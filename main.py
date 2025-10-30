@@ -1030,13 +1030,13 @@ def main():
 
                 y_pos += 20
 
-        # FLOATING TRADE POPUP - Top Right Corner Overlay
+        # FLOATING TRADE POPUP - Top Right Area Overlay
         if trade_mode:
-            # Position in top-right corner
+            # Position in top-right area (not edge)
             popup_width = 400
             popup_height = 300
-            popup_x = SCREEN_W - popup_width - 20
-            popup_y = 20
+            popup_x = SCREEN_W - popup_width - 80  # More margin from right edge
+            popup_y = 50  # More margin from top
 
             # Semi-transparent background overlay
             overlay = pygame.Surface((SCREEN_W, SCREEN_H))
