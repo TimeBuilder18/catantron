@@ -344,68 +344,67 @@ def main():
                 running = False
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_d:
-                    if event.key == pygame.K_d:
-                        if game_system.can_roll_dice():
-                            dice_result = game_system.roll_dice()
-                            if dice_result:
-                                print(f"Rolled: {dice_result[2]}")
-                                # Automatically enter robber mode if 7 was rolled
-                                if dice_result[2] == 7:
-                                    robber_move_mode = True
-                                    add_message("Move the robber!", (255, 100, 100), game_messages)
-                    elif event.key == pygame.K_t:
-                        success, message = game_system.end_turn()
-                        print(message)
-                    elif event.key == pygame.K_1:
-                        build_mode = "SETTLEMENT"
-                    elif event.key == pygame.K_2:
-                        build_mode = "CITY"
-                    elif event.key == pygame.K_3:
-                        build_mode = "ROAD"
-                    elif event.key == pygame.K_b:
-                        show_buildable = not show_buildable
-                    elif event.key == pygame.K_c:
-                        show_coords = not show_coords
-                    elif event.key == pygame.K_x:
-                        success, message = game_system.try_buy_development_card()
-                        print(message)
-                    elif event.key == pygame.K_4:
-                        # Bank trade 4:1 - Quick trade wood for brick
-                        if game_system.can_trade_or_build():
-                            success, msg = game_system.execute_bank_trade(current_player, ResourceType.WOOD,
-                                                                          ResourceType.BRICK, 4)
-                            print(msg)
-                    elif event.key == pygame.K_5:
-                        # Toggle trade mode
-                        trade_mode = not trade_mode
-                        if trade_mode:
-                            print("TRADE MODE: Use arrows/WASD to adjust, ENTER to trade")
-                            # Reset trade amounts
-                            for res in offering_resources:
-                                offering_resources[res] = 0
-                            for res in requesting_resources:
-                                requesting_resources[res] = 0
-                    elif event.key == pygame.K_6:
-                        # Toggle dev card menu
-                        show_dev_card_menu = not show_dev_card_menu
-                    elif event.key == pygame.K_7:
-                        # Play Knight
-                        if game_system.can_trade_or_build():
-                            success, msg = game_system.play_knight_card(current_player)
-                            print(msg)
-                            if success:
+                    if game_system.can_roll_dice():
+                        dice_result = game_system.roll_dice()
+                        if dice_result:
+                            print(f"Rolled: {dice_result[2]}")
+                            # Automatically enter robber mode if 7 was rolled
+                            if dice_result[2] == 7:
                                 robber_move_mode = True
-                    elif event.key == pygame.K_8:
-                        # Play Year of Plenty (wood and brick)
-                        if game_system.can_trade_or_build():
-                            success, msg = game_system.play_year_of_plenty_card(current_player, ResourceType.WOOD,
-                                                                                ResourceType.BRICK)
-                            print(msg)
-                    elif event.key == pygame.K_9:
-                        # Play Monopoly on Wood
-                        if game_system.can_trade_or_build():
-                            success, msg = game_system.play_monopoly_card(current_player, ResourceType.WOOD)
-                            print(msg)
+                                add_message("Move the robber!", (255, 100, 100), game_messages)
+                elif event.key == pygame.K_t:
+                    success, message = game_system.end_turn()
+                    print(message)
+                elif event.key == pygame.K_1:
+                    build_mode = "SETTLEMENT"
+                elif event.key == pygame.K_2:
+                    build_mode = "CITY"
+                elif event.key == pygame.K_3:
+                    build_mode = "ROAD"
+                elif event.key == pygame.K_b:
+                    show_buildable = not show_buildable
+                elif event.key == pygame.K_c:
+                    show_coords = not show_coords
+                elif event.key == pygame.K_x:
+                    success, message = game_system.try_buy_development_card()
+                    print(message)
+                elif event.key == pygame.K_4:
+                    # Bank trade 4:1 - Quick trade wood for brick
+                    if game_system.can_trade_or_build():
+                        success, msg = game_system.execute_bank_trade(current_player, ResourceType.WOOD,
+                                                                      ResourceType.BRICK, 4)
+                        print(msg)
+                elif event.key == pygame.K_5:
+                    # Toggle trade mode
+                    trade_mode = not trade_mode
+                    if trade_mode:
+                        print("TRADE MODE: Use arrows/WASD to adjust, ENTER to trade")
+                        # Reset trade amounts
+                        for res in offering_resources:
+                            offering_resources[res] = 0
+                        for res in requesting_resources:
+                            requesting_resources[res] = 0
+                elif event.key == pygame.K_6:
+                    # Toggle dev card menu
+                    show_dev_card_menu = not show_dev_card_menu
+                elif event.key == pygame.K_7:
+                    # Play Knight
+                    if game_system.can_trade_or_build():
+                        success, msg = game_system.play_knight_card(current_player)
+                        print(msg)
+                        if success:
+                            robber_move_mode = True
+                elif event.key == pygame.K_8:
+                    # Play Year of Plenty (wood and brick)
+                    if game_system.can_trade_or_build():
+                        success, msg = game_system.play_year_of_plenty_card(current_player, ResourceType.WOOD,
+                                                                            ResourceType.BRICK)
+                        print(msg)
+                elif event.key == pygame.K_9:
+                    # Play Monopoly on Wood
+                    if game_system.can_trade_or_build():
+                        success, msg = game_system.play_monopoly_card(current_player, ResourceType.WOOD)
+                        print(msg)
 
                 # Trade mode controls
                 if trade_mode and not game_system.is_initial_placement_phase():
