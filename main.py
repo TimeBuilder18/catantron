@@ -927,109 +927,104 @@ def main():
         pygame.draw.line(screen, (100, 100, 100), (panel_x + 20, y_pos), (panel_x + panel_width - 20, y_pos), 2)
         y_pos += 10
 
-        # Trading Interface (if active)
+        # Trading Interface (if active) - COMPACT
         if trade_mode:
             trade_box_y = y_pos
-            pygame.draw.rect(screen, (60, 40, 80), (panel_x + 20, trade_box_y, panel_width - 40, 250), border_radius=10)
-            pygame.draw.rect(screen, (200, 100, 255), (panel_x + 20, trade_box_y, panel_width - 40, 250), 3,
+            pygame.draw.rect(screen, (60, 40, 80), (panel_x + 20, trade_box_y, panel_width - 40, 140), border_radius=10)
+            pygame.draw.rect(screen, (200, 100, 255), (panel_x + 20, trade_box_y, panel_width - 40, 140), 3,
                              border_radius=10)
 
-            trade_title = font.render("TRADE MODE", True, (255, 200, 255))
-            screen.blit(trade_title, (panel_x + 30, trade_box_y + 10))
+            trade_title = small_font.render("TRADE MODE", True, (255, 200, 255))
+            screen.blit(trade_title, (panel_x + 30, trade_box_y + 8))
 
             partners = game_system.get_available_trade_partners(current_player)
             if partners:
                 partner = partners[selected_trade_partner]
-                partner_text = small_font.render(f"Trading with: {partner.name} (←/→ to change)", True, partner.color)
-                screen.blit(partner_text, (panel_x + 30, trade_box_y + 40))
+                partner_text = small_font.render(f"With: {partner.name} (←/→)", True, partner.color)
+                screen.blit(partner_text, (panel_x + 30, trade_box_y + 28))
 
-                # Offering section
-                offer_title = small_font.render("You Offer:", True, (255, 200, 200))
-                screen.blit(offer_title, (panel_x + 30, trade_box_y + 70))
+                # Offering and requesting side-by-side in compact format
+                offer_title = small_font.render("Offer:", True, (255, 200, 200))
+                screen.blit(offer_title, (panel_x + 30, trade_box_y + 48))
 
-                offer_y = trade_box_y + 95
-                resource_list = [
-                    (ResourceType.WOOD, "↑ Wood"),
-                    (ResourceType.BRICK, "W Brick"),
-                    (ResourceType.WHEAT, "A Wheat"),
-                    (ResourceType.SHEEP, "S Sheep"),
-                    (ResourceType.ORE, "Q Ore")
+                request_title = small_font.render("Request:", True, (200, 255, 200))
+                screen.blit(request_title, (panel_x + 350, trade_box_y + 48))
+
+                # Compact resource display
+                compact_y = trade_box_y + 68
+                resource_abbrev = [
+                    (ResourceType.WOOD, "W", "↑", "↓"),
+                    (ResourceType.BRICK, "B", "W", "E"),
+                    (ResourceType.WHEAT, "Wh", "A", "D"),
+                    (ResourceType.SHEEP, "S", "S", "F"),
+                    (ResourceType.ORE, "O", "Q", "Z")
                 ]
-                for res_type, label in resource_list:
-                    amount = offering_resources[res_type]
-                    color = (255, 255, 255) if amount > 0 else (100, 100, 100)
-                    text = small_font.render(f"{label}: {amount}", True, color)
-                    screen.blit(text, (panel_x + 40, offer_y))
-                    offer_y += 20
 
-                # Requesting section
-                request_title = small_font.render("You Request:", True, (200, 255, 200))
-                screen.blit(request_title, (panel_x + 300, trade_box_y + 70))
+                for res_type, abbrev, offer_key, req_key in resource_abbrev:
+                    offer_amt = offering_resources[res_type]
+                    req_amt = requesting_resources[res_type]
 
-                request_y = trade_box_y + 95
-                request_list = [
-                    (ResourceType.WOOD, "↓ Wood"),
-                    (ResourceType.BRICK, "E Brick"),
-                    (ResourceType.WHEAT, "D Wheat"),
-                    (ResourceType.SHEEP, "F Sheep"),
-                    (ResourceType.ORE, "Z Ore")
-                ]
-                for res_type, label in request_list:
-                    amount = requesting_resources[res_type]
-                    color = (255, 255, 255) if amount > 0 else (100, 100, 100)
-                    text = small_font.render(f"{label}: {amount}", True, color)
-                    screen.blit(text, (panel_x + 310, request_y))
-                    request_y += 20
+                    # Offer
+                    color = (255, 255, 255) if offer_amt > 0 else (100, 100, 100)
+                    text = small_font.render(f"{abbrev}:{offer_amt}", True, color)
+                    screen.blit(text, (panel_x + 30, compact_y))
 
-                # Execute button hint
-                execute_text = small_font.render("Press ENTER to execute trade", True, (255, 255, 0))
-                screen.blit(execute_text, (panel_x + 30, trade_box_y + 220))
+                    # Request
+                    color = (255, 255, 255) if req_amt > 0 else (100, 100, 100)
+                    text = small_font.render(f"{abbrev}:{req_amt}", True, color)
+                    screen.blit(text, (panel_x + 350, compact_y))
 
-            y_pos = trade_box_y + 260
+                    compact_y += 14
 
-        # Development Cards Display
-        if show_dev_card_menu or any(current_player.development_cards.values()):
+                # Execute hint
+                execute_text = small_font.render("ENTER=Trade", True, (255, 255, 0))
+                screen.blit(execute_text, (panel_x + 30, trade_box_y + 120))
+
+            y_pos = trade_box_y + 145
+
+        # Development Cards Display - Skip if empty to save space
+        if show_dev_card_menu and any(current_player.development_cards.values()):
             dev_y = y_pos
-            dev_title = font.render("DEVELOPMENT CARDS", True, (255, 200, 100))
+            dev_title = small_font.render("DEV CARDS", True, (255, 200, 100))
             screen.blit(dev_title, (panel_x + 20, dev_y))
-            dev_y += 30
+            dev_y += 20
 
             for card_type, count in current_player.development_cards.items():
                 if count > 0:
                     card_name = card_type.value.replace('_', ' ').title()
                     card_text = small_font.render(f"{card_name}: {count}", True, (255, 255, 255))
                     screen.blit(card_text, (panel_x + 30, dev_y))
-                    dev_y += 22
+                    dev_y += 18
 
-            y_pos = dev_y + 10
+            y_pos = dev_y + 5
 
-        # Free Roads Indicator
+        # Free Roads Indicator - Compact
         if game_system.free_roads_remaining > 0:
             free_roads_y = y_pos
-            pygame.draw.rect(screen, (0, 100, 0), (panel_x + 20, free_roads_y, panel_width - 40, 60), border_radius=10)
-            pygame.draw.rect(screen, (0, 255, 0), (panel_x + 20, free_roads_y, panel_width - 40, 60), 3, border_radius=10)
+            pygame.draw.rect(screen, (0, 100, 0), (panel_x + 20, free_roads_y, panel_width - 40, 40), border_radius=8)
+            pygame.draw.rect(screen, (0, 255, 0), (panel_x + 20, free_roads_y, panel_width - 40, 40), 3, border_radius=8)
 
-            free_roads_title = font.render(f"🛣️ FREE ROADS: {game_system.free_roads_remaining} 🛣️", True, (100, 255, 100))
-            screen.blit(free_roads_title, (panel_x + 30, free_roads_y + 10))
+            free_roads_title = small_font.render(f"FREE ROADS: {game_system.free_roads_remaining}", True, (100, 255, 100))
+            screen.blit(free_roads_title, (panel_x + 30, free_roads_y + 8))
 
-            free_roads_desc = small_font.render("Click edges to build free roads", True, (255, 255, 255))
-            screen.blit(free_roads_desc, (panel_x + 30, free_roads_y + 35))
+            free_roads_desc = small_font.render("Click edges to build", True, (200, 255, 200))
+            screen.blit(free_roads_desc, (panel_x + 30, free_roads_y + 24))
 
-            y_pos = free_roads_y + 70
+            y_pos = free_roads_y + 45
 
-        # Robber Mode Indicator
+        # Robber Mode Indicator - Compact
         if robber_move_mode:
             robber_y = y_pos
-            pygame.draw.rect(screen, (100, 0, 0), (panel_x + 20, robber_y, panel_width - 40, 60), border_radius=10)
-            pygame.draw.rect(screen, (255, 0, 0), (panel_x + 20, robber_y, panel_width - 40, 60), 3, border_radius=10)
+            pygame.draw.rect(screen, (100, 0, 0), (panel_x + 20, robber_y, panel_width - 40, 40), border_radius=8)
+            pygame.draw.rect(screen, (255, 0, 0), (panel_x + 20, robber_y, panel_width - 40, 40), 3, border_radius=8)
 
-            robber_title = font.render("🏴 ROBBER MODE 🏴", True, (255, 100, 100))
-            screen.blit(robber_title, (panel_x + 30, robber_y + 10))
+            robber_title = small_font.render("ROBBER MODE", True, (255, 100, 100))
+            screen.blit(robber_title, (panel_x + 30, robber_y + 8))
 
-            robber_desc = small_font.render("Click a tile to move the robber", True, (255, 255, 255))
-            screen.blit(robber_desc, (panel_x + 30, robber_y + 35))
+            robber_desc = small_font.render("Click tile to move robber", True, (255, 200, 200))
+            screen.blit(robber_desc, (panel_x + 30, robber_y + 24))
 
-            y_pos = robber_y + 70
+            y_pos = robber_y + 45
 
         pygame.draw.line(screen, (100, 100, 100), (panel_x + 20, y_pos), (panel_x + panel_width - 20, y_pos), 2)
         y_pos += 15
