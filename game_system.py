@@ -285,7 +285,7 @@ class Player:
             missing = []
             for resource, amount in cost.items():
                 if self.resources[resource] < amount:
-                    missing.append(f"{resource.value}")
+                    missing.append(f"{resource.name.lower()}")
             return False, f"Need: 1 wood + 1 brick + 1 wheat + 1 sheep (Missing: {', '.join(missing)})"
 
         if not vertex.can_build_settlement(self, ignore_road_rule):
@@ -304,7 +304,7 @@ class Player:
             missing = []
             for resource, amount in cost.items():
                 if self.resources[resource] < amount:
-                    missing.append(f"{resource.value}")
+                    missing.append(f"{resource.name.lower()}")
             return False, f"Need: 2 wheat + 3 ore (Missing: {', '.join(missing)})"
 
         if not vertex.can_build_city(self):
@@ -323,7 +323,7 @@ class Player:
             missing = []
             for resource, amount in cost.items():
                 if self.resources[resource] < amount:
-                    missing.append(f"{resource.value}")
+                    missing.append(f"{resource.name.lower()}")
             return False, f"Need: 1 wood + 1 brick (Missing: {', '.join(missing)})"
 
         if not edge.can_build_road(self):
