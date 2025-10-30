@@ -278,37 +278,58 @@ class Player:
 
     def try_build_settlement(self, vertex, ignore_road_rule=False):
         """Attempt to build a settlement"""
-        if not self.can_afford(Settlement.get_cost()):
-            return False, "Not enough resources"
+        cost = Settlement.get_cost()
+
+        # Check resources with detailed message
+        if not self.can_afford(cost):
+            missing = []
+            for resource, amount in cost.items():
+                if self.resources[resource] < amount:
+                    missing.append(f"{resource.value}")
+            return False, f"Need: 1 wood + 1 brick + 1 wheat + 1 sheep (Missing: {', '.join(missing)})"
 
         if not vertex.can_build_settlement(self, ignore_road_rule):
-            return False, "Cannot build settlement here"
+            return False, "Cannot build settlement (too close or no road connection)"
 
-        self.pay_cost(Settlement.get_cost())
+        self.pay_cost(cost)
         vertex.build_settlement(self)
         return True, "Settlement built"
 
     def try_build_city(self, vertex):
         """Attempt to build a city"""
-        if not self.can_afford(City.get_cost()):
-            return False, "Not enough resources"
+        cost = City.get_cost()
+
+        # Check resources with detailed message
+        if not self.can_afford(cost):
+            missing = []
+            for resource, amount in cost.items():
+                if self.resources[resource] < amount:
+                    missing.append(f"{resource.value}")
+            return False, f"Need: 2 wheat + 3 ore (Missing: {', '.join(missing)})"
 
         if not vertex.can_build_city(self):
-            return False, "Cannot build city here"
+            return False, "Cannot upgrade (must have a settlement here)"
 
-        self.pay_cost(City.get_cost())
+        self.pay_cost(cost)
         vertex.build_city(self)
         return True, "City built"
 
     def try_build_road(self, edge):
         """Attempt to build a road"""
-        if not self.can_afford(Road.get_cost()):
-            return False, "Not enough resources"
+        cost = Road.get_cost()
+
+        # Check resources with detailed message
+        if not self.can_afford(cost):
+            missing = []
+            for resource, amount in cost.items():
+                if self.resources[resource] < amount:
+                    missing.append(f"{resource.value}")
+            return False, f"Need: 1 wood + 1 brick (Missing: {', '.join(missing)})"
 
         if not edge.can_build_road(self):
-            return False, "Cannot build road here"
+            return False, "Road must connect to your existing road/settlement"
 
-        self.pay_cost(Road.get_cost())
+        self.pay_cost(cost)
         edge.build_road(self)
         return True, "Road built"
 
