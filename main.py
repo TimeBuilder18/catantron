@@ -243,6 +243,32 @@ def find_closest_edge(game_board, mouse_pos, offset, max_distance=10):
     return closest_edge
 
 
+def draw_button(screen, x, y, width, height, text, color, hover_color, font, enabled=True):
+    """Draw a button and return its rect and hover state"""
+    mouse_pos = pygame.mouse.get_pos()
+    rect = pygame.Rect(x, y, width, height)
+    is_hovering = rect.collidepoint(mouse_pos) and enabled
+
+    button_color = hover_color if is_hovering else color
+    if not enabled:
+        button_color = (60, 60, 60)
+
+    pygame.draw.rect(screen, button_color, rect, border_radius=5)
+    pygame.draw.rect(screen, (200, 200, 200) if enabled else (100, 100, 100), rect, 2, border_radius=5)
+
+    text_color = (255, 255, 255) if enabled else (120, 120, 120)
+    text_surface = font.render(text, True, text_color)
+    text_rect = text_surface.get_rect(center=rect.center)
+    screen.blit(text_surface, text_rect)
+
+    return rect, is_hovering
+
+
+def add_message(message, color, messages_list):
+    """Add a message to the message queue with timestamp"""
+    messages_list.append((message, color, pygame.time.get_ticks()))
+
+
 def main():
     pygame.init()
     pygame.font.init()
@@ -251,6 +277,15 @@ def main():
     screen = pygame.display.set_mode((SCREEN_W, SCREEN_H))
     pygame.display.set_caption("Catan Game")
     clock = pygame.time.Clock()
+
+    # Initialize fonts early
+    font_title = pygame.font.SysFont(None, 32)
+    font = pygame.font.SysFont(None, 24)
+    small_font = pygame.font.SysFont(None, 20)
+
+    # Initialize UI state
+    game_messages = []
+    buttons = {}
 
     tile_size = 50
 
@@ -314,6 +349,10 @@ def main():
                             dice_result = game_system.roll_dice()
                             if dice_result:
                                 print(f"Rolled: {dice_result[2]}")
+                                # Automatically enter robber mode if 7 was rolled
+                                if dice_result[2] == 7:
+                                    robber_move_mode = True
+                                    add_message("Move the robber!", (255, 100, 100), game_messages)
                     elif event.key == pygame.K_t:
                         success, message = game_system.end_turn()
                         print(message)
@@ -431,7 +470,11 @@ def main():
                                 dice_result = game_system.roll_dice()
                                 if dice_result:
                                     add_message(f"Rolled: {dice_result[2]} ({dice_result[0]}+{dice_result[1]})",
-                                                (255, 255, 0))
+                                                (255, 255, 0), game_messages)
+                                    # Automatically enter robber mode if 7 was rolled
+                                    if dice_result[2] == 7:
+                                        robber_move_mode = True
+                                        add_message("Move the robber!", (255, 100, 100), game_messages)
                         elif button_name == "END_TURN":
                             success, msg = game_system.end_turn()
                             if success:
@@ -441,22 +484,22 @@ def main():
                                 if winner:
                                     show_victory_screen = True
                                 else:
-                                    add_message(msg, (100, 255, 100))
+                                    add_message(msg, (100, 255, 100), game_messages)
                         elif button_name == "BUILD_SETTLEMENT":
                             build_mode = "SETTLEMENT"
-                            add_message("Settlement mode", (100, 255, 100))
+                            add_message("Settlement mode", (100, 255, 100), game_messages)
                         elif button_name == "BUILD_CITY":
                             build_mode = "CITY"
-                            add_message("City mode", (100, 255, 100))
+                            add_message("City mode", (100, 255, 100), game_messages)
                         elif button_name == "BUILD_ROAD":
                             build_mode = "ROAD"
-                            add_message("Road mode", (100, 255, 100))
+                            add_message("Road mode", (100, 255, 100), game_messages)
                         elif button_name == "BUY_DEV_CARD":
                             success, msg = game_system.try_buy_development_card()
-                            add_message(msg, (255, 255, 0) if success else (255, 100, 100))
+                            add_message(msg, (255, 255, 0) if success else (255, 100, 100), game_messages)
                         elif button_name == "BANK_TRADE":
                             trade_mode = not trade_mode
-                            add_message("Trade mode: " + ("ON" if trade_mode else "OFF"), (255, 200, 255))
+                            add_message("Trade mode: " + ("ON" if trade_mode else "OFF"), (255, 200, 255), game_messages)
                         elif button_name == "SHOW_BUILDABLE":
                             show_buildable = not show_buildable
                         continue
@@ -486,6 +529,7 @@ def main():
                             print(steal_msg)
 
                         robber_move_mode = False
+                        add_message("Robber moved!", (255, 100, 100), game_messages)
 
                 elif game_system.is_initial_placement_phase():
                     if not game_system.waiting_for_road:
@@ -504,16 +548,32 @@ def main():
                         if vertex:
                             success, msg = current_player.try_build_settlement(vertex, False)
                             print(msg)
+                            if success:
+                                add_message(msg, (100, 255, 100), game_messages)
                     elif build_mode == "CITY":
                         vertex = find_closest_vertex(game_board, mouse_pos, offset)
                         if vertex:
                             success, msg = current_player.try_build_city(vertex)
                             print(msg)
+                            if success:
+                                add_message(msg, (100, 255, 100), game_messages)
                     elif build_mode == "ROAD":
                         edge = find_closest_edge(game_board, mouse_pos, offset)
-                        if vertex:
-                            success, msg = current_player.try_build_road(edge)
+                        if edge:
+                            # Check if we're building free roads from Road Building card
+                            if game_system.free_roads_remaining > 0:
+                                success, msg = game_system.try_build_free_road(edge)
+                            else:
+                                success, msg = current_player.try_build_road(edge)
                             print(msg)
+                            if success:
+                                add_message(msg, (100, 255, 100), game_messages)
+
+        # Clear screen
+        screen.fill((20, 50, 80))
+
+        # Draw board
+        draw_game_board(screen, game_board, offset, show_coords)
 
         # Draw messages at top of screen
         current_time = pygame.time.get_ticks()
@@ -536,9 +596,6 @@ def main():
                 msg_y += 40
             else:
                 game_messages.remove((msg_text, msg_color, msg_time))
-
-        # Draw board
-        draw_game_board(screen, game_board, offset, show_coords)
 
         # Victory Screen Overlay
         if show_victory_screen and winner:
@@ -623,9 +680,6 @@ def main():
         # Draw UI Panel with better design
         panel_x = 850
         panel_width = 700
-        font_title = pygame.font.SysFont(None, 32)
-        font = pygame.font.SysFont(None, 24)
-        small_font = pygame.font.SysFont(None, 20)
 
         # Draw semi-transparent background panel
         panel_surface = pygame.Surface((panel_width, SCREEN_H))
@@ -926,6 +980,20 @@ def main():
                     dev_y += 22
 
             y_pos = dev_y + 10
+
+        # Free Roads Indicator
+        if game_system.free_roads_remaining > 0:
+            free_roads_y = y_pos
+            pygame.draw.rect(screen, (0, 100, 0), (panel_x + 20, free_roads_y, panel_width - 40, 60), border_radius=10)
+            pygame.draw.rect(screen, (0, 255, 0), (panel_x + 20, free_roads_y, panel_width - 40, 60), 3, border_radius=10)
+
+            free_roads_title = font.render(f"🛣️ FREE ROADS: {game_system.free_roads_remaining} 🛣️", True, (100, 255, 100))
+            screen.blit(free_roads_title, (panel_x + 30, free_roads_y + 10))
+
+            free_roads_desc = small_font.render("Click edges to build free roads", True, (255, 255, 255))
+            screen.blit(free_roads_desc, (panel_x + 30, free_roads_y + 35))
+
+            y_pos = free_roads_y + 70
 
         # Robber Mode Indicator
         if robber_move_mode:

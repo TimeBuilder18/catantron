@@ -503,13 +503,7 @@ class DiceRoller:
                 if 'self' in caller_locals and hasattr(caller_locals['self'], 'game_phase'):
                     game_system = caller_locals['self']
                     if hasattr(game_system, 'game_phase') and game_system.game_phase != "NORMAL_PLAY":
-                        print("ERROR: Preventing dice roll during initial placement/setup!")
-                        print(f"ERROR: Current phase: {game_system.game_phase}")
-                        print("ERROR: Dice should only roll during normal play when user presses 'D'")
-                        return 1, 1, 2  # Return fake result to prevent crash
-
-                print(f"DEBUG: Dice roll called from: {caller_frame.f_code.co_filename}:{caller_frame.f_lineno}")
-                print(f"DEBUG: In function: {caller_frame.f_code.co_name}")
+                        return 1, 1, 2  # Return fake result to prevent crash during initial placement
         finally:
             del frame
 
@@ -583,6 +577,11 @@ class GameSystem:
         self.player_initial_placements = {player: {"settlements": 0, "roads": 0} for player in players}
         self.waiting_for_road = False
         self.last_settlement_vertex = None
+
+        # Development card effects
+        self.free_roads_remaining = 0  # For Road Building card
+        self.longest_road_player = None
+        self.largest_army_player = None
 
     def can_roll_dice(self):
         """Check if current player can roll dice"""
@@ -671,8 +670,6 @@ class GameSystem:
             print("ERROR: Cannot roll dice right now")
             return None
 
-        print(f"DEBUG: {self.get_current_player().name} is rolling dice via game_system.roll_dice()")
-
         # Call the dice roller directly instead of through the class method
         die1 = random.randint(1, 6)
         die2 = random.randint(1, 6)
@@ -684,11 +681,29 @@ class GameSystem:
         self.dice_rolled = True
         self.turn_phase = "TRADE_BUILD"
 
-        print(f"DEBUG: Dice result = {total}, turn_phase = {self.turn_phase}, dice_rolled = {self.dice_rolled}")
-
         if total == 7:
             self.last_resource_gains = {}
-            print("Rolled 7! Robber activates (not implemented yet)")
+            print("Rolled 7! Robber activates")
+
+            # Players with more than 7 cards must discard half
+            for player in self.players:
+                total_resources = player.get_total_resources()
+                if total_resources > 7:
+                    discard_count = total_resources // 2
+                    print(f"{player.name} must discard {discard_count} cards (has {total_resources})")
+
+                    # Auto-discard random resources for now (can be made interactive later)
+                    discarded = 0
+                    while discarded < discard_count:
+                        for resource_type in ResourceType:
+                            if player.resources[resource_type] > 0 and discarded < discard_count:
+                                player.remove_resource(resource_type, 1)
+                                discarded += 1
+
+                    print(f"{player.name} discarded {discard_count} cards")
+
+            # Current player will move robber (handled in UI)
+            print(f"{self.get_current_player().name} must move the robber")
         else:
             self.last_resource_gains = DiceRoller.distribute_resources(
                 total, self.game_board, self.players
@@ -747,7 +762,6 @@ class GameSystem:
                 # In second round, go in reverse order
                 self.current_player_index -= 1
                 if self.current_player_index < 0:
-                    print("DEBUG: About to transition to normal play...")
                     self.game_phase = "NORMAL_PLAY"
                     self.turn_phase = "ROLL_DICE"
                     self.current_player_index = 0
@@ -756,47 +770,28 @@ class GameSystem:
                     self.last_dice_roll = None
                     self.last_resource_gains = None
 
-                    # Give proper starting resources from second settlements (safe version)
-                    print("DEBUG: Giving proper starting resources from second settlements...")
-                    for i in range(len(self.players)):
-                        player = self.players[i]
-                        print(f"Processing {player.name}...")
-
-                        # Check if player has at least 2 settlements
+                    # Give starting resources from second settlements
+                    for player in self.players:
                         if len(player.settlements) >= 2:
-                            # Get the second settlement (last one placed)
                             second_settlement = player.settlements[1]
                             vertex = second_settlement.position
-
-                            print(
-                                f"  {player.name}'s second settlement has {len(vertex.adjacent_tiles)} adjacent tiles")
 
                             # Check each adjacent tile for resources
                             for tile in vertex.adjacent_tiles:
                                 tile_resource = tile.resource
-                                print(f"    Tile resource: {tile_resource}")
 
                                 if tile_resource == "forest":
                                     player.resources[ResourceType.WOOD] += 1
-                                    print(f"      Added 1 wood to {player.name}")
                                 elif tile_resource == "hill":
                                     player.resources[ResourceType.BRICK] += 1
-                                    print(f"      Added 1 brick to {player.name}")
                                 elif tile_resource == "field":
                                     player.resources[ResourceType.WHEAT] += 1
-                                    print(f"      Added 1 wheat to {player.name}")
                                 elif tile_resource == "mountain":
                                     player.resources[ResourceType.ORE] += 1
-                                    print(f"      Added 1 ore to {player.name}")
                                 elif tile_resource == "pasture":
                                     player.resources[ResourceType.SHEEP] += 1
-                                    print(f"      Added 1 sheep to {player.name}")
-                                elif tile_resource == "desert":
-                                    print(f"      Desert tile - no resource")
-                        else:
-                            print(f"  {player.name} has no second settlement")
 
-                    print("Starting resources complete!")
+                    print("Initial placement complete! Game begins!")
                     print(f"Turn {self.turn_number} - {self.get_current_player().name}")
                     print("Press 'D' to roll dice and begin your turn!")
 
@@ -809,11 +804,6 @@ class GameSystem:
             return True, "Advanced to next player"
         else:
             return False, "Must complete settlement and road placement first"
-        """Get all vertices where player can build settlements"""
-        if player is None:
-            player = self.get_current_player()
-
-        return [v for v in self.game_board.vertices if v.can_build_settlement(player, self.ignore_road_rule)]
 
     def get_buildable_vertices_for_settlements(self, player=None):
         """Get all vertices where player can build settlements"""
@@ -840,6 +830,8 @@ class GameSystem:
         return [e for e in self.game_board.edges
                 if e.structure is None and
                 (e.vertex1 == self.last_settlement_vertex or e.vertex2 == self.last_settlement_vertex)]
+
+    def get_buildable_vertices_for_cities(self, player=None):
         """Get all vertices where player can build cities"""
         if player is None:
             player = self.get_current_player()
@@ -859,7 +851,7 @@ class GameSystem:
         self.turn_phase = "ROLL_DICE"
         self.last_dice_roll = None
         self.last_resource_gains = None
-        print(f"DEBUG: Turn state reset for {self.get_current_player().name}")
+        print(f"Turn state reset for {self.get_current_player().name}")
         print("You can now roll dice with 'D'")
 
     # ==================== ENHANCED TRADING SYSTEM ====================
@@ -976,7 +968,30 @@ class GameSystem:
             return False, message
 
         player.development_cards[DevelopmentCardType.ROAD_BUILDING] -= 1
+        self.free_roads_remaining = 2
         return True, "Road Building: Click 2 edges to build free roads"
+
+    def try_build_free_road(self, edge, player=None):
+        """Build a free road from Road Building card"""
+        if player is None:
+            player = self.get_current_player()
+
+        if self.free_roads_remaining <= 0:
+            return False, "No free roads available"
+
+        if edge.structure is not None:
+            return False, "Road already exists here"
+
+        if not edge.can_build_road(player):
+            return False, "Cannot build road here"
+
+        # Build the road without cost
+        road = Road(player)
+        edge.structure = road
+        player.roads.append(road)
+        self.free_roads_remaining -= 1
+
+        return True, f"Free road built! ({self.free_roads_remaining} remaining)"
 
     def play_monopoly_card(self, player, resource_type):
         """Play Monopoly card - take all of one resource from all players"""
@@ -1016,8 +1031,6 @@ class GameSystem:
                 adjacent_players.add(vertex.structure.player)
 
         return list(adjacent_players)
-
-        return True, f"Stole 1 resource from {target_player.name}"
 
     def steal_random_resource(self, stealing_player, target_player):
         """Steal a random resource from target player"""
