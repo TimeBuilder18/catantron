@@ -428,34 +428,74 @@ def main():
                     else:
                         add_message("Must roll dice first! (Press D)", (255, 100, 100), game_messages)
 
-                # Trade mode controls
+                # Trade mode controls - ONLY active in trade mode
                 if trade_mode and not game_system.is_initial_placement_phase():
+                    # Offering controls (what you give) - capped at what you have
                     if event.key == pygame.K_UP:
                         offering_resources[ResourceType.WOOD] = min(offering_resources[ResourceType.WOOD] + 1,
                                                                     current_player.resources[ResourceType.WOOD])
-                    elif event.key == pygame.K_w:
+                        add_message(f"Offering Wood: {offering_resources[ResourceType.WOOD]}", (255, 200, 200), game_messages)
+                    if event.key == pygame.K_w:
                         offering_resources[ResourceType.BRICK] = min(offering_resources[ResourceType.BRICK] + 1,
                                                                      current_player.resources[ResourceType.BRICK])
-                    elif event.key == pygame.K_a:
+                        add_message(f"Offering Brick: {offering_resources[ResourceType.BRICK]}", (255, 200, 200), game_messages)
+                    if event.key == pygame.K_a:
                         offering_resources[ResourceType.WHEAT] = min(offering_resources[ResourceType.WHEAT] + 1,
                                                                      current_player.resources[ResourceType.WHEAT])
-                    elif event.key == pygame.K_s:
+                        add_message(f"Offering Wheat: {offering_resources[ResourceType.WHEAT]}", (255, 200, 200), game_messages)
+                    if event.key == pygame.K_s:
                         offering_resources[ResourceType.SHEEP] = min(offering_resources[ResourceType.SHEEP] + 1,
                                                                      current_player.resources[ResourceType.SHEEP])
-                    elif event.key == pygame.K_q:
+                        add_message(f"Offering Sheep: {offering_resources[ResourceType.SHEEP]}", (255, 200, 200), game_messages)
+                    if event.key == pygame.K_q:
                         offering_resources[ResourceType.ORE] = min(offering_resources[ResourceType.ORE] + 1,
                                                                    current_player.resources[ResourceType.ORE])
-                    elif event.key == pygame.K_DOWN:
+                        add_message(f"Offering Ore: {offering_resources[ResourceType.ORE]}", (255, 200, 200), game_messages)
+
+                    # Requesting controls (what you want) - capped at reasonable amount
+                    if event.key == pygame.K_DOWN:
                         requesting_resources[ResourceType.WOOD] = min(requesting_resources[ResourceType.WOOD] + 1, 10)
-                    elif event.key == pygame.K_e:
+                        add_message(f"Requesting Wood: {requesting_resources[ResourceType.WOOD]}", (200, 255, 200), game_messages)
+                    if event.key == pygame.K_e:
                         requesting_resources[ResourceType.BRICK] = min(requesting_resources[ResourceType.BRICK] + 1, 10)
-                    elif event.key == pygame.K_d:
+                        add_message(f"Requesting Brick: {requesting_resources[ResourceType.BRICK]}", (200, 255, 200), game_messages)
+                    if event.key == pygame.K_d:
                         requesting_resources[ResourceType.WHEAT] = min(requesting_resources[ResourceType.WHEAT] + 1, 10)
-                    elif event.key == pygame.K_f:
+                        add_message(f"Requesting Wheat: {requesting_resources[ResourceType.WHEAT]}", (200, 255, 200), game_messages)
+                    if event.key == pygame.K_f:
                         requesting_resources[ResourceType.SHEEP] = min(requesting_resources[ResourceType.SHEEP] + 1, 10)
-                    elif event.key == pygame.K_z:
+                        add_message(f"Requesting Sheep: {requesting_resources[ResourceType.SHEEP]}", (200, 255, 200), game_messages)
+                    if event.key == pygame.K_z:
                         requesting_resources[ResourceType.ORE] = min(requesting_resources[ResourceType.ORE] + 1, 10)
-                    elif event.key == pygame.K_LEFT:
+                        add_message(f"Requesting Ore: {requesting_resources[ResourceType.ORE]}", (200, 255, 200), game_messages)
+
+                    # Decrease controls (hold SHIFT to decrease)
+                    mods = pygame.key.get_mods()
+                    if mods & pygame.KMOD_SHIFT:
+                        if event.key == pygame.K_UP:
+                            offering_resources[ResourceType.WOOD] = max(0, offering_resources[ResourceType.WOOD] - 1)
+                        if event.key == pygame.K_w:
+                            offering_resources[ResourceType.BRICK] = max(0, offering_resources[ResourceType.BRICK] - 1)
+                        if event.key == pygame.K_a:
+                            offering_resources[ResourceType.WHEAT] = max(0, offering_resources[ResourceType.WHEAT] - 1)
+                        if event.key == pygame.K_s:
+                            offering_resources[ResourceType.SHEEP] = max(0, offering_resources[ResourceType.SHEEP] - 1)
+                        if event.key == pygame.K_q:
+                            offering_resources[ResourceType.ORE] = max(0, offering_resources[ResourceType.ORE] - 1)
+
+                        if event.key == pygame.K_DOWN:
+                            requesting_resources[ResourceType.WOOD] = max(0, requesting_resources[ResourceType.WOOD] - 1)
+                        if event.key == pygame.K_e:
+                            requesting_resources[ResourceType.BRICK] = max(0, requesting_resources[ResourceType.BRICK] - 1)
+                        if event.key == pygame.K_d:
+                            requesting_resources[ResourceType.WHEAT] = max(0, requesting_resources[ResourceType.WHEAT] - 1)
+                        if event.key == pygame.K_f:
+                            requesting_resources[ResourceType.SHEEP] = max(0, requesting_resources[ResourceType.SHEEP] - 1)
+                        if event.key == pygame.K_z:
+                            requesting_resources[ResourceType.ORE] = max(0, requesting_resources[ResourceType.ORE] - 1)
+
+                    # Partner selection
+                    if event.key == pygame.K_LEFT:
                         # Previous trade partner
                         partners = game_system.get_available_trade_partners(current_player)
                         if partners:
@@ -1034,7 +1074,7 @@ def main():
         if trade_mode:
             # Position in top-right area (not edge)
             popup_width = 400
-            popup_height = 300
+            popup_height = 320  # Increased for SHIFT hint
             popup_x = SCREEN_W - popup_width - 80  # More margin from right edge
             popup_y = 50  # More margin from top
 
@@ -1105,8 +1145,13 @@ def main():
 
                     trade_y += 22
 
+                # Hints
+                trade_y += 5
+                hint_text = small_font.render("Hold SHIFT + key to decrease", True, (150, 150, 150))
+                screen.blit(hint_text, (popup_x + 15, trade_y))
+                trade_y += 20
+
                 # Execute button
-                trade_y += 10
                 execute_bg = pygame.Rect(popup_x + 15, trade_y, popup_width - 30, 30)
                 pygame.draw.rect(screen, (80, 0, 80), execute_bg, border_radius=8)
                 pygame.draw.rect(screen, (255, 255, 0), execute_bg, 3, border_radius=8)
