@@ -366,24 +366,37 @@ def main():
                 elif event.key == pygame.K_c:
                     show_coords = not show_coords
                 elif event.key == pygame.K_x:
-                    success, message = game_system.try_buy_development_card()
-                    print(message)
+                    if game_system.can_trade_or_build():
+                        success, message = game_system.try_buy_development_card()
+                        print(message)
+                        add_message(message, (100, 255, 100) if success else (255, 100, 100), game_messages)
+                    else:
+                        add_message("Must roll dice first! (Press D)", (255, 100, 100), game_messages)
                 elif event.key == pygame.K_4:
                     # Bank trade 4:1 - Quick trade wood for brick
                     if game_system.can_trade_or_build():
                         success, msg = game_system.execute_bank_trade(current_player, ResourceType.WOOD,
                                                                       ResourceType.BRICK, 4)
                         print(msg)
+                        add_message(msg, (100, 255, 100) if success else (255, 100, 100), game_messages)
+                    else:
+                        add_message("Must roll dice first! (Press D)", (255, 100, 100), game_messages)
                 elif event.key == pygame.K_5:
                     # Toggle trade mode
-                    trade_mode = not trade_mode
-                    if trade_mode:
-                        print("TRADE MODE: Use arrows/WASD to adjust, ENTER to trade")
-                        # Reset trade amounts
-                        for res in offering_resources:
-                            offering_resources[res] = 0
-                        for res in requesting_resources:
-                            requesting_resources[res] = 0
+                    if game_system.can_trade_or_build():
+                        trade_mode = not trade_mode
+                        if trade_mode:
+                            print("TRADE MODE: Use arrows/WASD to adjust, ENTER to trade")
+                            add_message("TRADE MODE: Use arrows/WASD", (255, 200, 255), game_messages)
+                            # Reset trade amounts
+                            for res in offering_resources:
+                                offering_resources[res] = 0
+                            for res in requesting_resources:
+                                requesting_resources[res] = 0
+                        else:
+                            add_message("Trade mode OFF", (200, 200, 200), game_messages)
+                    else:
+                        add_message("Must roll dice first! (Press D)", (255, 100, 100), game_messages)
                 elif event.key == pygame.K_6:
                     # Toggle dev card menu
                     show_dev_card_menu = not show_dev_card_menu
@@ -392,19 +405,28 @@ def main():
                     if game_system.can_trade_or_build():
                         success, msg = game_system.play_knight_card(current_player)
                         print(msg)
+                        add_message(msg, (100, 255, 100) if success else (255, 100, 100), game_messages)
                         if success:
                             robber_move_mode = True
+                    else:
+                        add_message("Must roll dice first! (Press D)", (255, 100, 100), game_messages)
                 elif event.key == pygame.K_8:
                     # Play Year of Plenty (wood and brick)
                     if game_system.can_trade_or_build():
                         success, msg = game_system.play_year_of_plenty_card(current_player, ResourceType.WOOD,
                                                                             ResourceType.BRICK)
                         print(msg)
+                        add_message(msg, (100, 255, 100) if success else (255, 100, 100), game_messages)
+                    else:
+                        add_message("Must roll dice first! (Press D)", (255, 100, 100), game_messages)
                 elif event.key == pygame.K_9:
                     # Play Monopoly on Wood
                     if game_system.can_trade_or_build():
                         success, msg = game_system.play_monopoly_card(current_player, ResourceType.WOOD)
                         print(msg)
+                        add_message(msg, (100, 255, 100) if success else (255, 100, 100), game_messages)
+                    else:
+                        add_message("Must roll dice first! (Press D)", (255, 100, 100), game_messages)
 
                 # Trade mode controls
                 if trade_mode and not game_system.is_initial_placement_phase():
@@ -542,31 +564,41 @@ def main():
                             success, msg = game_system.try_place_initial_road(edge)
                             print(msg)
                 else:
-                    if build_mode == "SETTLEMENT":
-                        vertex = find_closest_vertex(game_board, mouse_pos, offset)
-                        if vertex:
-                            success, msg = current_player.try_build_settlement(vertex, False)
-                            print(msg)
-                            if success:
-                                add_message(msg, (100, 255, 100), game_messages)
-                    elif build_mode == "CITY":
-                        vertex = find_closest_vertex(game_board, mouse_pos, offset)
-                        if vertex:
-                            success, msg = current_player.try_build_city(vertex)
-                            print(msg)
-                            if success:
-                                add_message(msg, (100, 255, 100), game_messages)
-                    elif build_mode == "ROAD":
-                        edge = find_closest_edge(game_board, mouse_pos, offset)
-                        if edge:
-                            # Check if we're building free roads from Road Building card
-                            if game_system.free_roads_remaining > 0:
-                                success, msg = game_system.try_build_free_road(edge)
-                            else:
-                                success, msg = current_player.try_build_road(edge)
-                            print(msg)
-                            if success:
-                                add_message(msg, (100, 255, 100), game_messages)
+                    # Check if player can build (must have rolled dice first)
+                    if not game_system.can_trade_or_build():
+                        add_message("Must roll dice first! (Press D)", (255, 100, 100), game_messages)
+                    else:
+                        if build_mode == "SETTLEMENT":
+                            vertex = find_closest_vertex(game_board, mouse_pos, offset)
+                            if vertex:
+                                success, msg = current_player.try_build_settlement(vertex, False)
+                                print(msg)
+                                if success:
+                                    add_message(msg, (100, 255, 100), game_messages)
+                                else:
+                                    add_message(msg, (255, 100, 100), game_messages)
+                        elif build_mode == "CITY":
+                            vertex = find_closest_vertex(game_board, mouse_pos, offset)
+                            if vertex:
+                                success, msg = current_player.try_build_city(vertex)
+                                print(msg)
+                                if success:
+                                    add_message(msg, (100, 255, 100), game_messages)
+                                else:
+                                    add_message(msg, (255, 100, 100), game_messages)
+                        elif build_mode == "ROAD":
+                            edge = find_closest_edge(game_board, mouse_pos, offset)
+                            if edge:
+                                # Check if we're building free roads from Road Building card
+                                if game_system.free_roads_remaining > 0:
+                                    success, msg = game_system.try_build_free_road(edge)
+                                else:
+                                    success, msg = current_player.try_build_road(edge)
+                                print(msg)
+                                if success:
+                                    add_message(msg, (100, 255, 100), game_messages)
+                                else:
+                                    add_message(msg, (255, 100, 100), game_messages)
 
         # Clear screen
         screen.fill((20, 50, 80))
