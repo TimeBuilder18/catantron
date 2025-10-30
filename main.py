@@ -698,20 +698,21 @@ def main():
         vp_text = font.render(f"Victory Points: {vp_value}/10", True,
                               (255, 215, 0) if vp_value >= 8 else (255, 255, 255))
         screen.blit(vp_text, (panel_x + 20, y_pos))
-        y_pos += 30
+        y_pos += 25
 
-        # VP Breakdown
+        # VP Breakdown - Compact, only show non-zero
         breakdown = current_player.get_victory_point_breakdown()
         for category, points in breakdown.items():
-            breakdown_text = small_font.render(f"  {category}: {points}", True, (200, 200, 200))
-            screen.blit(breakdown_text, (panel_x + 30, y_pos))
-            y_pos += 20
+            if points > 0:
+                breakdown_text = small_font.render(f"  {category}: {points}", True, (200, 200, 200))
+                screen.blit(breakdown_text, (panel_x + 30, y_pos))
+                y_pos += 18
 
-        y_pos += 10
+        y_pos += 7
 
-        # Game Phase Indicator
+        # Game Phase Indicator - Compact
         pygame.draw.line(screen, (100, 100, 100), (panel_x + 20, y_pos), (panel_x + panel_width - 20, y_pos), 2)
-        y_pos += 15
+        y_pos += 10
 
         if game_system.is_initial_placement_phase():
             phase_text = "INITIAL PLACEMENT"
@@ -721,56 +722,56 @@ def main():
             phase_text = f"TURN {game_system.turn_number}"
             phase_color = (100, 255, 100)
             if game_system.turn_phase == "ROLL_DICE":
-                phase_desc = "▶ Roll dice to start (Press D)"
+                phase_desc = "▶ Roll dice (D)"
             else:
-                phase_desc = "▶ Trade & Build (Press T to end turn)"
+                phase_desc = "▶ Trade & Build (T=End)"
 
         phase_surface = font.render(phase_text, True, phase_color)
         screen.blit(phase_surface, (panel_x + 20, y_pos))
-        y_pos += 30
+        y_pos += 25
 
         desc_surface = small_font.render(phase_desc, True, (200, 200, 200))
         screen.blit(desc_surface, (panel_x + 20, y_pos))
-        y_pos += 40
+        y_pos += 30
 
-        # Dice Roll Display - PROMINENT
+        # Dice Roll Display - Compact
         if game_system.last_dice_roll and game_system.game_phase == "NORMAL_PLAY":
-            pygame.draw.rect(screen, (50, 50, 60), (panel_x + 20, y_pos, panel_width - 40, 80), border_radius=10)
-            pygame.draw.rect(screen, (255, 215, 0), (panel_x + 20, y_pos, panel_width - 40, 80), 3, border_radius=10)
+            pygame.draw.rect(screen, (50, 50, 60), (panel_x + 20, y_pos, panel_width - 40, 65), border_radius=10)
+            pygame.draw.rect(screen, (255, 215, 0), (panel_x + 20, y_pos, panel_width - 40, 65), 3, border_radius=10)
 
-            dice_title = font.render("LAST ROLL", True, (255, 215, 0))
-            screen.blit(dice_title, (panel_x + 30, y_pos + 10))
+            dice_title = small_font.render("LAST ROLL", True, (255, 215, 0))
+            screen.blit(dice_title, (panel_x + 30, y_pos + 8))
 
             die1, die2, total = game_system.last_dice_roll
 
             # Draw dice visually
             dice_x = panel_x + 30
-            dice_y = y_pos + 40
+            dice_y = y_pos + 30
 
             # Die 1
-            pygame.draw.rect(screen, (255, 255, 255), (dice_x, dice_y, 35, 35), border_radius=5)
-            die1_text = font_title.render(str(die1), True, (0, 0, 0))
+            pygame.draw.rect(screen, (255, 255, 255), (dice_x, dice_y, 30, 30), border_radius=5)
+            die1_text = font.render(str(die1), True, (0, 0, 0))
             screen.blit(die1_text, (dice_x + 10, dice_y + 5))
 
             # Plus sign
-            plus_text = font.render("+", True, (255, 255, 255))
-            screen.blit(plus_text, (dice_x + 45, dice_y + 5))
+            plus_text = small_font.render("+", True, (255, 255, 255))
+            screen.blit(plus_text, (dice_x + 38, dice_y + 5))
 
             # Die 2
-            pygame.draw.rect(screen, (255, 255, 255), (dice_x + 70, dice_y, 35, 35), border_radius=5)
-            die2_text = font_title.render(str(die2), True, (0, 0, 0))
-            screen.blit(die2_text, (dice_x + 80, dice_y + 5))
+            pygame.draw.rect(screen, (255, 255, 255), (dice_x + 60, dice_y, 30, 30), border_radius=5)
+            die2_text = font.render(str(die2), True, (0, 0, 0))
+            screen.blit(die2_text, (dice_x + 70, dice_y + 5))
 
             # Equals sign
-            equals_text = font.render("=", True, (255, 255, 255))
-            screen.blit(equals_text, (dice_x + 115, dice_y + 5))
+            equals_text = small_font.render("=", True, (255, 255, 255))
+            screen.blit(equals_text, (dice_x + 98, dice_y + 5))
 
             # Total
             total_color = (255, 0, 0) if total in [6, 8] else (255, 255, 255)
-            total_text = font_title.render(str(total), True, total_color)
-            screen.blit(total_text, (dice_x + 145, dice_y + 5))
+            total_text = font.render(str(total), True, total_color)
+            screen.blit(total_text, (dice_x + 120, dice_y + 5))
 
-            y_pos += 90
+            y_pos += 70
 
         pygame.draw.line(screen, (100, 100, 100), (panel_x + 20, y_pos), (panel_x + panel_width - 20, y_pos), 2)
         y_pos += 15
@@ -863,46 +864,36 @@ def main():
                 bar_width = min(amount * 20, 200)
                 pygame.draw.rect(screen, color, (panel_x + 150, y_pos + 5, bar_width, 10))
 
-            y_pos += 25
+            y_pos += 20
 
-        y_pos += 10
+        y_pos += 5
         pygame.draw.line(screen, (100, 100, 100), (panel_x + 20, y_pos), (panel_x + panel_width - 20, y_pos), 2)
-        y_pos += 15
+        y_pos += 10
 
-        # Buildings Section
+        # Buildings Section - Compact
         buildings_title = font.render("BUILDINGS", True, (100, 200, 255))
         screen.blit(buildings_title, (panel_x + 20, y_pos))
-        y_pos += 30
-
-        settlements_text = small_font.render(f"🏘️ Settlements: {len(current_player.settlements)}/5", True,
-                                             (255, 255, 255))
-        screen.blit(settlements_text, (panel_x + 30, y_pos))
         y_pos += 25
 
-        cities_text = small_font.render(f"🏰 Cities: {len(current_player.cities)}/4", True, (255, 255, 255))
-        screen.blit(cities_text, (panel_x + 30, y_pos))
-        y_pos += 25
+        buildings_text = small_font.render(
+            f"Settlements:{len(current_player.settlements)}/5  Cities:{len(current_player.cities)}/4  Roads:{len(current_player.roads)}/15",
+            True, (255, 255, 255))
+        screen.blit(buildings_text, (panel_x + 30, y_pos))
+        y_pos += 20
 
-        roads_text = small_font.render(f"🛣️ Roads: {len(current_player.roads)}/15", True, (255, 255, 255))
-        screen.blit(roads_text, (panel_x + 30, y_pos))
-        y_pos += 30
-
-        # Dev Cards
+        # Dev Cards - Compact
         total_cards = sum(current_player.development_cards.values())
-        if total_cards > 0:
-            dev_text = small_font.render(f"🎴 Dev Cards: {total_cards}", True, (255, 255, 255))
-            screen.blit(dev_text, (panel_x + 30, y_pos))
-            y_pos += 25
-
+        dev_info = f"Dev Cards:{total_cards}"
         if current_player.knights_played > 0:
-            knights_text = small_font.render(f"⚔️ Knights Played: {current_player.knights_played}", True,
-                                             (255, 255, 255))
-            screen.blit(knights_text, (panel_x + 30, y_pos))
-            y_pos += 25
+            dev_info += f"  Knights:{current_player.knights_played}"
 
-        y_pos += 10
+        dev_text = small_font.render(dev_info, True, (255, 255, 255))
+        screen.blit(dev_text, (panel_x + 30, y_pos))
+        y_pos += 20
+
+        y_pos += 5
         pygame.draw.line(screen, (100, 100, 100), (panel_x + 20, y_pos), (panel_x + panel_width - 20, y_pos), 2)
-        y_pos += 15
+        y_pos += 10
 
         # Trading Interface (if active)
         if trade_mode:
@@ -1011,56 +1002,61 @@ def main():
         pygame.draw.line(screen, (100, 100, 100), (panel_x + 20, y_pos), (panel_x + panel_width - 20, y_pos), 2)
         y_pos += 15
 
-        # Controls Section
+        # Controls Section - Compact 2-column layout
         controls_title = font.render("CONTROLS", True, (100, 200, 255))
         screen.blit(controls_title, (panel_x + 20, y_pos))
-        y_pos += 30
+        y_pos += 25
 
         if trade_mode:
             controls = [
-                ("5", "Exit trade mode"),
-                ("↑/W/A/S/Q", "Add to offer"),
-                ("↓/E/D/F/Z", "Add to request"),
-                ("←/→", "Change partner"),
-                ("ENTER", "Execute trade")
+                ("5", "Exit", "↑WASQ", "Offer"),
+                ("←→", "Partner", "↓EDFZ", "Request"),
+                ("ENTER", "Trade", "", "")
             ]
         elif robber_move_mode:
             controls = [
-                ("Click", "Move robber to tile"),
+                ("Click", "Move robber", "", "")
             ]
         elif game_system.is_initial_placement_phase():
             controls = [
-                ("Click", "Place settlement/road"),
-                ("T", "Next player"),
+                ("Click", "Place", "T", "Next")
             ]
         else:
             controls = [
-                ("D", "Roll dice"),
-                ("T", "End turn"),
-                ("1/2/3", "Settlement/City/Road"),
-                ("X", "Buy dev card"),
-                ("B", "Show buildable"),
-                ("", ""),
-                ("4", "Bank trade (4:1)"),
-                ("5", "Player trade"),
-                ("7", "Play Knight"),
-                ("8", "Play Year of Plenty"),
-                ("9", "Play Monopoly"),
-                ("", ""),
-                (f"Mode: {build_mode}", "")
+                ("D", "Roll", "T", "End Turn"),
+                ("1", "Settlement", "2", "City"),
+                ("3", "Road", "X", "Dev Card"),
+                ("B", "Buildable", "5", "Trade"),
+                ("7", "Knight", "8", "Plenty"),
+                ("9", "Monopoly", f"Mode: {build_mode}", "")
             ]
 
-        for key, desc in controls:
-            if key and desc:
-                key_text = small_font.render(key, True, (255, 255, 0))
-                screen.blit(key_text, (panel_x + 30, y_pos))
+        for i, control_pair in enumerate(controls):
+            if len(control_pair) >= 2:
+                key1, desc1 = control_pair[0], control_pair[1]
+                key2, desc2 = control_pair[2] if len(control_pair) > 2 else "", control_pair[3] if len(control_pair) > 3 else ""
 
-                desc_text = small_font.render(desc, True, (200, 200, 200))
-                screen.blit(desc_text, (panel_x + 150, y_pos))
-            elif key:
-                mode_text = small_font.render(key, True, (100, 255, 100))
-                screen.blit(mode_text, (panel_x + 30, y_pos))
-            y_pos += 22
+                # Left column
+                if key1 and desc1:
+                    key_text = small_font.render(key1, True, (255, 255, 0))
+                    screen.blit(key_text, (panel_x + 25, y_pos))
+                    desc_text = small_font.render(desc1, True, (200, 200, 200))
+                    screen.blit(desc_text, (panel_x + 85, y_pos))
+                elif key1:
+                    mode_text = small_font.render(key1, True, (100, 255, 100))
+                    screen.blit(mode_text, (panel_x + 25, y_pos))
+
+                # Right column
+                if key2 and desc2:
+                    key_text = small_font.render(key2, True, (255, 255, 0))
+                    screen.blit(key_text, (panel_x + 350, y_pos))
+                    desc_text = small_font.render(desc2, True, (200, 200, 200))
+                    screen.blit(desc_text, (panel_x + 410, y_pos))
+                elif key2:
+                    mode_text = small_font.render(key2, True, (100, 255, 100))
+                    screen.blit(mode_text, (panel_x + 350, y_pos))
+
+                y_pos += 20
 
         pygame.display.flip()
         clock.tick(60)
