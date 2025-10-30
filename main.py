@@ -927,61 +927,6 @@ def main():
         pygame.draw.line(screen, (100, 100, 100), (panel_x + 20, y_pos), (panel_x + panel_width - 20, y_pos), 2)
         y_pos += 10
 
-        # Trading Interface (if active) - COMPACT
-        if trade_mode:
-            trade_box_y = y_pos
-            pygame.draw.rect(screen, (60, 40, 80), (panel_x + 20, trade_box_y, panel_width - 40, 140), border_radius=10)
-            pygame.draw.rect(screen, (200, 100, 255), (panel_x + 20, trade_box_y, panel_width - 40, 140), 3,
-                             border_radius=10)
-
-            trade_title = small_font.render("TRADE MODE", True, (255, 200, 255))
-            screen.blit(trade_title, (panel_x + 30, trade_box_y + 8))
-
-            partners = game_system.get_available_trade_partners(current_player)
-            if partners:
-                partner = partners[selected_trade_partner]
-                partner_text = small_font.render(f"With: {partner.name} (←/→)", True, partner.color)
-                screen.blit(partner_text, (panel_x + 30, trade_box_y + 28))
-
-                # Offering and requesting side-by-side in compact format
-                offer_title = small_font.render("Offer:", True, (255, 200, 200))
-                screen.blit(offer_title, (panel_x + 30, trade_box_y + 48))
-
-                request_title = small_font.render("Request:", True, (200, 255, 200))
-                screen.blit(request_title, (panel_x + 350, trade_box_y + 48))
-
-                # Compact resource display
-                compact_y = trade_box_y + 68
-                resource_abbrev = [
-                    (ResourceType.WOOD, "W", "↑", "↓"),
-                    (ResourceType.BRICK, "B", "W", "E"),
-                    (ResourceType.WHEAT, "Wh", "A", "D"),
-                    (ResourceType.SHEEP, "S", "S", "F"),
-                    (ResourceType.ORE, "O", "Q", "Z")
-                ]
-
-                for res_type, abbrev, offer_key, req_key in resource_abbrev:
-                    offer_amt = offering_resources[res_type]
-                    req_amt = requesting_resources[res_type]
-
-                    # Offer
-                    color = (255, 255, 255) if offer_amt > 0 else (100, 100, 100)
-                    text = small_font.render(f"{abbrev}:{offer_amt}", True, color)
-                    screen.blit(text, (panel_x + 30, compact_y))
-
-                    # Request
-                    color = (255, 255, 255) if req_amt > 0 else (100, 100, 100)
-                    text = small_font.render(f"{abbrev}:{req_amt}", True, color)
-                    screen.blit(text, (panel_x + 350, compact_y))
-
-                    compact_y += 14
-
-                # Execute hint
-                execute_text = small_font.render("ENTER=Trade", True, (255, 255, 0))
-                screen.blit(execute_text, (panel_x + 30, trade_box_y + 120))
-
-            y_pos = trade_box_y + 145
-
         # Development Cards Display - Skip if empty to save space
         if show_dev_card_menu and any(current_player.development_cards.values()):
             dev_y = y_pos
@@ -1084,6 +1029,91 @@ def main():
                     screen.blit(mode_text, (panel_x + 350, y_pos))
 
                 y_pos += 20
+
+        # FLOATING TRADE POPUP - Top Right Corner Overlay
+        if trade_mode:
+            # Position in top-right corner
+            popup_width = 400
+            popup_height = 300
+            popup_x = SCREEN_W - popup_width - 20
+            popup_y = 20
+
+            # Semi-transparent background overlay
+            overlay = pygame.Surface((SCREEN_W, SCREEN_H))
+            overlay.set_alpha(100)
+            overlay.fill((0, 0, 0))
+            screen.blit(overlay, (0, 0))
+
+            # Trade popup box
+            pygame.draw.rect(screen, (40, 30, 60), (popup_x, popup_y, popup_width, popup_height), border_radius=15)
+            pygame.draw.rect(screen, (200, 100, 255), (popup_x, popup_y, popup_width, popup_height), 4, border_radius=15)
+
+            trade_y = popup_y + 15
+
+            # Title
+            trade_title = font.render("TRADE MODE", True, (255, 200, 255))
+            screen.blit(trade_title, (popup_x + 15, trade_y))
+
+            # Close hint
+            close_hint = small_font.render("(Press 5 to close)", True, (150, 150, 150))
+            screen.blit(close_hint, (popup_x + popup_width - 140, trade_y + 5))
+            trade_y += 35
+
+            partners = game_system.get_available_trade_partners(current_player)
+            if partners:
+                partner = partners[selected_trade_partner]
+                partner_text = small_font.render(f"Trading with: {partner.name}", True, partner.color)
+                screen.blit(partner_text, (popup_x + 15, trade_y))
+
+                partner_hint = small_font.render("(←/→ to change partner)", True, (150, 150, 150))
+                screen.blit(partner_hint, (popup_x + 15, trade_y + 18))
+                trade_y += 50
+
+                # Two columns
+                col1_x = popup_x + 15
+                col2_x = popup_x + 210
+
+                # YOU OFFER column
+                offer_title = font.render("YOU OFFER", True, (255, 180, 180))
+                screen.blit(offer_title, (col1_x, trade_y))
+
+                request_title = font.render("YOU REQUEST", True, (180, 255, 180))
+                screen.blit(request_title, (col2_x, trade_y))
+                trade_y += 28
+
+                resource_info = [
+                    (ResourceType.WOOD, "Wood", "↑", "↓"),
+                    (ResourceType.BRICK, "Brick", "W", "E"),
+                    (ResourceType.WHEAT, "Wheat", "A", "D"),
+                    (ResourceType.SHEEP, "Sheep", "S", "F"),
+                    (ResourceType.ORE, "Ore", "Q", "Z")
+                ]
+
+                for res_type, name, offer_key, req_key in resource_info:
+                    offer_amt = offering_resources[res_type]
+                    req_amt = requesting_resources[res_type]
+
+                    # Offer column
+                    color = (255, 255, 255) if offer_amt > 0 else (120, 120, 120)
+                    offer_text = small_font.render(f"[{offer_key}] {name}: {offer_amt}", True, color)
+                    screen.blit(offer_text, (col1_x, trade_y))
+
+                    # Request column
+                    color = (255, 255, 255) if req_amt > 0 else (120, 120, 120)
+                    req_text = small_font.render(f"[{req_key}] {name}: {req_amt}", True, color)
+                    screen.blit(req_text, (col2_x, trade_y))
+
+                    trade_y += 22
+
+                # Execute button
+                trade_y += 10
+                execute_bg = pygame.Rect(popup_x + 15, trade_y, popup_width - 30, 30)
+                pygame.draw.rect(screen, (80, 0, 80), execute_bg, border_radius=8)
+                pygame.draw.rect(screen, (255, 255, 0), execute_bg, 3, border_radius=8)
+
+                execute_text = font.render("Press ENTER to Execute Trade", True, (255, 255, 0))
+                execute_rect = execute_text.get_rect(center=execute_bg.center)
+                screen.blit(execute_text, execute_rect)
 
         pygame.display.flip()
         clock.tick(60)
