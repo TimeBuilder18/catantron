@@ -188,7 +188,7 @@ def draw_game_board(screen, game_board, offset, show_coords=False):
     # Draw ports
     port_font = pygame.font.Font(None, 20)
     for port in game_board.ports:
-        # Calculate midpoint between the two vertices
+        # Calculate midpoint between the two vertices on the outer edge
         x1, y1 = port.vertex1.x + offset[0], port.vertex1.y + offset[1]
         x2, y2 = port.vertex2.x + offset[0], port.vertex2.y + offset[1]
         mid_x = (x1 + x2) / 2
@@ -204,18 +204,17 @@ def draw_game_board(screen, game_board, offset, show_coords=False):
             port_color = RESOURCE_COLORS.get(resource_name, (255, 255, 255))
             port_text = "2:1"
 
-        # Draw port icon (anchor/ship symbol)
-        pygame.draw.circle(screen, port_color, (int(mid_x), int(mid_y)), 12)
-        pygame.draw.circle(screen, (0, 0, 0), (int(mid_x), int(mid_y)), 12, 2)
+        # Draw thicker edge line for the port edge
+        pygame.draw.line(screen, port_color, (x1, y1), (x2, y2), 5)
+
+        # Draw port icon (ship/anchor symbol) at midpoint
+        pygame.draw.circle(screen, port_color, (int(mid_x), int(mid_y)), 14)
+        pygame.draw.circle(screen, (0, 0, 0), (int(mid_x), int(mid_y)), 14, 2)
 
         # Draw port ratio text
         text_surface = port_font.render(port_text, True, (0, 0, 0))
         text_rect = text_surface.get_rect(center=(int(mid_x), int(mid_y)))
         screen.blit(text_surface, text_rect)
-
-        # Draw connecting lines to vertices
-        pygame.draw.line(screen, port_color, (x1, y1), (mid_x, mid_y), 2)
-        pygame.draw.line(screen, port_color, (x2, y2), (mid_x, mid_y), 2)
 
 
 def find_closest_vertex(game_board, mouse_pos, offset, max_distance=15):
