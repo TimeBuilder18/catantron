@@ -185,6 +185,38 @@ def draw_game_board(screen, game_board, offset, show_coords=False):
         else:
             pygame.draw.line(screen, (150, 150, 150), (x1, y1), (x2, y2), 1)
 
+    # Draw ports
+    port_font = pygame.font.Font(None, 20)
+    for port in game_board.ports:
+        # Calculate midpoint between the two vertices
+        x1, y1 = port.vertex1.x + offset[0], port.vertex1.y + offset[1]
+        x2, y2 = port.vertex2.x + offset[0], port.vertex2.y + offset[1]
+        mid_x = (x1 + x2) / 2
+        mid_y = (y1 + y2) / 2
+
+        # Determine port color and text based on type
+        if port.port_type.name == "GENERIC":
+            port_color = (200, 200, 200)
+            port_text = "3:1"
+        else:
+            # Specialized 2:1 ports - use resource color
+            resource_name = port.port_type.name.lower()
+            port_color = RESOURCE_COLORS.get(resource_name, (255, 255, 255))
+            port_text = "2:1"
+
+        # Draw port icon (anchor/ship symbol)
+        pygame.draw.circle(screen, port_color, (int(mid_x), int(mid_y)), 12)
+        pygame.draw.circle(screen, (0, 0, 0), (int(mid_x), int(mid_y)), 12, 2)
+
+        # Draw port ratio text
+        text_surface = port_font.render(port_text, True, (0, 0, 0))
+        text_rect = text_surface.get_rect(center=(int(mid_x), int(mid_y)))
+        screen.blit(text_surface, text_rect)
+
+        # Draw connecting lines to vertices
+        pygame.draw.line(screen, port_color, (x1, y1), (mid_x, mid_y), 2)
+        pygame.draw.line(screen, port_color, (x2, y2), (mid_x, mid_y), 2)
+
 
 def find_closest_vertex(game_board, mouse_pos, offset, max_distance=15):
     """Find the closest vertex to mouse position"""
@@ -355,6 +387,7 @@ def main():
                 elif event.key == pygame.K_t:
                     success, message = game_system.end_turn()
                     print(message)
+                    add_message(message, (100, 255, 100) if success else (255, 100, 100), game_messages)
                 elif event.key == pygame.K_1:
                     build_mode = "SETTLEMENT"
                 elif event.key == pygame.K_2:
