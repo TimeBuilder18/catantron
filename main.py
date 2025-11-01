@@ -373,10 +373,10 @@ def main():
                     else:
                         add_message("Must roll dice first! (Press D)", (255, 100, 100), game_messages)
                 elif event.key == pygame.K_4:
-                    # Bank trade 4:1 - Quick trade wood for brick
+                    # Bank trade - Quick trade wood for brick (uses best port ratio)
                     if game_system.can_trade_or_build():
                         success, msg = game_system.execute_bank_trade(current_player, ResourceType.WOOD,
-                                                                      ResourceType.BRICK, 4)
+                                                                      ResourceType.BRICK)
                         print(msg)
                         add_message(msg, (100, 255, 100) if success else (255, 100, 100), game_messages)
                     else:
@@ -427,6 +427,28 @@ def main():
                         add_message(msg, (100, 255, 100) if success else (255, 100, 100), game_messages)
                     else:
                         add_message("Must roll dice first! (Press D)", (255, 100, 100), game_messages)
+                elif event.key == pygame.K_y:
+                    # Accept pending trade offer
+                    pending_offers = game_system.get_pending_offers_for_player(current_player)
+                    if pending_offers:
+                        # Accept the first pending offer
+                        offer = pending_offers[0]
+                        success, msg = game_system.accept_trade_offer(offer)
+                        print(msg)
+                        add_message(msg, (100, 255, 100) if success else (255, 100, 100), game_messages)
+                    else:
+                        add_message("No pending trade offers", (150, 150, 150), game_messages)
+                elif event.key == pygame.K_n:
+                    # Reject pending trade offer
+                    pending_offers = game_system.get_pending_offers_for_player(current_player)
+                    if pending_offers:
+                        # Reject the first pending offer
+                        offer = pending_offers[0]
+                        success, msg = game_system.reject_trade_offer(offer)
+                        print(msg)
+                        add_message(msg, (150, 150, 150) if success else (255, 100, 100), game_messages)
+                    else:
+                        add_message("No pending trade offers", (150, 150, 150), game_messages)
 
                 # Trade mode controls - ONLY active in trade mode
                 if trade_mode and not game_system.is_initial_placement_phase():
@@ -506,13 +528,14 @@ def main():
                         if partners:
                             selected_trade_partner = (selected_trade_partner + 1) % len(partners)
                     elif event.key == pygame.K_RETURN:
-                        # Execute trade
+                        # Propose trade to partner
                         partners = game_system.get_available_trade_partners(current_player)
                         if partners:
                             target = partners[selected_trade_partner]
-                            success, msg = game_system.execute_player_trade(current_player, target, offering_resources,
-                                                                            requesting_resources)
+                            success, trade_offer, msg = game_system.propose_player_trade(current_player, target,
+                                                                                          offering_resources, requesting_resources)
                             print(msg)
+                            add_message(msg, (100, 255, 100) if success else (255, 100, 100), game_messages)
                             if success:
                                 # Reset
                                 for res in offering_resources:
@@ -805,6 +828,29 @@ def main():
         desc_surface = small_font.render(phase_desc, True, (200, 200, 200))
         screen.blit(desc_surface, (panel_x + 20, y_pos))
         y_pos += 30
+
+        # Pending Trade Offers Notification
+        pending_offers = game_system.get_pending_offers_for_player(current_player)
+        if pending_offers:
+            y_pos += 5
+            pygame.draw.rect(screen, (80, 40, 0), (panel_x + 20, y_pos, panel_width - 40, 55), border_radius=8)
+            pygame.draw.rect(screen, (255, 180, 0), (panel_x + 20, y_pos, panel_width - 40, 55), 3, border_radius=8)
+
+            offer_title = small_font.render(f"📩 TRADE OFFER ({len(pending_offers)})", True, (255, 220, 100))
+            screen.blit(offer_title, (panel_x + 30, y_pos + 5))
+
+            # Show first offer summary
+            offer = pending_offers[0]
+            summary = offer.get_offer_summary()
+            # Truncate if too long
+            if len(summary) > 40:
+                summary = summary[:37] + "..."
+            summary_text = small_font.render(summary[:50], True, (255, 255, 255))
+            screen.blit(summary_text, (panel_x + 30, y_pos + 22))
+
+            accept_text = small_font.render("Y=Accept  N=Reject", True, (150, 255, 150))
+            screen.blit(accept_text, (panel_x + 30, y_pos + 37))
+            y_pos += 60
 
         # Dice Roll Display - Compact
         if game_system.last_dice_roll and game_system.game_phase == "NORMAL_PLAY":

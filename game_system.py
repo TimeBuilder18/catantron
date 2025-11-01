@@ -22,6 +22,16 @@ class DevelopmentCardType(Enum):
     MONOPOLY = "monopoly"
 
 
+class PortType(Enum):
+    """Types of trading ports"""
+    GENERIC = "3:1"  # Trade any 3 of one resource for 1 of another
+    WOOD = "wood_2:1"  # Trade 2 wood for 1 of any resource
+    BRICK = "brick_2:1"
+    WHEAT = "wheat_2:1"
+    SHEEP = "sheep_2:1"
+    ORE = "ore_2:1"
+
+
 class GameConstants:
     """Game constants for Catan"""
     # Victory conditions
@@ -84,6 +94,86 @@ class Road(Structure):
             ResourceType.WOOD: 1,
             ResourceType.BRICK: 1
         }
+
+
+# ==================== PORTS ====================
+
+class Port:
+    """Represents a trading port on the board"""
+    def __init__(self, port_type, vertex1, vertex2):
+        self.port_type = port_type  # PortType enum
+        self.vertex1 = vertex1  # First vertex position
+        self.vertex2 = vertex2  # Second vertex position
+
+    def get_trade_ratio(self, resource_type=None):
+        """Get the trade ratio for this port"""
+        if self.port_type == PortType.GENERIC:
+            return 3  # 3:1 for any resource
+        else:
+            # Check if this is the specialized resource for this port
+            port_resource = self._get_port_resource()
+            if resource_type == port_resource:
+                return 2  # 2:1 for specialized resource
+            else:
+                return 4  # Regular 4:1 if not the right resource
+
+    def _get_port_resource(self):
+        """Get the resource type this port specializes in"""
+        port_map = {
+            PortType.WOOD: ResourceType.WOOD,
+            PortType.BRICK: ResourceType.BRICK,
+            PortType.WHEAT: ResourceType.WHEAT,
+            PortType.SHEEP: ResourceType.SHEEP,
+            PortType.ORE: ResourceType.ORE
+        }
+        return port_map.get(self.port_type, None)
+
+    def can_player_use(self, player):
+        """Check if player has a settlement/city on this port"""
+        for vertex in [self.vertex1, self.vertex2]:
+            if vertex and vertex.structure and vertex.structure.player == player:
+                return True
+        return False
+
+
+# ==================== TRADE NEGOTIATION ====================
+
+class TradeOfferStatus(Enum):
+    """Status of a trade offer"""
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+    COUNTERED = "countered"
+    EXPIRED = "expired"
+
+
+class TradeOffer:
+    """Represents a trade offer between players"""
+    def __init__(self, offering_player, target_player, offered_resources, requested_resources):
+        self.offering_player = offering_player
+        self.target_player = target_player
+        self.offered_resources = offered_resources.copy()  # Dict of ResourceType -> amount
+        self.requested_resources = requested_resources.copy()  # Dict of ResourceType -> amount
+        self.status = TradeOfferStatus.PENDING
+        self.counter_offer = None  # Can store a counter-offer TradeOffer
+
+    def get_offer_summary(self):
+        """Get a human-readable summary of the offer"""
+        offered = ", ".join([f"{amt} {res.name.lower()}" for res, amt in self.offered_resources.items() if amt > 0])
+        requested = ", ".join([f"{amt} {res.name.lower()}" for res, amt in self.requested_resources.items() if amt > 0])
+        return f"{self.offering_player.name} offers {offered} for {requested}"
+
+    def is_valid(self):
+        """Check if both players still have the resources for this trade"""
+        # Check offering player has offered resources
+        for resource_type, amount in self.offered_resources.items():
+            if amount > 0 and self.offering_player.resources[resource_type] < amount:
+                return False
+        # Check target player has requested resources
+        for resource_type, amount in self.requested_resources.items():
+            if amount > 0 and self.target_player.resources[resource_type] < amount:
+                return False
+        return True
 
 
 # ==================== DEVELOPMENT CARDS ====================
@@ -459,7 +549,9 @@ class GameBoard:
         self.tiles = tiles
         self.vertices = []
         self.edges = []
+        self.ports = []
         self.generate_vertices_and_edges()
+        self.generate_ports()
 
     def generate_vertices_and_edges(self):
         """Generate vertices and edges based on tile positions"""
@@ -500,6 +592,69 @@ class GameBoard:
         for edge in self.edges:
             edge.vertex1.adjacent_vertices.append(edge.vertex2)
             edge.vertex2.adjacent_vertices.append(edge.vertex1)
+
+    def generate_ports(self):
+        """Generate 9 trading ports on edge vertices"""
+        # Find edge vertices (vertices with fewer adjacent tiles - on the board edge)
+        edge_vertices = [v for v in self.vertices if len(v.adjacent_tiles) <= 2]
+
+        if len(edge_vertices) < 18:  # Need at least 18 edge vertices for 9 ports
+            print(f"Warning: Only {len(edge_vertices)} edge vertices found, may not place all ports")
+            return
+
+        # Shuffle to randomize port placement
+        random.shuffle(edge_vertices)
+
+        # Create port types: 4 generic 3:1, 5 specialized 2:1
+        port_types = (
+            [PortType.GENERIC] * 4 +
+            [PortType.WOOD, PortType.BRICK, PortType.WHEAT, PortType.SHEEP, PortType.ORE]
+        )
+        random.shuffle(port_types)
+
+        # Place ports on pairs of adjacent edge vertices
+        used_vertices = set()
+        port_count = 0
+
+        for i in range(0, len(edge_vertices) - 1, 2):
+            if port_count >= 9:
+                break
+
+            vertex1 = edge_vertices[i]
+            vertex2 = edge_vertices[i + 1]
+
+            # Skip if already used
+            if vertex1 in used_vertices or vertex2 in used_vertices:
+                continue
+
+            # Create port
+            port = Port(port_types[port_count], vertex1, vertex2)
+            self.ports.append(port)
+
+            used_vertices.add(vertex1)
+            used_vertices.add(vertex2)
+            port_count += 1
+
+        print(f"Generated {len(self.ports)} ports")
+
+    def get_player_ports(self, player):
+        """Get all ports a player has access to"""
+        return [port for port in self.ports if port.can_player_use(player)]
+
+    def get_best_trade_ratio(self, player, resource_type):
+        """Get the best trade ratio for a player for a specific resource"""
+        player_ports = self.get_player_ports(player)
+
+        if not player_ports:
+            return 4  # Default 4:1 with no ports
+
+        best_ratio = 4
+        for port in player_ports:
+            ratio = port.get_trade_ratio(resource_type)
+            if ratio < best_ratio:
+                best_ratio = ratio
+
+        return best_ratio
 
 
 # ==================== DICE AND RESOURCE DISTRIBUTION ====================
@@ -603,6 +758,9 @@ class GameSystem:
         self.free_roads_remaining = 0  # For Road Building card
         self.longest_road_player = None
         self.largest_army_player = None
+
+        # Trade negotiation
+        self.pending_trade_offers = []  # List of TradeOffer objects
 
     def can_roll_dice(self):
         """Check if current player can roll dice"""
@@ -743,6 +901,9 @@ class GameSystem:
             self.turn_phase = "ROLL_DICE"
             self.last_dice_roll = None
             self.last_resource_gains = None
+
+            # Clear any pending trade offers
+            self.clear_expired_offers()
 
             # Move to next player
             self.current_player_index = (self.current_player_index + 1) % len(self.players)
@@ -885,56 +1046,126 @@ class GameSystem:
         """Check if player can afford a bank trade"""
         return player.resources[offering_resource] >= trade_ratio
 
-    def execute_bank_trade(self, player, offering_resource, requesting_resource, trade_ratio=4):
-        """Execute a bank trade"""
+    def execute_bank_trade(self, player, offering_resource, requesting_resource, trade_ratio=None):
+        """Execute a bank trade using best available port ratio"""
         if not self.can_trade_or_build():
             return False, "Can only trade during trade/build phase"
 
+        # Determine best trade ratio based on player's ports
+        if trade_ratio is None:
+            trade_ratio = self.board.get_best_trade_ratio(player, offering_resource)
+
         if not self.can_afford_bank_trade(player, offering_resource, trade_ratio):
-            return False, f"Need {trade_ratio} {offering_resource.value} to trade"
+            return False, f"Need {trade_ratio} {offering_resource.name.lower()} to trade"
 
         # Execute trade
         player.remove_resource(offering_resource, trade_ratio)
         player.add_resource(requesting_resource, 1)
 
-        return True, f"Traded {trade_ratio} {offering_resource.value} for 1 {requesting_resource.value}"
+        return True, f"Traded {trade_ratio} {offering_resource.name.lower()} for 1 {requesting_resource.name.lower()}"
 
     def propose_player_trade(self, offering_player, target_player, offered_resources, requested_resources):
-        """Propose a trade between players"""
+        """Propose a trade between players - creates a pending offer"""
         if not self.can_trade_or_build():
-            return False, "Can only trade during trade/build phase"
+            return False, None, "Can only trade during trade/build phase"
 
         # Validate offering player has resources
         for resource_type, amount in offered_resources.items():
             if amount > 0 and offering_player.resources[resource_type] < amount:
-                return False, f"You don't have {amount} {resource_type.value}"
+                return False, None, f"You don't have {amount} {resource_type.name.lower()}"
 
-        # Validate target player has requested resources
-        for resource_type, amount in requested_resources.items():
-            if amount > 0 and target_player.resources[resource_type] < amount:
-                return False, f"{target_player.name} doesn't have {amount} {resource_type.value}"
+        # Check if something is being offered and requested
+        total_offered = sum(offered_resources.values())
+        total_requested = sum(requested_resources.values())
+        if total_offered == 0 or total_requested == 0:
+            return False, None, "Must offer and request at least one resource"
 
-        return True, f"Trade proposal valid with {target_player.name}"
+        # Create trade offer
+        trade_offer = TradeOffer(offering_player, target_player, offered_resources, requested_resources)
+        self.pending_trade_offers.append(trade_offer)
+
+        return True, trade_offer, f"Trade proposed to {target_player.name}"
+
+    def accept_trade_offer(self, trade_offer):
+        """Accept a trade offer and execute it"""
+        if trade_offer.status != TradeOfferStatus.PENDING:
+            return False, "Trade offer is no longer pending"
+
+        # Validate offer is still valid (players still have resources)
+        if not trade_offer.is_valid():
+            trade_offer.status = TradeOfferStatus.EXPIRED
+            return False, "Trade no longer valid - players don't have required resources"
+
+        # Execute the trade
+        for resource_type, amount in trade_offer.offered_resources.items():
+            if amount > 0:
+                trade_offer.offering_player.remove_resource(resource_type, amount)
+                trade_offer.target_player.add_resource(resource_type, amount)
+
+        for resource_type, amount in trade_offer.requested_resources.items():
+            if amount > 0:
+                trade_offer.target_player.remove_resource(resource_type, amount)
+                trade_offer.offering_player.add_resource(resource_type, amount)
+
+        trade_offer.status = TradeOfferStatus.ACCEPTED
+        return True, f"Trade completed with {trade_offer.offering_player.name}"
+
+    def reject_trade_offer(self, trade_offer):
+        """Reject a trade offer"""
+        if trade_offer.status != TradeOfferStatus.PENDING:
+            return False, "Trade offer is no longer pending"
+
+        trade_offer.status = TradeOfferStatus.REJECTED
+        return True, f"Trade rejected from {trade_offer.offering_player.name}"
+
+    def counter_trade_offer(self, original_offer, counter_offered_resources, counter_requested_resources):
+        """Counter a trade offer with a new proposal"""
+        if original_offer.status != TradeOfferStatus.PENDING:
+            return False, None, "Original trade offer is no longer pending"
+
+        # Reject the original offer
+        original_offer.status = TradeOfferStatus.COUNTERED
+
+        # Create counter offer (reversed - target becomes offering player)
+        counter_offer = TradeOffer(
+            original_offer.target_player,
+            original_offer.offering_player,
+            counter_offered_resources,
+            counter_requested_resources
+        )
+
+        # Validate counter offer
+        if not counter_offer.is_valid():
+            return False, None, "Counter offer invalid - you don't have required resources"
+
+        # Link the counter offer to original
+        original_offer.counter_offer = counter_offer
+        self.pending_trade_offers.append(counter_offer)
+
+        return True, counter_offer, f"Counter offer sent to {counter_offer.target_player.name}"
+
+    def get_pending_offers_for_player(self, player):
+        """Get all pending trade offers directed at a player"""
+        return [offer for offer in self.pending_trade_offers
+                if offer.target_player == player and offer.status == TradeOfferStatus.PENDING]
+
+    def clear_expired_offers(self):
+        """Clear all pending trade offers (called on turn end)"""
+        for offer in self.pending_trade_offers:
+            if offer.status == TradeOfferStatus.PENDING:
+                offer.status = TradeOfferStatus.EXPIRED
+        # Keep offers for history, but could also clear them: self.pending_trade_offers = []
 
     def execute_player_trade(self, offering_player, target_player, offered_resources, requested_resources):
-        """Execute a trade between players (auto-accept for now)"""
-        success, message = self.propose_player_trade(offering_player, target_player, offered_resources,
-                                                     requested_resources)
+        """Legacy method - creates and auto-accepts a trade (for AI or testing)"""
+        success, trade_offer, message = self.propose_player_trade(offering_player, target_player,
+                                                                   offered_resources, requested_resources)
         if not success:
             return False, message
 
-        # Execute the trade
-        for resource_type, amount in offered_resources.items():
-            if amount > 0:
-                offering_player.remove_resource(resource_type, amount)
-                target_player.add_resource(resource_type, amount)
-
-        for resource_type, amount in requested_resources.items():
-            if amount > 0:
-                target_player.remove_resource(resource_type, amount)
-                offering_player.add_resource(resource_type, amount)
-
-        return True, f"Trade completed with {target_player.name}"
+        # Auto-accept for legacy compatibility
+        success, message = self.accept_trade_offer(trade_offer)
+        return success, message
 
     # ==================== DEVELOPMENT CARD SYSTEM ====================
 
