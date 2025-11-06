@@ -187,6 +187,7 @@ def draw_game_board(screen, game_board, offset, show_coords=False):
 
     # Draw ports
     port_font = pygame.font.Font(None, 20)
+    port_label_font = pygame.font.Font(None, 16)
     for port in game_board.ports:
         # Calculate midpoint between the two vertices on the outer edge
         x1, y1 = port.vertex1.x + offset[0], port.vertex1.y + offset[1]
@@ -194,15 +195,18 @@ def draw_game_board(screen, game_board, offset, show_coords=False):
         mid_x = (x1 + x2) / 2
         mid_y = (y1 + y2) / 2
 
-        # Determine port color and text based on type
+        # Determine port color, text, and label based on type
         if port.port_type.name == "GENERIC":
             port_color = (200, 200, 200)
             port_text = "3:1"
+            resource_label = None
         else:
-            # Specialized 2:1 ports - use resource color
+            # Specialized 2:1 ports - use resource color and show resource name
             resource_name = port.port_type.name.lower()
             port_color = RESOURCE_COLORS.get(resource_name, (255, 255, 255))
             port_text = "2:1"
+            # Capitalize first letter for display
+            resource_label = resource_name.capitalize()
 
         # Draw thicker edge line for the port edge
         pygame.draw.line(screen, port_color, (x1, y1), (x2, y2), 5)
@@ -211,10 +215,20 @@ def draw_game_board(screen, game_board, offset, show_coords=False):
         pygame.draw.circle(screen, port_color, (int(mid_x), int(mid_y)), 14)
         pygame.draw.circle(screen, (0, 0, 0), (int(mid_x), int(mid_y)), 14, 2)
 
-        # Draw port ratio text
+        # Draw port ratio text inside circle
         text_surface = port_font.render(port_text, True, (0, 0, 0))
         text_rect = text_surface.get_rect(center=(int(mid_x), int(mid_y)))
         screen.blit(text_surface, text_rect)
+
+        # Draw resource label below circle for specialized ports
+        if resource_label:
+            label_surface = port_label_font.render(resource_label, True, port_color)
+            label_rect = label_surface.get_rect(center=(int(mid_x), int(mid_y) + 20))
+            # Draw background for better visibility
+            bg_rect = label_rect.inflate(4, 2)
+            pygame.draw.rect(screen, (0, 0, 0), bg_rect)
+            pygame.draw.rect(screen, port_color, bg_rect, 1)
+            screen.blit(label_surface, label_rect)
 
 
 def find_closest_vertex(game_board, mouse_pos, offset, max_distance=15):
