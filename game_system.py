@@ -594,16 +594,26 @@ class GameBoard:
             edge.vertex2.adjacent_vertices.append(edge.vertex1)
 
     def generate_ports(self):
-        """Generate 9 trading ports on edge vertices"""
+        """Generate 9 trading ports on outer edge vertices"""
         # Find edge vertices (vertices with fewer adjacent tiles - on the board edge)
-        edge_vertices = [v for v in self.vertices if len(v.adjacent_tiles) <= 2]
+        edge_vertices = set(v for v in self.vertices if len(v.adjacent_tiles) <= 2)
 
         if len(edge_vertices) < 18:  # Need at least 18 edge vertices for 9 ports
             print(f"Warning: Only {len(edge_vertices)} edge vertices found, may not place all ports")
             return
 
+        # Find outer edges (edges where BOTH vertices are edge vertices)
+        outer_edges = []
+        for edge in self.edges:
+            if edge.vertex1 in edge_vertices and edge.vertex2 in edge_vertices:
+                outer_edges.append(edge)
+
+        if len(outer_edges) < 9:
+            print(f"Warning: Only {len(outer_edges)} outer edges found, need at least 9 for ports")
+            return
+
         # Shuffle to randomize port placement
-        random.shuffle(edge_vertices)
+        random.shuffle(outer_edges)
 
         # Create port types: 4 generic 3:1, 5 specialized 2:1
         port_types = (
@@ -612,30 +622,13 @@ class GameBoard:
         )
         random.shuffle(port_types)
 
-        # Place ports on pairs of adjacent edge vertices
-        used_vertices = set()
-        port_count = 0
-
-        for i in range(0, len(edge_vertices) - 1, 2):
-            if port_count >= 9:
-                break
-
-            vertex1 = edge_vertices[i]
-            vertex2 = edge_vertices[i + 1]
-
-            # Skip if already used
-            if vertex1 in used_vertices or vertex2 in used_vertices:
-                continue
-
-            # Create port
-            port = Port(port_types[port_count], vertex1, vertex2)
+        # Place ports on outer edges (limit to 9)
+        for i in range(min(9, len(outer_edges))):
+            edge = outer_edges[i]
+            port = Port(port_types[i], edge.vertex1, edge.vertex2)
             self.ports.append(port)
 
-            used_vertices.add(vertex1)
-            used_vertices.add(vertex2)
-            port_count += 1
-
-        print(f"Generated {len(self.ports)} ports")
+        print(f"Generated {len(self.ports)} ports on outer edges")
 
     def get_player_ports(self, player):
         """Get all ports a player has access to"""
