@@ -632,7 +632,7 @@ class GameBoard:
         )
         random.shuffle(port_types)
 
-        # Place ports with spacing - no two ports can be adjacent (share vertices)
+        # Place ports with proper spacing - at least one edge gap between ports
         used_vertices = set()
         port_type_index = 0
 
@@ -640,7 +640,7 @@ class GameBoard:
             if port_type_index >= 9:
                 break
 
-            # Check if this edge shares vertices with already-placed ports
+            # Check if this edge or adjacent edges are blocked by existing ports
             if edge.vertex1 in used_vertices or edge.vertex2 in used_vertices:
                 continue  # Skip this edge, it's too close to another port
 
@@ -648,13 +648,19 @@ class GameBoard:
             port = Port(port_types[port_type_index], edge.vertex1, edge.vertex2)
             self.ports.append(port)
 
-            # Mark these vertices as used (and their adjacent vertices for extra spacing)
+            # Mark port vertices as used
             used_vertices.add(edge.vertex1)
             used_vertices.add(edge.vertex2)
 
+            # Also mark adjacent vertices to create a gap (at least one edge between ports)
+            for adj_vertex in edge.vertex1.adjacent_vertices:
+                used_vertices.add(adj_vertex)
+            for adj_vertex in edge.vertex2.adjacent_vertices:
+                used_vertices.add(adj_vertex)
+
             port_type_index += 1
 
-        print(f"Generated {len(self.ports)} spaced ports where terrain hexes meet the sea")
+        print(f"Generated {len(self.ports)} properly spaced ports (min 1 edge gap between ports)")
 
     def get_player_ports(self, player):
         """Get all ports a player has access to"""
