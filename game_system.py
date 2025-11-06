@@ -594,26 +594,36 @@ class GameBoard:
             edge.vertex2.adjacent_vertices.append(edge.vertex1)
 
     def generate_ports(self):
-        """Generate 9 trading ports on outer edge vertices"""
-        # Find edge vertices (vertices with fewer adjacent tiles - on the board edge)
+        """Generate 9 trading ports where two terrain hexes meet the sea"""
+        # Find edge vertices (vertices on the board perimeter with ≤2 adjacent tiles)
         edge_vertices = set(v for v in self.vertices if len(v.adjacent_tiles) <= 2)
 
-        if len(edge_vertices) < 18:  # Need at least 18 edge vertices for 9 ports
+        if len(edge_vertices) < 18:
             print(f"Warning: Only {len(edge_vertices)} edge vertices found, may not place all ports")
             return
 
-        # Find outer edges (edges where BOTH vertices are edge vertices)
-        outer_edges = []
+        # Find harbor edges: edges where exactly 2 terrain hexes meet the sea
+        # These are edges where:
+        # 1. Both vertices are on the perimeter (edge vertices)
+        # 2. The two vertices together are adjacent to exactly 2 unique terrain hexes
+        harbor_edges = []
         for edge in self.edges:
             if edge.vertex1 in edge_vertices and edge.vertex2 in edge_vertices:
-                outer_edges.append(edge)
+                # Get all unique tiles adjacent to either vertex
+                adjacent_tiles = set(edge.vertex1.adjacent_tiles) | set(edge.vertex2.adjacent_tiles)
 
-        if len(outer_edges) < 9:
-            print(f"Warning: Only {len(outer_edges)} outer edges found, need at least 9 for ports")
-            return
+                # We want edges where exactly 2 hexes meet the sea
+                if len(adjacent_tiles) == 2:
+                    harbor_edges.append(edge)
+
+        if len(harbor_edges) < 9:
+            print(f"Warning: Only {len(harbor_edges)} harbor edges found, need at least 9 for ports")
+            # If not enough, fall back to any outer edge
+            harbor_edges = [e for e in self.edges
+                          if e.vertex1 in edge_vertices and e.vertex2 in edge_vertices]
 
         # Shuffle to randomize port placement
-        random.shuffle(outer_edges)
+        random.shuffle(harbor_edges)
 
         # Create port types: 4 generic 3:1, 5 specialized 2:1
         port_types = (
@@ -622,13 +632,13 @@ class GameBoard:
         )
         random.shuffle(port_types)
 
-        # Place ports on outer edges (limit to 9)
-        for i in range(min(9, len(outer_edges))):
-            edge = outer_edges[i]
+        # Place ports on harbor edges (limit to 9)
+        for i in range(min(9, len(harbor_edges))):
+            edge = harbor_edges[i]
             port = Port(port_types[i], edge.vertex1, edge.vertex2)
             self.ports.append(port)
 
-        print(f"Generated {len(self.ports)} ports on outer edges")
+        print(f"Generated {len(self.ports)} ports where terrain hexes meet the sea")
 
     def get_player_ports(self, player):
         """Get all ports a player has access to"""
