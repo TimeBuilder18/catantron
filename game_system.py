@@ -594,76 +594,79 @@ class GameBoard:
             edge.vertex2.adjacent_vertices.append(edge.vertex1)
 
     def generate_ports(self):
-        """Generate 9 trading ports with FIXED positions but randomized types"""
-        # Find edge vertices (vertices on the board perimeter with ≤2 adjacent tiles)
+        """Generate 9 trading ports at FIXED predetermined positions"""
+        # STEP 1: Find all valid harbor edges (where exactly 2 hexes meet the sea)
         edge_vertices = set(v for v in self.vertices if len(v.adjacent_tiles) <= 2)
 
-        if len(edge_vertices) < 18:
-            print(f"Warning: Only {len(edge_vertices)} edge vertices found, may not place all ports")
-            return
-
-        # Find harbor edges: edges where exactly 2 terrain hexes meet the sea
-        harbor_edges = []
+        # Find harbor edges with their associated tiles
+        harbor_edges_with_tiles = []
         for edge in self.edges:
             if edge.vertex1 in edge_vertices and edge.vertex2 in edge_vertices:
-                # Get all unique tiles adjacent to either vertex
                 adjacent_tiles = set(edge.vertex1.adjacent_tiles) | set(edge.vertex2.adjacent_tiles)
-
-                # We want edges where exactly 2 hexes meet the sea
                 if len(adjacent_tiles) == 2:
-                    harbor_edges.append(edge)
+                    # Store edge with its adjacent tiles for identification
+                    tiles_list = list(adjacent_tiles)
+                    harbor_edges_with_tiles.append((edge, tiles_list))
 
-        if len(harbor_edges) < 9:
-            print(f"Warning: Only {len(harbor_edges)} harbor edges found, need at least 9 for ports")
-            # If not enough, fall back to any outer edge
-            harbor_edges = [e for e in self.edges
-                          if e.vertex1 in edge_vertices and e.vertex2 in edge_vertices]
+        if len(harbor_edges_with_tiles) < 9:
+            print(f"Warning: Only {len(harbor_edges_with_tiles)} harbor edges found")
+            return
 
-        # IMPORTANT: Sort edges by angle from center to create FIXED, consistent positions
-        # This ensures port locations are the same every game
-        def edge_angle(edge):
-            # Calculate angle of edge midpoint from board center
+        # STEP 2: Define 9 FIXED port positions based on hex coordinate patterns
+        # These positions are based on standard Catan board geometry
+        # Ports are placed where specific pairs of outer-ring hexes meet the sea
+
+        # Sort harbor edges to create consistent ordering based on angle
+        def get_edge_angle(edge_with_tiles):
+            edge = edge_with_tiles[0]
             mid_x = (edge.vertex1.x + edge.vertex2.x) / 2
             mid_y = (edge.vertex1.y + edge.vertex2.y) / 2
             import math
             return math.atan2(mid_y, mid_x)
 
-        harbor_edges.sort(key=edge_angle)
+        harbor_edges_with_tiles.sort(key=get_edge_angle)
 
-        # Select 9 FIXED port positions evenly distributed around the perimeter
-        # Use consistent spacing to select positions
-        total_edges = len(harbor_edges)
-        spacing = max(1, total_edges // 9)  # How many edges between each port
+        # STEP 3: Select 9 evenly-spaced FIXED positions
+        # This creates the permanent port slot locations
+        total_edges = len(harbor_edges_with_tiles)
 
-        fixed_port_positions = []
-        for i in range(9):
-            index = (i * spacing) % total_edges
-            if index < len(harbor_edges):
-                fixed_port_positions.append(harbor_edges[index])
+        # Calculate indices for 9 evenly-distributed positions
+        # These specific indices will always be the same for this board size
+        fixed_indices = []
+        if total_edges >= 9:
+            step = total_edges / 9.0
+            for i in range(9):
+                index = int(i * step)
+                fixed_indices.append(index)
+        else:
+            fixed_indices = list(range(min(9, total_edges)))
 
-        # If we don't have exactly 9, try to fill remaining slots
-        while len(fixed_port_positions) < 9 and len(harbor_edges) > len(fixed_port_positions):
-            for edge in harbor_edges:
-                if edge not in fixed_port_positions:
-                    fixed_port_positions.append(edge)
-                    if len(fixed_port_positions) >= 9:
-                        break
+        # Select the edges at these fixed indices
+        fixed_port_edges = [harbor_edges_with_tiles[i][0] for i in fixed_indices]
 
-        # Create port types: 4 generic 3:1, 5 specialized 2:1
+        # STEP 4: Create randomized port types
         port_types = [
             PortType.GENERIC, PortType.GENERIC, PortType.GENERIC, PortType.GENERIC,
             PortType.WOOD, PortType.BRICK, PortType.WHEAT, PortType.SHEEP, PortType.ORE
         ]
 
-        # RANDOMIZE ONLY THE TYPES, NOT THE POSITIONS
+        # RANDOMIZE ONLY THE TYPES (not the positions)
         random.shuffle(port_types)
 
-        # Assign randomized types to fixed positions
-        for i, edge in enumerate(fixed_port_positions[:9]):
-            port = Port(port_types[i], edge.vertex1, edge.vertex2)
-            self.ports.append(port)
+        # STEP 5: Assign shuffled types to the fixed positions
+        for i, edge in enumerate(fixed_port_edges):
+            if i < len(port_types):
+                port = Port(port_types[i], edge.vertex1, edge.vertex2)
+                self.ports.append(port)
 
-        print(f"Generated {len(self.ports)} ports at FIXED positions with randomized types")
+                # Debug: Show which tiles this port is between
+                tiles_adjacent = set(edge.vertex1.adjacent_tiles) | set(edge.vertex2.adjacent_tiles)
+                if len(tiles_adjacent) == 2:
+                    tiles_list = list(tiles_adjacent)
+                    t1, t2 = tiles_list[0], tiles_list[1]
+                    print(f"  Port {i+1} ({port.port_type.value}): Between hex ({t1.q},{t1.r}) and ({t2.q},{t2.r})")
+
+        print(f"Generated {len(self.ports)} ports at FIXED positions (positions never change, only types randomized)")
 
     def get_player_ports(self, player):
         """Get all ports a player has access to"""
