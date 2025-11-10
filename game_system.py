@@ -594,148 +594,96 @@ class GameBoard:
             edge.vertex2.adjacent_vertices.append(edge.vertex1)
 
 
-def generate_ports(self):
-    """Generate 9 trading ports at EXACT FIXED positions based on hex coordinates"""
+    def generate_ports(self):
+        """Generate 9 trading ports at EXACT FIXED positions based on hex coordinates"""
 
-    # CRITICAL: The 9 EXACT port positions for standard Catan (radius=2 board)
-    # Each position defined by two hex coordinates (q,r) it sits between
-    # These positions are HARDCODED and NEVER change - only types get shuffled
+        # CRITICAL: The 9 EXACT port positions for standard Catan (radius=2 board)
+        # Each position defined by two hex coordinates (q,r) it sits between
+        # These positions are HARDCODED and NEVER change - only types get shuffled
 
-    FIXED_PORT_HEX_PAIRS = [
-        ((-2, 2), (-1, 2)),   # Position 1: Top-left (NW)
-        ((-1, 2), (0, 2)),    # Position 2: Top-center (N)
-        ((0, 2), (1, 1)),     # Position 3: Top-right (NE)
-        ((1, 1), (2, 0)),     # Position 4: Right-upper (E-NE)
-        ((2, 0), (2, -1)),    # Position 5: Right-lower (E-SE)
-        ((2, -1), (2, -2)),   # Position 6: Bottom-right (SE)
-        ((1, -2), (2, -2)),   # Position 7: Bottom-center (S)
-        ((0, -2), (1, -2)),   # Position 8: Bottom-left (SW)
-        ((-2, 0), (-2, 1)),   # Position 9: Left (W)
-    ]
+        FIXED_PORT_HEX_PAIRS = [
+            ((-2, 2), (-1, 2)),   # Position 1: Top-left (NW)
+            ((-1, 2), (0, 2)),    # Position 2: Top-center (N)
+            ((0, 2), (1, 1)),     # Position 3: Top-right (NE)
+            ((1, 1), (2, 0)),     # Position 4: Right-upper (E-NE)
+            ((2, 0), (2, -1)),    # Position 5: Right-lower (E-SE)
+            ((2, -1), (2, -2)),   # Position 6: Bottom-right (SE)
+            ((1, -2), (2, -2)),   # Position 7: Bottom-center (S)
+            ((0, -2), (1, -2)),   # Position 8: Bottom-left (SW)
+            ((-2, 0), (-2, 1)),   # Position 9: Left (W)
+        ]
 
-    # Create lookup map: hex (q,r) -> Tile object
-    tile_map = {(tile.q, tile.r): tile for tile in self.tiles}
+        # Create lookup map: hex (q,r) -> Tile object
+        tile_map = {(tile.q, tile.r): tile for tile in self.tiles}
 
-    # Find the exact edges that match each fixed position
-    fixed_port_edges = []
+        # Find the exact edges that match each fixed position
+        fixed_port_edges = []
 
-    for hex_pair in FIXED_PORT_HEX_PAIRS:
-        coord1, coord2 = hex_pair
-        tile1 = tile_map.get(coord1)
-        tile2 = tile_map.get(coord2)
+        for hex_pair in FIXED_PORT_HEX_PAIRS:
+            coord1, coord2 = hex_pair
+            tile1 = tile_map.get(coord1)
+            tile2 = tile_map.get(coord2)
 
-        if not tile1 or not tile2:
-            continue
+            if not tile1 or not tile2:
+                continue
 
-        # Find the edge between these two specific tiles
-        found_edge = None
-        for edge in self.edges:
-            v1_tiles = set(edge.vertex1.adjacent_tiles)
-            v2_tiles = set(edge.vertex2.adjacent_tiles)
+            # Find the edge between these two specific tiles
+            found_edge = None
+            for edge in self.edges:
+                v1_tiles = set(edge.vertex1.adjacent_tiles)
+                v2_tiles = set(edge.vertex2.adjacent_tiles)
 
-            # Edge is between tile1 and tile2 if both vertices touch both tiles
-            if (tile1 in v1_tiles and tile2 in v1_tiles and
-                tile1 in v2_tiles and tile2 in v2_tiles):
-                found_edge = edge
-                break
+                # Edge is between tile1 and tile2 if both vertices touch both tiles
+                if (tile1 in v1_tiles and tile2 in v1_tiles and
+                    tile1 in v2_tiles and tile2 in v2_tiles):
+                    found_edge = edge
+                    break
 
-        if found_edge:
-            fixed_port_edges.append((found_edge, tile1, tile2))
+            if found_edge:
+                fixed_port_edges.append((found_edge, tile1, tile2))
 
-    if len(fixed_port_edges) < 9:
-        print(f"⚠ Warning: Only found {len(fixed_port_edges)}/9 fixed ports. Using fallback...")
-        self._generate_ports_fallback()
-        return
+        if len(fixed_port_edges) < 9:
+            print(f"⚠ Warning: Only found {len(fixed_port_edges)}/9 fixed ports. Using fallback...")
+            self._generate_ports_fallback()
+            return
 
-    # Create port types: 4 generic 3:1, 5 specialized 2:1
-    port_types = [
-        PortType.GENERIC, PortType.GENERIC, PortType.GENERIC, PortType.GENERIC,
-        PortType.WOOD, PortType.BRICK, PortType.WHEAT, PortType.SHEEP, PortType.ORE
-    ]
-
-    # RANDOMIZE ONLY THE TYPES (not the positions!)
-    random.shuffle(port_types)
-
-    # Assign shuffled types to the EXACT fixed positions
-    print("=== PORT PLACEMENT (FIXED POSITIONS, RANDOMIZED TYPES) ===")
-    for i, (edge, tile1, tile2) in enumerate(fixed_port_edges[:9]):
-        port = Port(port_types[i], edge.vertex1, edge.vertex2)
-        self.ports.append(port)
-        print(f"  Position {i+1}: {port_types[i].value:12s} between hex ({tile1.q:2d},{tile1.r:2d}) and ({tile2.q:2d},{tile2.r:2d})")
-
-    print(f"✓ {len(self.ports)} ports at EXACT FIXED positions with randomized types")
-
-def _generate_ports_fallback(self):
-    """Fallback if hardcoded positions fail"""
-    edge_vertices = set(v for v in self.vertices if len(v.adjacent_tiles) <= 2)
-    harbor_edges = [e for e in self.edges
-                   if e.vertex1 in edge_vertices and e.vertex2 in edge_vertices
-                   and len(set(e.vertex1.adjacent_tiles) | set(e.vertex2.adjacent_tiles)) == 2]
-
-    import math
-    harbor_edges.sort(key=lambda e: math.atan2(
-        (e.vertex1.y + e.vertex2.y)/2, (e.vertex1.x + e.vertex2.x)/2))
-
-    step = len(harbor_edges) / 9.0
-    selected = [harbor_edges[int(i*step)] for i in range(min(9, len(harbor_edges)))]
-
-    types = [PortType.GENERIC]*4 + [PortType.WOOD, PortType.BRICK, PortType.WHEAT, PortType.SHEEP, PortType.ORE]
-    random.shuffle(types)
-
-    for i, edge in enumerate(selected[:9]):
-        self.ports.append(Port(types[i], edge.vertex1, edge.vertex2))
-
-        def get_edge_angle(edge_with_tiles):
-            edge = edge_with_tiles[0]
-            mid_x = (edge.vertex1.x + edge.vertex2.x) / 2
-            mid_y = (edge.vertex1.y + edge.vertex2.y) / 2
-            import math
-            return math.atan2(mid_y, mid_x)
-
-        harbor_edges_with_tiles.sort(key=get_edge_angle)
-
-        # STEP 3: Select 9 evenly-spaced FIXED positions
-        # This creates the permanent port slot locations
-        total_edges = len(harbor_edges_with_tiles)
-
-        # Calculate indices for 9 evenly-distributed positions
-        # These specific indices will always be the same for this board size
-        fixed_indices = []
-        if total_edges >= 9:
-            step = total_edges / 9.0
-            for i in range(9):
-                index = int(i * step)
-                fixed_indices.append(index)
-        else:
-            fixed_indices = list(range(min(9, total_edges)))
-
-        # Select the edges at these fixed indices
-        fixed_port_edges = [harbor_edges_with_tiles[i][0] for i in fixed_indices]
-
-        # STEP 4: Create randomized port types
+        # Create port types: 4 generic 3:1, 5 specialized 2:1
         port_types = [
             PortType.GENERIC, PortType.GENERIC, PortType.GENERIC, PortType.GENERIC,
             PortType.WOOD, PortType.BRICK, PortType.WHEAT, PortType.SHEEP, PortType.ORE
         ]
 
-        # RANDOMIZE ONLY THE TYPES (not the positions)
+        # RANDOMIZE ONLY THE TYPES (not the positions!)
         random.shuffle(port_types)
 
-        # STEP 5: Assign shuffled types to the fixed positions
-        for i, edge in enumerate(fixed_port_edges):
-            if i < len(port_types):
-                port = Port(port_types[i], edge.vertex1, edge.vertex2)
-                self.ports.append(port)
+        # Assign shuffled types to the EXACT fixed positions
+        print("=== PORT PLACEMENT (FIXED POSITIONS, RANDOMIZED TYPES) ===")
+        for i, (edge, tile1, tile2) in enumerate(fixed_port_edges[:9]):
+            port = Port(port_types[i], edge.vertex1, edge.vertex2)
+            self.ports.append(port)
+            print(f"  Position {i+1}: {port_types[i].value:12s} between hex ({tile1.q:2d},{tile1.r:2d}) and ({tile2.q:2d},{tile2.r:2d})")
 
-                # Debug: Show which tiles this port is between
-                tiles_adjacent = set(edge.vertex1.adjacent_tiles) | set(edge.vertex2.adjacent_tiles)
-                if len(tiles_adjacent) == 2:
-                    tiles_list = list(tiles_adjacent)
-                    t1, t2 = tiles_list[0], tiles_list[1]
-                    print(f"  Port {i+1} ({port.port_type.value}): Between hex ({t1.q},{t1.r}) and ({t2.q},{t2.r})")
+        print(f"✓ {len(self.ports)} ports at EXACT FIXED positions with randomized types")
 
-        print(f"Generated {len(self.ports)} ports at FIXED positions (positions never change, only types randomized)")
+    def _generate_ports_fallback(self):
+        """Fallback if hardcoded positions fail"""
+        edge_vertices = set(v for v in self.vertices if len(v.adjacent_tiles) <= 2)
+        harbor_edges = [e for e in self.edges
+                       if e.vertex1 in edge_vertices and e.vertex2 in edge_vertices
+                       and len(set(e.vertex1.adjacent_tiles) | set(e.vertex2.adjacent_tiles)) == 2]
 
+        import math
+        harbor_edges.sort(key=lambda e: math.atan2(
+            (e.vertex1.y + e.vertex2.y)/2, (e.vertex1.x + e.vertex2.x)/2))
+
+        step = len(harbor_edges) / 9.0
+        selected = [harbor_edges[int(i*step)] for i in range(min(9, len(harbor_edges)))]
+
+        types = [PortType.GENERIC]*4 + [PortType.WOOD, PortType.BRICK, PortType.WHEAT, PortType.SHEEP, PortType.ORE]
+        random.shuffle(types)
+
+        for i, edge in enumerate(selected[:9]):
+            self.ports.append(Port(types[i], edge.vertex1, edge.vertex2))
     def get_player_ports(self, player):
         """Get all ports a player has access to"""
         return [port for port in self.ports if port.can_player_use(player)]
