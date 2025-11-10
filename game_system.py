@@ -594,7 +594,7 @@ class GameBoard:
             edge.vertex2.adjacent_vertices.append(edge.vertex1)
 
     def generate_ports(self):
-        """Generate 9 trading ports where two terrain hexes meet the sea"""
+        """Generate 9 trading ports with FIXED positions but randomized types"""
         # Find edge vertices (vertices on the board perimeter with ≤2 adjacent tiles)
         edge_vertices = set(v for v in self.vertices if len(v.adjacent_tiles) <= 2)
 
@@ -603,9 +603,6 @@ class GameBoard:
             return
 
         # Find harbor edges: edges where exactly 2 terrain hexes meet the sea
-        # These are edges where:
-        # 1. Both vertices are on the perimeter (edge vertices)
-        # 2. The two vertices together are adjacent to exactly 2 unique terrain hexes
         harbor_edges = []
         for edge in self.edges:
             if edge.vertex1 in edge_vertices and edge.vertex2 in edge_vertices:
@@ -622,45 +619,51 @@ class GameBoard:
             harbor_edges = [e for e in self.edges
                           if e.vertex1 in edge_vertices and e.vertex2 in edge_vertices]
 
-        # Shuffle to randomize port placement
-        random.shuffle(harbor_edges)
+        # IMPORTANT: Sort edges by angle from center to create FIXED, consistent positions
+        # This ensures port locations are the same every game
+        def edge_angle(edge):
+            # Calculate angle of edge midpoint from board center
+            mid_x = (edge.vertex1.x + edge.vertex2.x) / 2
+            mid_y = (edge.vertex1.y + edge.vertex2.y) / 2
+            import math
+            return math.atan2(mid_y, mid_x)
+
+        harbor_edges.sort(key=edge_angle)
+
+        # Select 9 FIXED port positions evenly distributed around the perimeter
+        # Use consistent spacing to select positions
+        total_edges = len(harbor_edges)
+        spacing = max(1, total_edges // 9)  # How many edges between each port
+
+        fixed_port_positions = []
+        for i in range(9):
+            index = (i * spacing) % total_edges
+            if index < len(harbor_edges):
+                fixed_port_positions.append(harbor_edges[index])
+
+        # If we don't have exactly 9, try to fill remaining slots
+        while len(fixed_port_positions) < 9 and len(harbor_edges) > len(fixed_port_positions):
+            for edge in harbor_edges:
+                if edge not in fixed_port_positions:
+                    fixed_port_positions.append(edge)
+                    if len(fixed_port_positions) >= 9:
+                        break
 
         # Create port types: 4 generic 3:1, 5 specialized 2:1
-        port_types = (
-            [PortType.GENERIC] * 4 +
-            [PortType.WOOD, PortType.BRICK, PortType.WHEAT, PortType.SHEEP, PortType.ORE]
-        )
+        port_types = [
+            PortType.GENERIC, PortType.GENERIC, PortType.GENERIC, PortType.GENERIC,
+            PortType.WOOD, PortType.BRICK, PortType.WHEAT, PortType.SHEEP, PortType.ORE
+        ]
+
+        # RANDOMIZE ONLY THE TYPES, NOT THE POSITIONS
         random.shuffle(port_types)
 
-        # Place ports with proper spacing - at least one edge gap between ports
-        used_vertices = set()
-        port_type_index = 0
-
-        for edge in harbor_edges:
-            if port_type_index >= 9:
-                break
-
-            # Check if this edge or adjacent edges are blocked by existing ports
-            if edge.vertex1 in used_vertices or edge.vertex2 in used_vertices:
-                continue  # Skip this edge, it's too close to another port
-
-            # Place port on this edge
-            port = Port(port_types[port_type_index], edge.vertex1, edge.vertex2)
+        # Assign randomized types to fixed positions
+        for i, edge in enumerate(fixed_port_positions[:9]):
+            port = Port(port_types[i], edge.vertex1, edge.vertex2)
             self.ports.append(port)
 
-            # Mark port vertices as used
-            used_vertices.add(edge.vertex1)
-            used_vertices.add(edge.vertex2)
-
-            # Also mark adjacent vertices to create a gap (at least one edge between ports)
-            for adj_vertex in edge.vertex1.adjacent_vertices:
-                used_vertices.add(adj_vertex)
-            for adj_vertex in edge.vertex2.adjacent_vertices:
-                used_vertices.add(adj_vertex)
-
-            port_type_index += 1
-
-        print(f"Generated {len(self.ports)} properly spaced ports (min 1 edge gap between ports)")
+        print(f"Generated {len(self.ports)} ports at FIXED positions with randomized types")
 
     def get_player_ports(self, player):
         """Get all ports a player has access to"""
