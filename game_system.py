@@ -610,16 +610,34 @@ class GameBoard:
         # Create lookup map
         tile_map = {(tile.q, tile.r): tile for tile in self.tiles}
 
-        # Find all COASTAL edges (edges facing ocean, not between two hexes)
+        # Step 1: Find the radius of the board (max distance from center)
+        max_distance = 0
+        for tile in self.tiles:
+            # Axial distance from center (0,0) in hex coordinates
+            distance = max(abs(tile.q), abs(tile.r), abs(-tile.q - tile.r))
+            max_distance = max(max_distance, distance)
+
+        print(f"[PORT DEBUG] Board radius: {max_distance}")
+
+        # Step 2: Find ONLY tiles on the outer ring (distance == max_distance)
+        outer_ring_tiles = []
+        for tile in self.tiles:
+            distance = max(abs(tile.q), abs(tile.r), abs(-tile.q - tile.r))
+            if distance == max_distance:
+                outer_ring_tiles.append(tile)
+
+        print(f"[PORT DEBUG] Outer ring tiles: {len(outer_ring_tiles)} (should be {6 * max_distance} for radius {max_distance})")
+
+        # Step 3: For each OUTER RING tile only, find edges that face OUTWARD
         coastal_edges = []
 
-        for tile in self.tiles:
+        for tile in outer_ring_tiles:  # ← ONLY outer ring tiles, not all tiles!
             # Check each of the 6 possible neighbors
             for dir_idx, (dq, dr) in enumerate(HEX_DIRECTIONS):
                 neighbor_q = tile.q + dq
                 neighbor_r = tile.r + dr
 
-                # If there's NO hex in this direction, this edge faces the ocean
+                # If there's NO hex in this direction, this edge faces outward (ocean)
                 if (neighbor_q, neighbor_r) not in tile_map:
                     # Get the two vertices for this edge
                     corners = tile.get_corners()
@@ -636,6 +654,8 @@ class GameBoard:
                            ((e1_x, e1_y) == (v2_x, v2_y) and (e2_x, e2_y) == (v1_x, v1_y)):
                             coastal_edges.append((edge, tile, dir_idx))
                             break
+
+        print(f"[PORT DEBUG] Coastal (outer perimeter) edges found: {len(coastal_edges)} (should be {6 * max_distance} for radius {max_distance})")
 
         if len(coastal_edges) < 9:
             print(f"⚠ Warning: Only {len(coastal_edges)} coastal edges found (need 9)")
@@ -667,13 +687,13 @@ class GameBoard:
         random.shuffle(port_types)
 
         # Assign shuffled types to the FIXED coastal positions
-        print("=== PORT PLACEMENT ON COASTAL EDGES (WHERE LAND MEETS OCEAN) ===")
+        print("=== PORT PLACEMENT ON OUTER PERIMETER ONLY ===")
         for i, (edge, tile, direction) in enumerate(fixed_coastal_edges):
             port = Port(port_types[i], edge.vertex1, edge.vertex2)
             self.ports.append(port)
-            print(f"  Port {i+1}: {port_types[i].value:12s} on hex ({tile.q:2d},{tile.r:2d}) edge {direction} [COASTAL]")
+            print(f"  Port {i+1}: {port_types[i].value:12s} on OUTER hex ({tile.q:2d},{tile.r:2d}) edge {direction}")
 
-        print(f"✓ {len(self.ports)} ports placed on COASTAL edges (land meets ocean)")
+        print(f"✓ {len(self.ports)} ports placed on OUTER PERIMETER edges only")
 
     def get_player_ports(self, player):
         """Get all ports a player has access to"""
