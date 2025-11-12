@@ -183,110 +183,132 @@ class ClientWindow:
                     y_pos += 20
 
     def draw_board(self):
-        """Draw the game board"""
+        """Draw the game board - exactly like main.py"""
         if not self.game_state:
             # Show "waiting for server" message
             waiting_text = self.font.render("Connecting to server...", True, (255, 255, 100))
             self.screen.blit(waiting_text, (self.width // 2 - 100, self.height // 2))
             return
 
-        # Center the board on screen (board spans roughly -260 to 260 in x, -150 to 150 in y)
-        board_x = 500  # Center horizontally
-        board_y = 350  # Center vertically
-
         with self.state_lock:
-            # Draw hexagonal tiles
+            # Import Tile to reconstruct board
+            from tile import Tile
+            from game_system import Settlement, City, Vertex, Edge, Port, PortType
+
+            # Reconstruct tiles for proper rendering
+            tiles = []
             for tile_data in self.game_state['tiles']:
-                x = tile_data['x'] + board_x
-                y = tile_data['y'] + board_y
-                resource = tile_data['resource']
-                number = tile_data['number']
+                tile = Tile(tile_data['q'], tile_data['r'], 50, tile_data['resource'], tile_data['number'])
+                tiles.append(tile)
 
-                # Draw hex
-                color = RESOURCE_COLORS.get(resource, RESOURCE_COLORS['desert'])
-                self.draw_hexagon(x, y, 50, color)
+            # Compute center offset (same as main.py)
+            if tiles:
+                xs = [t.x for t in tiles]
+                ys = [t.y for t in tiles]
+                min_x, max_x = min(xs), max(xs)
+                min_y, max_y = min(ys), max(ys)
+                board_cx, board_cy = (min_x + max_x) / 2, (min_y + max_y) / 2
+                offset = (self.width / 2 - board_cx, self.height / 2 - board_cy)
+            else:
+                offset = (0, 0)
 
-                # Draw number
-                if number:
-                    # Highlight 6 and 8 (best numbers)
-                    num_color = (255, 100, 100) if number in [6, 8] else (255, 255, 255)
-                    num_text = self.font.render(str(number), True, num_color)
-                    num_rect = num_text.get_rect(center=(int(x), int(y)))
+            # Draw tiles (same as main.py)
+            for tile in tiles:
+                color = RESOURCE_COLORS.get(tile.resource, RESOURCE_COLORS["desert"])
+                tile.draw(self.screen, fill_color=color, offset=offset, show_coords=False)
 
-                    # Background circle
-                    pygame.draw.circle(self.screen, (50, 50, 50), (int(x), int(y)), 18)
-                    self.screen.blit(num_text, num_rect)
+            # Draw vertices (from game state)
+            if 'vertices' in self.game_state:
+                for vertex_data in self.game_state['vertices']:
+                    x = vertex_data['x'] + offset[0]
+                    y = vertex_data['y'] + offset[1]
+                    pygame.draw.circle(self.screen, (100, 100, 100), (int(x), int(y)), 3)
 
-            # Draw settlements
+            # Draw edges (from game state)
+            if 'edges' in self.game_state:
+                for edge_data in self.game_state['edges']:
+                    x1 = edge_data['x1'] + offset[0]
+                    y1 = edge_data['y1'] + offset[1]
+                    x2 = edge_data['x2'] + offset[0]
+                    y2 = edge_data['y2'] + offset[1]
+                    pygame.draw.line(self.screen, (150, 150, 150), (x1, y1), (x2, y2), 1)
+
+            # Draw settlements (same as main.py)
             for settlement in self.game_state['settlements']:
-                x = settlement['x'] + board_x
-                y = settlement['y'] + board_y
+                x = settlement['x'] + offset[0]
+                y = settlement['y'] + offset[1]
                 player_idx = settlement['player_index']
                 player_color = self.game_state['players'][player_idx]['color']
 
                 pygame.draw.circle(self.screen, player_color, (int(x), int(y)), 8)
                 pygame.draw.circle(self.screen, (0, 0, 0), (int(x), int(y)), 8, 2)
 
-            # Draw cities
+            # Draw cities (same as main.py)
             for city in self.game_state['cities']:
-                x = city['x'] + board_x
-                y = city['y'] + board_y
+                x = city['x'] + offset[0]
+                y = city['y'] + offset[1]
                 player_idx = city['player_index']
                 player_color = self.game_state['players'][player_idx]['color']
 
                 pygame.draw.rect(self.screen, player_color, (x - 10, y - 10, 20, 20))
                 pygame.draw.rect(self.screen, (0, 0, 0), (x - 10, y - 10, 20, 20), 2)
 
-            # Draw roads
+            # Draw roads (same as main.py)
             for road in self.game_state['roads']:
-                x1 = road['x1'] + board_x
-                y1 = road['y1'] + board_y
-                x2 = road['x2'] + board_x
-                y2 = road['y2'] + board_y
+                x1 = road['x1'] + offset[0]
+                y1 = road['y1'] + offset[1]
+                x2 = road['x2'] + offset[0]
+                y2 = road['y2'] + offset[1]
                 player_idx = road['player_index']
                 player_color = self.game_state['players'][player_idx]['color']
 
-                pygame.draw.line(self.screen, player_color, (x1, y1), (x2, y2), 6)
+                pygame.draw.line(self.screen, player_color, (x1, y1), (x2, y2), 4)
 
-            # Draw ports
-            port_font = pygame.font.Font(None, 14)
+            # Draw ports (same as main.py)
+            port_font = pygame.font.Font(None, 20)
+            port_label_font = pygame.font.Font(None, 16)
             for port in self.game_state['ports']:
-                x1 = port['x1'] + board_x
-                y1 = port['y1'] + board_y
-                x2 = port['x2'] + board_x
-                y2 = port['y2'] + board_y
+                x1 = port['x1'] + offset[0]
+                y1 = port['y1'] + offset[1]
+                x2 = port['x2'] + offset[0]
+                y2 = port['y2'] + offset[1]
                 mid_x = (x1 + x2) / 2
                 mid_y = (y1 + y2) / 2
 
                 port_type = port['port_type']
 
+                # Determine port color, text, and label (same as main.py)
                 if port_type == "GENERIC":
                     port_color = (200, 200, 200)
                     port_text = "3:1"
+                    resource_label = None
                 else:
                     resource_name = port_type.lower()
                     port_color = RESOURCE_COLORS.get(resource_name, (255, 255, 255))
                     port_text = "2:1"
+                    resource_label = resource_name.capitalize()
 
-                pygame.draw.circle(self.screen, port_color, (int(mid_x), int(mid_y)), 10)
-                pygame.draw.circle(self.screen, (0, 0, 0), (int(mid_x), int(mid_y)), 10, 2)
+                # Draw thicker edge line for the port edge
+                pygame.draw.line(self.screen, port_color, (x1, y1), (x2, y2), 5)
 
+                # Draw port icon at midpoint
+                pygame.draw.circle(self.screen, port_color, (int(mid_x), int(mid_y)), 14)
+                pygame.draw.circle(self.screen, (0, 0, 0), (int(mid_x), int(mid_y)), 14, 2)
+
+                # Draw port ratio text inside circle
                 text_surface = port_font.render(port_text, True, (0, 0, 0))
                 text_rect = text_surface.get_rect(center=(int(mid_x), int(mid_y)))
                 self.screen.blit(text_surface, text_rect)
 
-    def draw_hexagon(self, cx, cy, size, color):
-        """Draw a hexagon at (cx, cy)"""
-        import math
-        points = []
-        for i in range(6):
-            angle = math.pi / 3 * i
-            x = cx + size * math.cos(angle)
-            y = cy + size * math.sin(angle)
-            points.append((x, y))
-
-        pygame.draw.polygon(self.screen, color, points)
-        pygame.draw.polygon(self.screen, (0, 0, 0), points, 2)
+                # Draw resource label below circle for specialized ports
+                if resource_label:
+                    label_surface = port_label_font.render(resource_label, True, port_color)
+                    label_rect = label_surface.get_rect(center=(int(mid_x), int(mid_y) + 20))
+                    # Draw background for better visibility
+                    bg_rect = label_rect.inflate(4, 2)
+                    pygame.draw.rect(self.screen, (0, 0, 0), bg_rect)
+                    pygame.draw.rect(self.screen, port_color, bg_rect, 1)
+                    self.screen.blit(label_surface, label_rect)
 
     def draw_messages(self):
         """Draw recent messages"""

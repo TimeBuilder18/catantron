@@ -158,6 +158,26 @@ class GameServer:
                     for t in self.game_board.tiles
                 ],
 
+                # Vertices (for rendering)
+                'vertices': [
+                    {
+                        'x': v.x,
+                        'y': v.y
+                    }
+                    for v in self.game_board.vertices
+                ],
+
+                # Edges (for rendering)
+                'edges': [
+                    {
+                        'x1': e.vertex1.x,
+                        'y1': e.vertex1.y,
+                        'x2': e.vertex2.x,
+                        'y2': e.vertex2.y
+                    }
+                    for e in self.game_board.edges
+                ],
+
                 # Structures
                 'settlements': [
                     {
