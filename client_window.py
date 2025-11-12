@@ -208,11 +208,20 @@ class ClientWindow:
             pygame.draw.line(self.screen, (100, 100, 100), (panel_x + 20, y_pos), (panel_x + panel_width - 20, y_pos), 2)
             y_pos += 15
 
-            # Turn indicator
+            # Turn indicator - handle both initial placement and normal play
+            game_phase = self.game_state.get('game_phase', 'NORMAL_PLAY')
+            turn_phase = self.game_state.get('turn_phase', 'ROLL_DICE')
+
             if current_turn == self.player_index:
                 phase_text = "YOUR TURN"
                 phase_color = (100, 255, 100)
-                if not dice_rolled:
+
+                # Show different instructions based on game phase
+                if game_phase == "INITIAL_PLACEMENT_1":
+                    phase_desc = "▶ Place first settlement (click vertex)"
+                elif game_phase == "INITIAL_PLACEMENT_2":
+                    phase_desc = "▶ Place second settlement (click vertex)"
+                elif not dice_rolled:
                     phase_desc = "▶ Roll dice (D)"
                 else:
                     phase_desc = "▶ Trade & Build (T=End)"
@@ -445,7 +454,20 @@ class ClientWindow:
             if event.type == pygame.KEYDOWN:
                 self.handle_keypress(event.key)
 
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                self.handle_mouseclick(event.pos)
+
         return True
+
+    def handle_mouseclick(self, pos):
+        """Handle mouse clicks for building placement"""
+        # TODO: Implement building placement
+        # For now just show a message
+        with self.state_lock:
+            game_phase = self.game_state.get('game_phase', 'NORMAL_PLAY') if self.game_state else 'NORMAL_PLAY'
+
+            if game_phase in ["INITIAL_PLACEMENT_1", "INITIAL_PLACEMENT_2"]:
+                self.add_message("Settlement placement: Coming soon!", (255, 200, 100))
 
     def handle_keypress(self, key):
         """Handle keyboard input"""
