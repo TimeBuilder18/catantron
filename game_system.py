@@ -3,7 +3,6 @@ import math
 import pygame
 from enum import Enum
 
-
 # ==================== ENUMS AND CONSTANTS ====================
 
 class ResourceType(Enum):
@@ -100,6 +99,7 @@ class Road(Structure):
 
 class Port:
     """Represents a trading port on the board"""
+
     def __init__(self, port_type, vertex1, vertex2):
         self.port_type = port_type  # PortType enum
         self.vertex1 = vertex1  # First vertex position
@@ -149,6 +149,7 @@ class TradeOfferStatus(Enum):
 
 class TradeOffer:
     """Represents a trade offer between players"""
+
     def __init__(self, offering_player, target_player, offered_resources, requested_resources):
         self.offering_player = offering_player
         self.target_player = target_player
@@ -595,96 +596,121 @@ class GameBoard:
 
 
     def generate_ports(self):
-        """Generate 9 trading ports at FIXED positions on outer perimeter
+        """Generate 9 trading ports on COASTAL edges - ALGORITHMIC VERSION FOR FLAT-TOP HEXAGONS"""
 
-        Port POSITIONS are fixed - only their TYPES are randomized.
-        This matches the physical Catan board where the frame has 9 fixed notches
-        and you randomize which port piece goes in which notch.
-        """
+        print("\n" + "="*70)
+        print("🚢 PORT PLACEMENT SYSTEM - FOR FLAT-TOP HEXAGONS")
+        print("="*70)
 
-        # FIXED PORT POSITIONS for standard Catan board (radius 2)
-        # Each position is (hex_q, hex_r, edge_direction)
-        # Edge directions: 0=E, 1=SE, 2=SW, 3=W, 4=NW, 5=NE
-        # These 9 positions are evenly distributed around the outer perimeter
-        FIXED_PORT_POSITIONS = [
-            (1, -2, 2),   # Port 1: Top area
-            (2, -1, 0),   # Port 2: Northeast area
-            (2, 0, 1),    # Port 3: East area
-            (1, 1, 1),    # Port 4: Southeast area
-            (-1, 2, 3),   # Port 5: South area
-            (-2, 2, 3),   # Port 6: Southwest area
-            (-2, 1, 4),   # Port 7: West area
-            (-2, 0, 5),   # Port 8: Northwest area
-            (0, -2, 2),   # Port 9: North area
+        # Hex neighbor offsets in axial coordinates for FLAT-TOP hexagons
+        # Direction 0=E, 1=SE, 2=SW, 3=W, 4=NW, 5=NE (based on which neighbor hex)
+        HEX_DIRECTIONS = [
+            (+1, 0),   # East - right neighbor
+            (+0, +1),  # Southeast - lower-right neighbor
+            (-1, +1),  # Southwest - lower-left neighbor
+            (-1, 0),   # West - left neighbor
+            (0, -1),   # Northwest - upper-left neighbor
+            (+1, -1)   # Northeast - upper-right neighbor
         ]
 
-        # Create lookup map
+        # For FLAT-TOP hexagons with corners: 0=top, 1=upper-right, 2=lower-right, 3=bottom, 4=lower-left, 5=upper-left
+        # Map direction (which neighbor is missing) to which edge faces that direction
+        # If East neighbor is missing, the edge between corners 1-2 faces East
+        DIR_TO_CORNER = [1, 2, 3, 4, 5, 0]  # Maps direction index to starting corner of the edge
+
+        # Create lookup map of tile positions
         tile_map = {(tile.q, tile.r): tile for tile in self.tiles}
 
-        print("\n=== GENERATING PORTS AT FIXED POSITIONS ===")
-        print(f"Using {len(FIXED_PORT_POSITIONS)} predefined port positions")
+        # Step 1: Calculate board radius
+        max_distance = 0
+        for tile in self.tiles:
+            distance = max(abs(tile.q), abs(tile.r), abs(tile.q + tile.r))
+            max_distance = max(max_distance, distance)
 
-        # For each fixed position, find the corresponding edge
-        port_edges = []
+        print(f"\n📊 Board Analysis:")
+        print(f"   • Total tiles: {len(self.tiles)}")
+        print(f"   • Board radius: {max_distance}")
 
-        for port_q, port_r, edge_dir in FIXED_PORT_POSITIONS:
-            # Find the tile at this position
-            if (port_q, port_r) not in tile_map:
-                print(f"⚠ Warning: Port position ({port_q}, {port_r}) not found in board!")
-                continue
+        # Step 2: Identify outer ring tiles
+        outer_ring_tiles = []
+        for tile in self.tiles:
+            distance = max(abs(tile.q), abs(tile.r), abs(tile.q + tile.r))
+            if distance == max_distance:
+                outer_ring_tiles.append(tile)
 
-            tile = tile_map[(port_q, port_r)]
+        print(f"   • Outer ring tiles: {len(outer_ring_tiles)}")
 
-            # Get the two vertices for this edge
-            corners = tile.get_corners()
-            v1_x, v1_y = round(corners[edge_dir][0], 1), round(corners[edge_dir][1], 1)
-            v2_x, v2_y = round(corners[(edge_dir + 1) % 6][0], 1), round(corners[(edge_dir + 1) % 6][1], 1)
+        # Step 3: Find coastal edges (edges facing outward from outer ring)
+        coastal_edges = []
 
-            # Find the edge object that matches these vertices
-            edge_found = None
-            for edge in self.edges:
-                e1_x, e1_y = round(edge.vertex1.x, 1), round(edge.vertex1.y, 1)
-                e2_x, e2_y = round(edge.vertex2.x, 1), round(edge.vertex2.y, 1)
+        for tile in outer_ring_tiles:
+            # Check each of the 6 possible neighbor directions
+            for dir_idx, (dq, dr) in enumerate(HEX_DIRECTIONS):
+                neighbor_q = tile.q + dq
+                neighbor_r = tile.r + dr
 
-                # Check if this edge matches (either direction)
-                if ((e1_x, e1_y) == (v1_x, v1_y) and (e2_x, e2_y) == (v2_x, v2_y)) or \
-                   ((e1_x, e1_y) == (v2_x, v2_y) and (e2_x, e2_y) == (v1_x, v1_y)):
-                    edge_found = edge
-                    break
+                # If NO hex exists in this direction, this edge faces the ocean
+                if (neighbor_q, neighbor_r) not in tile_map:
+                    # Get the two vertices for this edge
+                    corners = tile.get_corners()
+                    corner_idx = DIR_TO_CORNER[dir_idx]
+                    v1_x, v1_y = round(corners[corner_idx][0], 1), round(corners[corner_idx][1], 1)
+                    v2_x, v2_y = round(corners[(corner_idx + 1) % 6][0], 1), round(corners[(corner_idx + 1) % 6][1], 1)
 
-            if edge_found:
-                port_edges.append((edge_found, tile, edge_dir))
-            else:
-                print(f"⚠ Warning: Could not find edge for port at ({port_q}, {port_r}) edge {edge_dir}")
+                    # Find the edge object matching these vertices
+                    for edge in self.edges:
+                        e1_x, e1_y = round(edge.vertex1.x, 1), round(edge.vertex1.y, 1)
+                        e2_x, e2_y = round(edge.vertex2.x, 1), round(edge.vertex2.y, 1)
 
-        # Create port types: 4 generic 3:1, 5 specialized 2:1
+                        if ((e1_x, e1_y) == (v1_x, v1_y) and (e2_x, e2_y) == (v2_x, v2_y)) or \
+                           ((e1_x, e1_y) == (v2_x, v2_y) and (e2_x, e2_y) == (v1_x, v1_y)):
+                            coastal_edges.append((edge, tile, dir_idx))
+                            break
+
+        print(f"\n🏖️  Coastal Edge Detection:")
+        print(f"   • Coastal edges found: {len(coastal_edges)}")
+
+        if len(coastal_edges) < 9:
+            print(f"\n❌ ERROR: Only {len(coastal_edges)} coastal edges found!")
+            return
+
+        # Step 4: Sort by angle for even distribution
+        def get_angle(edge_tuple):
+            edge = edge_tuple[0]
+            mid_x = (edge.vertex1.x + edge.vertex2.x) / 2
+            mid_y = (edge.vertex1.y + edge.vertex2.y) / 2
+            return math.atan2(mid_y, mid_x)
+
+        coastal_edges.sort(key=get_angle)
+
+        # Step 5: Select 9 evenly distributed positions
+        num_coastal = len(coastal_edges)
+        step = num_coastal / 9.0
+        port_indices = [int(i * step) for i in range(9)]
+        selected_coastal_edges = [coastal_edges[i] for i in port_indices]
+
+        # Step 6: Create port types
         port_types = [
             PortType.GENERIC, PortType.GENERIC, PortType.GENERIC, PortType.GENERIC,
             PortType.WOOD, PortType.BRICK, PortType.WHEAT, PortType.SHEEP, PortType.ORE
         ]
-
-        # RANDOMIZE ONLY THE TYPES (not the positions!)
         random.shuffle(port_types)
 
-        print(f"\n✓ Found {len(port_edges)} valid port positions")
-        print("\n=== PORT PLACEMENT (FIXED POSITIONS, RANDOMIZED TYPES) ===")
+        # Step 7: Create and place ports
+        print(f"\n🚢 Port Placement Details:")
+        print(f"   {'#':<4} {'Type':<15} {'Hex':<12} {'Distance':<10}")
+        print(f"   {'-'*4} {'-'*15} {'-'*12} {'-'*10}")
 
-        # Assign shuffled types to the FIXED positions
-        for i, (edge, tile, edge_dir) in enumerate(port_edges):
-            if i >= len(port_types):
-                break
-
+        for i, (edge, tile, direction) in enumerate(selected_coastal_edges):
             port = Port(port_types[i], edge.vertex1, edge.vertex2)
             self.ports.append(port)
 
-            # Calculate distance of this tile from center (should always be 2 for outer ring)
-            tile_dist = max(abs(tile.q), abs(tile.r), abs(-tile.q - tile.r))
+            tile_dist = max(abs(tile.q), abs(tile.r), abs(tile.q + tile.r))
+            print(f"   {i+1:<4} {port_types[i].value:<15} ({tile.q:2d},{tile.r:2d}){'':<5} {tile_dist:<10}")
 
-            print(f"  Port {i+1}: {port_types[i].value:12s} | hex ({tile.q:2d},{tile.r:2d}) | edge dir={edge_dir} | dist={tile_dist}")
-
-        print(f"\n✓ {len(self.ports)} ports placed at FIXED outer perimeter positions")
-        print(f"✓ Port positions NEVER change - only types are randomized each game")
-        print()
+        print(f"\n✅ Port Placement Complete!")
+        print(f"   • {len(self.ports)} ports successfully placed on OUTER PERIMETER")
+        print("="*70 + "\n")
 
     def get_player_ports(self, player):
         """Get all ports a player has access to"""
@@ -868,76 +894,36 @@ class GameSystem:
 
     def give_starting_resources_step2(self):
         """Step 2: Absolute minimum - just iterate players"""
-        print("\n=== STARTING RESOURCES - STEP 2 (MINIMAL) ===")
-
         for player in self.players:
-            print(f"Player name: {player.name}")
-            # Don't touch settlements, resources, or anything else
+            if len(player.settlements) >= 2:
+                second_settlement = player.settlements[1]
+                vertex = second_settlement.position
 
-        print("=== STEP 2 COMPLETE - ONLY TOUCHED PLAYER NAMES ===\n")
-        """Roll dice and distribute resources"""
-        if self.dice_rolled:
+                for tile in vertex.adjacent_tiles:
+                    if tile.resource != "desert":
+                        resource_type = tile.get_resource_type()
+                        if resource_type:
+                            player.add_resource(resource_type, 1)
+
+    def roll_dice(self):
+        """Roll dice and distribute resources - EXACT copy from main.py"""
+        if not self.can_roll_dice():
             return None
 
         die1, die2, total = DiceRoller.roll_dice()
         self.last_dice_roll = (die1, die2, total)
         self.dice_rolled = True
-
-        if total == 7:
-            self.last_resource_gains = {}
-        else:
-            self.last_resource_gains = DiceRoller.distribute_resources(
-                total, self.game_board, self.players
-            )
-
-        return self.last_dice_roll
-
-    def roll_dice(self):
-        """Roll dice and distribute resources - ONLY CALL THIS FROM USER INPUT"""
-        if not self.can_roll_dice():
-            print("ERROR: Cannot roll dice right now")
-            return None
-
-        # Call the dice roller directly instead of through the class method
-        die1 = random.randint(1, 6)
-        die2 = random.randint(1, 6)
-        total = die1 + die2
-
-        self.last_dice_roll = (die1, die2, total)
-
-        # CRITICAL: Update both flags to prevent multiple rolls
-        self.dice_rolled = True
         self.turn_phase = "TRADE_BUILD"
 
         if total == 7:
-            self.last_resource_gains = {}
-            print("Rolled 7! Robber activates")
-
-            # Players with more than 7 cards must discard half
-            for player in self.players:
-                total_resources = player.get_total_resources()
-                if total_resources > 7:
-                    discard_count = total_resources // 2
-                    print(f"{player.name} must discard {discard_count} cards (has {total_resources})")
-
-                    # Auto-discard random resources for now (can be made interactive later)
-                    discarded = 0
-                    while discarded < discard_count:
-                        for resource_type in ResourceType:
-                            if player.resources[resource_type] > 0 and discarded < discard_count:
-                                player.remove_resource(resource_type, 1)
-                                discarded += 1
-
-                    print(f"{player.name} discarded {discard_count} cards")
-
-            # Current player will move robber (handled in UI)
-            print(f"{self.get_current_player().name} must move the robber")
+            # Handle robber (discard, move robber, steal)
+            return (die1, die2, total)
         else:
+            # Distribute resources
             self.last_resource_gains = DiceRoller.distribute_resources(
                 total, self.game_board, self.players
             )
-
-        return self.last_dice_roll
+            return (die1, die2, total)
 
     def end_turn(self):
         """End current player's turn and move to next player"""
@@ -986,13 +972,24 @@ class GameSystem:
                     self.game_phase = "INITIAL_PLACEMENT_2"
                     # In second round, go in reverse order (last player goes first)
                     self.current_player_index = len(self.players) - 1
+                    self.waiting_for_road = False  # Reset waiting_for_road for new round
+                    print("\n" + "="*60)
                     print("=== INITIAL PLACEMENT ROUND 2 ===")
-                    print("Players place in reverse order")
+                    print("Players place in REVERSE order: 4 → 3 → 2 → 1")
+                    print(f"Starting with Player {self.current_player_index + 1}")
+                    print("="*60 + "\n")
 
             elif self.game_phase == "INITIAL_PLACEMENT_2":
                 # In second round, go in reverse order
                 self.current_player_index -= 1
+                print(f"  [Round 2] Moving to previous player: Player {self.current_player_index + 1}")
+
                 if self.current_player_index < 0:
+                    print("\n" + "="*60)
+                    print("=== INITIAL PLACEMENT COMPLETE ===")
+                    print("Starting normal gameplay...")
+                    print("="*60 + "\n")
+
                     self.game_phase = "NORMAL_PLAY"
                     self.turn_phase = "ROLL_DICE"
                     self.current_player_index = 0
@@ -1022,236 +1019,95 @@ class GameSystem:
                                 elif tile_resource == "pasture":
                                     player.resources[ResourceType.SHEEP] += 1
 
-                    print("Initial placement complete! Game begins!")
-                    print(f"Turn {self.turn_number} - {self.get_current_player().name}")
-                    print("Press 'D' to roll dice and begin your turn!")
+                    print(f"\n=== NORMAL PLAY BEGINS ===")
+                    print(f"{self.get_current_player().name}'s turn")
 
-            self.waiting_for_road = False
-            self.last_settlement_vertex = None
+            return True, f"{self.get_current_player().name}'s turn"
 
-            if self.game_phase != "NORMAL_PLAY":
-                print(f"{self.get_current_player().name}'s turn - {self.get_current_player_needs()}")
+        return False, f"{current_player.name} must complete placement first"
 
-            return True, "Advanced to next player"
-        else:
-            return False, "Must complete settlement and road placement first"
+    def clear_expired_offers(self):
+        """Remove expired trade offers"""
+        # Simple implementation - remove all pending offers
+        self.pending_trade_offers = []
 
-    def get_buildable_vertices_for_settlements(self, player=None):
-        """Get all vertices where player can build settlements"""
+    # ==================== BUILDING ACTIONS ====================
+
+    def try_build_settlement(self, vertex, player=None):
+        """Try to build a settlement"""
         if player is None:
             player = self.get_current_player()
 
         if self.is_initial_placement_phase():
-            # During initial placement, only check distance rule
-            return [v for v in self.game_board.vertices
-                    if v.structure is None and
-                    all(adj.structure is None for adj in v.adjacent_vertices)]
-        else:
-            # Normal play - check all rules
-            return [v for v in self.game_board.vertices if v.can_build_settlement(player, False)]
+            return False, "Use initial placement method during setup"
 
-    def get_buildable_edges_for_initial_roads(self, player=None):
-        """Get edges where player can place initial roads (must connect to last settlement)"""
-        if player is None:
-            player = self.get_current_player()
-
-        if not self.waiting_for_road or not self.last_settlement_vertex:
-            return []
-
-        return [e for e in self.game_board.edges
-                if e.structure is None and
-                (e.vertex1 == self.last_settlement_vertex or e.vertex2 == self.last_settlement_vertex)]
-
-    def get_buildable_vertices_for_cities(self, player=None):
-        """Get all vertices where player can build cities"""
-        if player is None:
-            player = self.get_current_player()
-
-        return [v for v in self.game_board.vertices if v.can_build_city(player)]
-
-    def get_buildable_edges(self, player=None):
-        """Get all edges where player can build roads"""
-        if player is None:
-            player = self.get_current_player()
-
-        return [e for e in self.game_board.edges if e.can_build_road(player)]
-
-    def debug_reset_turn_state(self):
-        """Debug method to reset turn state"""
-        self.dice_rolled = False
-        self.turn_phase = "ROLL_DICE"
-        self.last_dice_roll = None
-        self.last_resource_gains = None
-        print(f"Turn state reset for {self.get_current_player().name}")
-        print("You can now roll dice with 'D'")
-
-    # ==================== ENHANCED TRADING SYSTEM ====================
-
-    def get_available_trade_partners(self, current_player):
-        """Get list of other players for trading"""
-        return [p for p in self.players if p != current_player]
-
-    def can_afford_bank_trade(self, player, offering_resource, trade_ratio=4):
-        """Check if player can afford a bank trade"""
-        return player.resources[offering_resource] >= trade_ratio
-
-    def execute_bank_trade(self, player, offering_resource, requesting_resource, trade_ratio=None):
-        """Execute a bank trade using best available port ratio"""
         if not self.can_trade_or_build():
-            return False, "Can only trade during trade/build phase"
+            return False, "Cannot build now - roll dice first"
 
-        # Determine best trade ratio based on player's ports
-        if trade_ratio is None:
-            trade_ratio = self.board.get_best_trade_ratio(player, offering_resource)
+        return player.try_build_settlement(vertex)
 
-        if not self.can_afford_bank_trade(player, offering_resource, trade_ratio):
-            return False, f"Need {trade_ratio} {offering_resource.name.lower()} to trade"
+    def try_build_city(self, vertex, player=None):
+        """Try to build a city"""
+        if player is None:
+            player = self.get_current_player()
 
-        # Execute trade
-        player.remove_resource(offering_resource, trade_ratio)
-        player.add_resource(requesting_resource, 1)
+        if self.is_initial_placement_phase():
+            return False, "Cannot build cities during initial placement"
 
-        return True, f"Traded {trade_ratio} {offering_resource.name.lower()} for 1 {requesting_resource.name.lower()}"
-
-    def propose_player_trade(self, offering_player, target_player, offered_resources, requested_resources):
-        """Propose a trade between players - creates a pending offer"""
         if not self.can_trade_or_build():
-            return False, None, "Can only trade during trade/build phase"
+            return False, "Cannot build now - roll dice first"
 
-        # Validate offering player has resources
-        for resource_type, amount in offered_resources.items():
-            if amount > 0 and offering_player.resources[resource_type] < amount:
-                return False, None, f"You don't have {amount} {resource_type.name.lower()}"
+        return player.try_build_city(vertex)
 
-        # Check if something is being offered and requested
-        total_offered = sum(offered_resources.values())
-        total_requested = sum(requested_resources.values())
-        if total_offered == 0 or total_requested == 0:
-            return False, None, "Must offer and request at least one resource"
+    def try_build_road(self, edge, player=None):
+        """Try to build a road"""
+        if player is None:
+            player = self.get_current_player()
 
-        # Create trade offer
-        trade_offer = TradeOffer(offering_player, target_player, offered_resources, requested_resources)
-        self.pending_trade_offers.append(trade_offer)
+        if self.is_initial_placement_phase():
+            return False, "Use initial placement method during setup"
 
-        return True, trade_offer, f"Trade proposed to {target_player.name}"
+        if not self.can_trade_or_build():
+            return False, "Cannot build now - roll dice first"
 
-    def accept_trade_offer(self, trade_offer):
-        """Accept a trade offer and execute it"""
-        if trade_offer.status != TradeOfferStatus.PENDING:
-            return False, "Trade offer is no longer pending"
+        return player.try_build_road(edge)
 
-        # Validate offer is still valid (players still have resources)
-        if not trade_offer.is_valid():
-            trade_offer.status = TradeOfferStatus.EXPIRED
-            return False, "Trade no longer valid - players don't have required resources"
+    # ==================== DEVELOPMENT CARDS ====================
 
-        # Execute the trade
-        for resource_type, amount in trade_offer.offered_resources.items():
-            if amount > 0:
-                trade_offer.offering_player.remove_resource(resource_type, amount)
-                trade_offer.target_player.add_resource(resource_type, amount)
+    def try_buy_development_card(self, player=None):
+        """Try to buy a development card"""
+        if player is None:
+            player = self.get_current_player()
 
-        for resource_type, amount in trade_offer.requested_resources.items():
-            if amount > 0:
-                trade_offer.target_player.remove_resource(resource_type, amount)
-                trade_offer.offering_player.add_resource(resource_type, amount)
+        if not self.can_trade_or_build():
+            return False, "Cannot buy cards now"
 
-        trade_offer.status = TradeOfferStatus.ACCEPTED
-        return True, f"Trade completed with {trade_offer.offering_player.name}"
-
-    def reject_trade_offer(self, trade_offer):
-        """Reject a trade offer"""
-        if trade_offer.status != TradeOfferStatus.PENDING:
-            return False, "Trade offer is no longer pending"
-
-        trade_offer.status = TradeOfferStatus.REJECTED
-        return True, f"Trade rejected from {trade_offer.offering_player.name}"
-
-    def counter_trade_offer(self, original_offer, counter_offered_resources, counter_requested_resources):
-        """Counter a trade offer with a new proposal"""
-        if original_offer.status != TradeOfferStatus.PENDING:
-            return False, None, "Original trade offer is no longer pending"
-
-        # Reject the original offer
-        original_offer.status = TradeOfferStatus.COUNTERED
-
-        # Create counter offer (reversed - target becomes offering player)
-        counter_offer = TradeOffer(
-            original_offer.target_player,
-            original_offer.offering_player,
-            counter_offered_resources,
-            counter_requested_resources
-        )
-
-        # Validate counter offer
-        if not counter_offer.is_valid():
-            return False, None, "Counter offer invalid - you don't have required resources"
-
-        # Link the counter offer to original
-        original_offer.counter_offer = counter_offer
-        self.pending_trade_offers.append(counter_offer)
-
-        return True, counter_offer, f"Counter offer sent to {counter_offer.target_player.name}"
-
-    def get_pending_offers_for_player(self, player):
-        """Get all pending trade offers directed at a player"""
-        return [offer for offer in self.pending_trade_offers
-                if offer.target_player == player and offer.status == TradeOfferStatus.PENDING]
-
-    def clear_expired_offers(self):
-        """Clear all pending trade offers (called on turn end)"""
-        for offer in self.pending_trade_offers:
-            if offer.status == TradeOfferStatus.PENDING:
-                offer.status = TradeOfferStatus.EXPIRED
-        # Keep offers for history, but could also clear them: self.pending_trade_offers = []
-
-    def execute_player_trade(self, offering_player, target_player, offered_resources, requested_resources):
-        """Legacy method - creates and auto-accepts a trade (for AI or testing)"""
-        success, trade_offer, message = self.propose_player_trade(offering_player, target_player,
-                                                                   offered_resources, requested_resources)
-        if not success:
-            return False, message
-
-        # Auto-accept for legacy compatibility
-        success, message = self.accept_trade_offer(trade_offer)
-        return success, message
-
-    # ==================== DEVELOPMENT CARD SYSTEM ====================
+        return player.try_buy_development_card(self.dev_deck)
 
     def can_play_development_card(self, player, card_type):
         """Check if player can play a development card"""
-        if not self.can_trade_or_build():
-            return False, "Can only play cards during trade/build phase"
-
         if player.development_cards[card_type] <= 0:
-            return False, f"No {card_type.value} cards available"
+            return False, "You don't have this card"
+
+        if not self.can_trade_or_build():
+            return False, "Can only play cards during your turn"
 
         return True, "Can play card"
 
     def play_knight_card(self, player):
-        """Play a knight development card"""
+        """Play a Knight card"""
         success, message = self.can_play_development_card(player, DevelopmentCardType.KNIGHT)
         if not success:
             return False, message
 
-        # Remove card and track knights played
         player.development_cards[DevelopmentCardType.KNIGHT] -= 1
         player.knights_played += 1
+        self.update_largest_army()
 
-        # Check for largest army (3+ knights and most among all players)
-        if player.knights_played >= GameConstants.LARGEST_ARMY_MIN_KNIGHTS:
-            current_largest = max(p.knights_played for p in self.players)
-            if player.knights_played >= current_largest:
-                # Remove largest army from other players
-                for p in self.players:
-                    p.has_largest_army = False
-                # Give to current player
-                player.has_largest_army = True
-
-        return True, f"Knight played! Move robber and steal from adjacent player. Knights played: {player.knights_played}"
+        return True, "Knight played - move the robber and steal from a player"
 
     def play_year_of_plenty_card(self, player, resource1, resource2):
-        """Play Year of Plenty card - take 2 resources from bank"""
+        """Play Year of Plenty card - take 2 resources"""
         success, message = self.can_play_development_card(player, DevelopmentCardType.YEAR_OF_PLENTY)
         if not success:
             return False, message
@@ -1260,7 +1116,7 @@ class GameSystem:
         player.add_resource(resource1, 1)
         player.add_resource(resource2, 1)
 
-        return True, f"Year of Plenty: Gained {resource1.value} and {resource2.value}"
+        return True, f"Year of Plenty: Gained 1 {resource1.value} and 1 {resource2.value}"
 
     def play_road_building_card(self, player):
         """Play Road Building card - build 2 free roads"""
@@ -1287,7 +1143,7 @@ class GameSystem:
             return False, "Cannot build road here"
 
         # Build the road without cost
-        road = Road(player)
+        road = Road(player, edge)
         edge.structure = road
         player.roads.append(road)
         self.free_roads_remaining -= 1
@@ -1351,8 +1207,7 @@ class GameSystem:
     def check_victory_conditions(self):
         """Check if any player has won and return the winner"""
         for player in self.players:
-            points = player.calculate_victory_points()
-            if points >= GameConstants.VICTORY_POINTS_TO_WIN:
+            if player.calculate_victory_points() >= GameConstants.VICTORY_POINTS_TO_WIN:
                 return player
         return None
 
@@ -1434,11 +1289,6 @@ class GameSystem:
             player.has_largest_army = (player == army_player)
 
         return army_player, most_knights
-        """Check if any player has won"""
-        for player in self.players:
-            if player.calculate_victory_points() >= GameConstants.VICTORY_POINTS_TO_WIN:
-                return player
-        return None
 
     def try_place_initial_settlement(self, vertex, player=None):
         """Place settlement during initial placement"""
@@ -1449,10 +1299,13 @@ class GameSystem:
             return False, "Not in initial placement phase"
 
         if self.waiting_for_road:
+            print(f"  [DEBUG] Cannot place settlement - waiting_for_road is True")
             return False, "Must place road first"
 
         placements = self.player_initial_placements[player]
         expected_settlements = 1 if self.game_phase == "INITIAL_PLACEMENT_1" else 2
+
+        print(f"  [DEBUG] Phase: {self.game_phase}, Player has {placements['settlements']} settlements, expected: {expected_settlements}")
 
         if placements["settlements"] >= expected_settlements:
             return False, f"Already placed {expected_settlements} settlement(s) this round"
