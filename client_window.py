@@ -185,10 +185,14 @@ class ClientWindow:
     def draw_board(self):
         """Draw the game board"""
         if not self.game_state:
+            # Show "waiting for server" message
+            waiting_text = self.font.render("Connecting to server...", True, (255, 255, 100))
+            self.screen.blit(waiting_text, (self.width // 2 - 100, self.height // 2))
             return
 
-        board_x = 250
-        board_y = 100
+        # Center the board on screen (board spans roughly -260 to 260 in x, -150 to 150 in y)
+        board_x = 500  # Center horizontally
+        board_y = 350  # Center vertically
 
         with self.state_lock:
             # Draw hexagonal tiles
@@ -311,6 +315,27 @@ class ClientWindow:
             self.screen.blit(text, (20, y_pos))
             y_pos += 18
 
+    def draw_debug_info(self):
+        """Draw debug information"""
+        debug_y = self.height - 30
+
+        # Connection status
+        if self.socket:
+            status_text = self.small_font.render("✓ Connected to server", True, (100, 255, 100))
+        else:
+            status_text = self.small_font.render("✗ Not connected", True, (255, 100, 100))
+
+        self.screen.blit(status_text, (self.width - 200, debug_y))
+
+        # Game state status
+        with self.state_lock:
+            if self.game_state:
+                state_text = self.small_font.render(f"✓ Game active ({len(self.game_state.get('tiles', []))} tiles)", True, (100, 255, 100))
+            else:
+                state_text = self.small_font.render("Waiting for game state...", True, (255, 255, 100))
+
+        self.screen.blit(state_text, (self.width - 200, debug_y - 20))
+
     def handle_events(self):
         """Handle Pygame events"""
         for event in pygame.event.get():
@@ -349,13 +374,7 @@ class ClientWindow:
 
         clock = pygame.time.Clock()
 
-        # Wait for initial game state
-        print(f"[{self.player_name}] Waiting for game state...")
-        while self.running and not self.game_state:
-            import time
-            time.sleep(0.1)
-
-        print(f"[{self.player_name}] ✓ Game state received! Starting window...")
+        print(f"[{self.player_name}] ✓ Window started! Waiting for game state...")
 
         while self.running:
             if not self.handle_events():
@@ -370,6 +389,7 @@ class ClientWindow:
             self.draw_board()
             self.draw_controls()
             self.draw_messages()
+            self.draw_debug_info()
 
             pygame.display.flip()
             clock.tick(30)  # 30 FPS
