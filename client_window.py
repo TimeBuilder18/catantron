@@ -54,6 +54,9 @@ class ClientWindow:
         self.build_mode = None
         self.show_coords = False
 
+        # Board rendering offset (for click detection)
+        self.board_offset = (0, 0)
+
     def position_window(self):
         """Position window based on player index - adjusted for 1600x1000 windows"""
         # These windows are much larger, so we may need to overlap or stack them
@@ -217,10 +220,14 @@ class ClientWindow:
                 phase_color = (100, 255, 100)
 
                 # Show different instructions based on game phase
-                if game_phase == "INITIAL_PLACEMENT_1":
-                    phase_desc = "▶ Place first settlement (click vertex)"
-                elif game_phase == "INITIAL_PLACEMENT_2":
-                    phase_desc = "▶ Place second settlement (click vertex)"
+                waiting_for_road = self.game_state.get('waiting_for_road', False)
+
+                if game_phase in ["INITIAL_PLACEMENT_1", "INITIAL_PLACEMENT_2"]:
+                    if waiting_for_road:
+                        phase_desc = "▶ Place a road (click edge adjacent to settlement)"
+                    else:
+                        round_name = "first" if game_phase == "INITIAL_PLACEMENT_1" else "second"
+                        phase_desc = f"▶ Place {round_name} settlement (click vertex)"
                 elif not dice_rolled:
                     phase_desc = "▶ Roll dice (D)"
                 else:
@@ -340,6 +347,9 @@ class ClientWindow:
                 offset = (600 - board_cx, self.height / 2 - board_cy)
             else:
                 offset = (0, 0)
+
+            # Store offset for click detection
+            self.board_offset = offset
 
             # Draw tiles (same as main.py)
             for tile in tiles:
@@ -461,13 +471,80 @@ class ClientWindow:
 
     def handle_mouseclick(self, pos):
         """Handle mouse clicks for building placement"""
-        # TODO: Implement building placement
-        # For now just show a message
-        with self.state_lock:
-            game_phase = self.game_state.get('game_phase', 'NORMAL_PLAY') if self.game_state else 'NORMAL_PLAY'
+        if not self.game_state:
+            return
 
+        with self.state_lock:
+            mouse_x, mouse_y = pos
+            game_phase = self.game_state.get('game_phase', 'NORMAL_PLAY')
+            current_turn = self.game_state.get('current_turn', 0)
+            waiting_for_road = self.game_state.get('waiting_for_road', False)
+
+            # Only allow clicks on your turn
+            if current_turn != self.player_index:
+                self.add_message("Not your turn!", (255, 100, 100))
+                return
+
+            # During initial placement
             if game_phase in ["INITIAL_PLACEMENT_1", "INITIAL_PLACEMENT_2"]:
-                self.add_message("Settlement placement: Coming soon!", (255, 200, 100))
+                # If waiting for road, click edges to place roads
+                if waiting_for_road:
+                    # Find closest edge to click
+                    edges = self.game_state.get('edges', [])
+                    closest_edge = None
+                    min_distance = float('inf')
+                    click_radius = 20  # pixels - slightly larger for edges
+
+                    for edge_data in edges:
+                        # Apply board offset
+                        x1 = edge_data['x1'] + self.board_offset[0]
+                        y1 = edge_data['y1'] + self.board_offset[1]
+                        x2 = edge_data['x2'] + self.board_offset[0]
+                        y2 = edge_data['y2'] + self.board_offset[1]
+
+                        # Calculate distance from click to edge (point-to-line-segment distance)
+                        # Use edge midpoint for simplicity
+                        mid_x = (x1 + x2) / 2
+                        mid_y = (y1 + y2) / 2
+                        distance = ((mouse_x - mid_x) ** 2 + (mouse_y - mid_y) ** 2) ** 0.5
+
+                        if distance < min_distance and distance <= click_radius:
+                            min_distance = distance
+                            closest_edge = edge_data
+
+                    if closest_edge:
+                        # Send placement action to server (using original coordinates without offset)
+                        action = f"PLACE_ROAD {closest_edge['x1']} {closest_edge['y1']} {closest_edge['x2']} {closest_edge['y2']}"
+                        self.send_action(action)
+                        self.add_message("Placing road...", (100, 255, 100))
+                    else:
+                        self.add_message("Click closer to an edge", (255, 200, 100))
+                else:
+                    # Waiting for settlement - click vertices
+                    vertices = self.game_state.get('vertices', [])
+                    closest_vertex = None
+                    min_distance = float('inf')
+                    click_radius = 15  # pixels
+
+                    for vertex_data in vertices:
+                        # Apply board offset
+                        vx = vertex_data['x'] + self.board_offset[0]
+                        vy = vertex_data['y'] + self.board_offset[1]
+
+                        # Calculate distance to mouse click
+                        distance = ((mouse_x - vx) ** 2 + (mouse_y - vy) ** 2) ** 0.5
+
+                        if distance < min_distance and distance <= click_radius:
+                            min_distance = distance
+                            closest_vertex = vertex_data
+
+                    if closest_vertex:
+                        # Send placement action to server (using original coordinates without offset)
+                        action = f"PLACE_SETTLEMENT {closest_vertex['x']} {closest_vertex['y']}"
+                        self.send_action(action)
+                        self.add_message("Placing settlement...", (100, 255, 100))
+                    else:
+                        self.add_message("Click closer to a vertex", (255, 200, 100))
 
     def handle_keypress(self, key):
         """Handle keyboard input"""
