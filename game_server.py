@@ -28,29 +28,109 @@ def create_hexagonal_board(size, radius=2):
 
 
 def assign_resources_numbers(tiles, robber):
-    """Assign resources and numbers to tiles"""
-    resources = RESOURCES.copy()
-    random.shuffle(resources)
+    """Assign resources and numbers with constraints - EXACT copy from main.py"""
+    all_resources = RESOURCES.copy()
+    random.shuffle(all_resources)
 
     for i, tile in enumerate(tiles):
-        if i < len(resources):
-            tile.resource = resources[i]
+        if i < len(all_resources):
+            tile.resource = all_resources[i]
+        else:
+            tile.resource = "forest"
 
-    # Place robber on desert
+    desert_tile = None
     for tile in tiles:
         if tile.resource == "desert":
             tile.number = None
+            desert_tile = tile
             robber.move_to_tile(tile)
             break
 
-    # Assign numbers to non-desert tiles
     non_desert_tiles = [t for t in tiles if t.resource != "desert"]
-    nums = NUMBER_TOKENS.copy()
-    random.shuffle(nums)
+    assign_numbers_with_constraints(non_desert_tiles)
 
-    for i, tile in enumerate(non_desert_tiles):
+
+def assign_numbers_with_constraints(tiles):
+    """Assign numbers ensuring 6s and 8s are not adjacent - EXACT copy from main.py"""
+    nums = NUMBER_TOKENS.copy()
+    red_numbers = [6, 8]
+
+    sixes = [n for n in nums if n == 6]
+    eights = [n for n in nums if n == 8]
+    red_nums_to_place = sixes + eights
+
+    max_attempts = 1000
+    for attempt in range(max_attempts):
+        for tile in tiles:
+            tile.number = None
+
+        success = True
+        remaining_nums = nums.copy()
+
+        for red_num in red_nums_to_place:
+            valid_tiles = []
+            for tile in tiles:
+                if tile.number is None and can_place_red_number(tile, red_num):
+                    valid_tiles.append(tile)
+
+            if not valid_tiles:
+                success = False
+                break
+
+            chosen_tile = random.choice(valid_tiles)
+            chosen_tile.number = red_num
+            remaining_nums.remove(red_num)
+
+        if not success:
+            continue
+
+        # Shuffle and assign remaining numbers
+        random.shuffle(remaining_nums)
+        remaining_tiles = [t for t in tiles if t.number is None]
+
+        for i, tile in enumerate(remaining_tiles):
+            if i < len(remaining_nums):
+                tile.number = remaining_nums[i]
+
+        if all(t.number is not None for t in tiles if t.resource != "desert"):
+            if is_board_valid(tiles):
+                return
+
+    print("Warning: Could not assign numbers without red adjacency.")
+    random.shuffle(nums)
+    for i, tile in enumerate(tiles):
         if i < len(nums):
             tile.number = nums[i]
+
+
+def can_place_red_number(tile, red_number):
+    """Check if a red number (6 or 8) can be placed on a tile - EXACT copy from main.py"""
+    red_numbers = [6, 8]
+
+    for neighbor in tile.neighbors:
+        if neighbor.number in red_numbers:
+            return False
+
+    return True
+
+
+def validate_board(tiles):
+    """Validate that no red numbers (6,8) are adjacent - EXACT copy from main.py"""
+    red_numbers = [6, 8]
+    violations = []
+
+    for tile in tiles:
+        if tile.number in red_numbers:
+            for neighbor in tile.neighbors:
+                if neighbor.number in red_numbers:
+                    violations.append(f"Red numbers adjacent: Tile ({tile.q},{tile.r}) has {tile.number}")
+
+    return violations
+
+
+def is_board_valid(tiles):
+    """Check if board is valid - EXACT copy from main.py"""
+    return len(validate_board(tiles)) == 0
 
 
 class GameServer:
@@ -106,10 +186,17 @@ class GameServer:
         self.game_system = GameSystem(self.game_board, players)
         self.game_system.robber = robber
 
+        # Skip initial placement phase for testing (like main.py when you start playing)
+        self.game_system.game_phase = "NORMAL_PLAY"
+        self.game_system.turn_phase = "ROLL_DICE"
+        self.game_system.dice_rolled = False
+
         print("✓ Game initialized!")
         print(f"  {len(tiles)} tiles created")
         print(f"  {len(self.game_board.ports)} ports generated")
         print(f"  4 players ready")
+        print(f"  Game phase: {self.game_system.game_phase}")
+        print(f"  Turn phase: {self.game_system.turn_phase}")
 
     def serialize_game_state(self, player_index):
         """Convert game state to JSON for a specific player"""
@@ -124,6 +211,8 @@ class GameServer:
                 'current_turn': current_player_index,
                 'dice_rolled': self.game_system.dice_rolled,
                 'last_roll': self.game_system.last_dice_roll,
+                'game_phase': self.game_system.game_phase,
+                'turn_phase': self.game_system.turn_phase,
 
                 # Player's private resources
                 'my_resources': {
@@ -256,27 +345,39 @@ class GameServer:
             print(f"✓ Player {player_index + 1} disconnected")
 
     def process_action(self, player_index, action):
-        """Process an action from a client"""
+        """Process an action from a client - EXACT logic from main.py"""
         with self.state_lock:
             player = self.game_system.players[player_index]
             current_player = self.game_system.get_current_player()
 
             # Only allow actions from current player
             if player != current_player:
+                print(f"  [DEBUG] Player {player_index + 1} tried to act, but it's Player {self.game_system.players.index(current_player) + 1}'s turn")
                 return
 
+            print(f"  [DEBUG] Processing action '{action}' from Player {player_index + 1}")
+
             if action == "ROLL_DICE":
-                if self.game_system.can_roll_dice():
+                can_roll = self.game_system.can_roll_dice()
+                print(f"  [DEBUG] can_roll_dice() = {can_roll}, dice_rolled = {self.game_system.dice_rolled}")
+                if can_roll:
                     result = self.game_system.roll_dice()
                     if result:
-                        print(f"  Player {player_index + 1} rolled: {result[2]} ({result[0]}+{result[1]})")
+                        print(f"  ✓ Player {player_index + 1} rolled: {result[2]} ({result[0]}+{result[1]})")
+                    else:
+                        print(f"  ✗ roll_dice() returned None!")
+                else:
+                    print(f"  ✗ Cannot roll dice (already rolled or wrong phase)")
 
             elif action == "END_TURN":
                 success, message = self.game_system.end_turn()
+                print(f"  [DEBUG] end_turn() = {success}, message = '{message}'")
                 if success:
                     new_player = self.game_system.get_current_player()
                     new_index = self.game_system.players.index(new_player)
-                    print(f"  Turn ended. Now: Player {new_index + 1}'s turn")
+                    print(f"  ✓ Turn ended. Now: Player {new_index + 1}'s turn")
+                else:
+                    print(f"  ✗ Could not end turn: {message}")
 
     def start(self):
         """Start the server"""
