@@ -986,13 +986,24 @@ class GameSystem:
                     self.game_phase = "INITIAL_PLACEMENT_2"
                     # In second round, go in reverse order (last player goes first)
                     self.current_player_index = len(self.players) - 1
+                    self.waiting_for_road = False  # Reset waiting_for_road for new round
+                    print("\n" + "="*60)
                     print("=== INITIAL PLACEMENT ROUND 2 ===")
-                    print("Players place in reverse order")
+                    print("Players place in REVERSE order: 4 → 3 → 2 → 1")
+                    print(f"Starting with Player {self.current_player_index + 1}")
+                    print("="*60 + "\n")
 
             elif self.game_phase == "INITIAL_PLACEMENT_2":
                 # In second round, go in reverse order
                 self.current_player_index -= 1
+                print(f"  [Round 2] Moving to previous player: Player {self.current_player_index + 1}")
+
                 if self.current_player_index < 0:
+                    print("\n" + "="*60)
+                    print("=== INITIAL PLACEMENT COMPLETE ===")
+                    print("Starting normal gameplay...")
+                    print("="*60 + "\n")
+
                     self.game_phase = "NORMAL_PLAY"
                     self.turn_phase = "ROLL_DICE"
                     self.current_player_index = 0
@@ -1449,10 +1460,13 @@ class GameSystem:
             return False, "Not in initial placement phase"
 
         if self.waiting_for_road:
+            print(f"  [DEBUG] Cannot place settlement - waiting_for_road is True")
             return False, "Must place road first"
 
         placements = self.player_initial_placements[player]
         expected_settlements = 1 if self.game_phase == "INITIAL_PLACEMENT_1" else 2
+
+        print(f"  [DEBUG] Phase: {self.game_phase}, Player has {placements['settlements']} settlements, expected: {expected_settlements}")
 
         if placements["settlements"] >= expected_settlements:
             return False, f"Already placed {expected_settlements} settlement(s) this round"
