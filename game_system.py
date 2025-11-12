@@ -595,99 +595,67 @@ class GameBoard:
 
 
     def generate_ports(self):
-        """Generate 9 trading ports on COASTAL edges (where land meets ocean)"""
+        """Generate 9 trading ports at FIXED positions on outer perimeter
 
-        # CRITICAL FIX: Ports must be on COASTAL edges, not internal edges!
-        # A coastal edge is an edge of an outer-ring hex that faces the OCEAN
-        # (has no neighboring hex on the other side)
+        Port POSITIONS are fixed - only their TYPES are randomized.
+        This matches the physical Catan board where the frame has 9 fixed notches
+        and you randomize which port piece goes in which notch.
+        """
 
-        # Hex neighbor offsets in axial coordinates
-        HEX_DIRECTIONS = [
-            (+1, 0), (+1, -1), (0, -1),  # East, Southeast, Southwest
-            (-1, 0), (-1, +1), (0, +1)   # West, Northwest, Northeast
+        # FIXED PORT POSITIONS for standard Catan board (radius 2)
+        # Each position is (hex_q, hex_r, edge_direction)
+        # Edge directions: 0=E, 1=SE, 2=SW, 3=W, 4=NW, 5=NE
+        # These 9 positions are evenly distributed around the outer perimeter
+        FIXED_PORT_POSITIONS = [
+            (1, -2, 2),   # Port 1: Top area
+            (2, -1, 0),   # Port 2: Northeast area
+            (2, 0, 1),    # Port 3: East area
+            (1, 1, 1),    # Port 4: Southeast area
+            (-1, 2, 3),   # Port 5: South area
+            (-2, 2, 3),   # Port 6: Southwest area
+            (-2, 1, 4),   # Port 7: West area
+            (-2, 0, 5),   # Port 8: Northwest area
+            (0, -2, 2),   # Port 9: North area
         ]
 
         # Create lookup map
         tile_map = {(tile.q, tile.r): tile for tile in self.tiles}
 
-        # Step 1: Find the radius of the board (max distance from center)
-        max_distance = 0
-        for tile in self.tiles:
-            # Axial distance from center (0,0) in hex coordinates
-            distance = max(abs(tile.q), abs(tile.r), abs(-tile.q - tile.r))
-            max_distance = max(max_distance, distance)
+        print("\n=== GENERATING PORTS AT FIXED POSITIONS ===")
+        print(f"Using {len(FIXED_PORT_POSITIONS)} predefined port positions")
 
-        print(f"[PORT DEBUG] Board radius: {max_distance}")
-        print(f"[PORT DEBUG] Total tiles: {len(self.tiles)}")
+        # For each fixed position, find the corresponding edge
+        port_edges = []
 
-        # Step 2: Find ONLY tiles on the outer ring (distance == max_distance)
-        outer_ring_tiles = []
-        all_tiles_by_distance = {}
+        for port_q, port_r, edge_dir in FIXED_PORT_POSITIONS:
+            # Find the tile at this position
+            if (port_q, port_r) not in tile_map:
+                print(f"⚠ Warning: Port position ({port_q}, {port_r}) not found in board!")
+                continue
 
-        for tile in self.tiles:
-            distance = max(abs(tile.q), abs(tile.r), abs(-tile.q - tile.r))
-            if distance not in all_tiles_by_distance:
-                all_tiles_by_distance[distance] = []
-            all_tiles_by_distance[distance].append((tile.q, tile.r))
+            tile = tile_map[(port_q, port_r)]
 
-            if distance == max_distance:
-                outer_ring_tiles.append(tile)
+            # Get the two vertices for this edge
+            corners = tile.get_corners()
+            v1_x, v1_y = round(corners[edge_dir][0], 1), round(corners[edge_dir][1], 1)
+            v2_x, v2_y = round(corners[(edge_dir + 1) % 6][0], 1), round(corners[(edge_dir + 1) % 6][1], 1)
 
-        # Show tile distribution by distance
-        for dist in sorted(all_tiles_by_distance.keys()):
-            print(f"[PORT DEBUG]   Distance {dist}: {len(all_tiles_by_distance[dist])} tiles")
+            # Find the edge object that matches these vertices
+            edge_found = None
+            for edge in self.edges:
+                e1_x, e1_y = round(edge.vertex1.x, 1), round(edge.vertex1.y, 1)
+                e2_x, e2_y = round(edge.vertex2.x, 1), round(edge.vertex2.y, 1)
 
-        print(f"[PORT DEBUG] Outer ring tiles (distance={max_distance}): {len(outer_ring_tiles)}")
-        print(f"[PORT DEBUG] Outer ring coordinates: {[(t.q, t.r) for t in outer_ring_tiles]}")
+                # Check if this edge matches (either direction)
+                if ((e1_x, e1_y) == (v1_x, v1_y) and (e2_x, e2_y) == (v2_x, v2_y)) or \
+                   ((e1_x, e1_y) == (v2_x, v2_y) and (e2_x, e2_y) == (v1_x, v1_y)):
+                    edge_found = edge
+                    break
 
-        # Step 3: For each OUTER RING tile only, find edges that face OUTWARD
-        coastal_edges = []
-
-        for tile in outer_ring_tiles:  # ← ONLY outer ring tiles, not all tiles!
-            # Check each of the 6 possible neighbors
-            for dir_idx, (dq, dr) in enumerate(HEX_DIRECTIONS):
-                neighbor_q = tile.q + dq
-                neighbor_r = tile.r + dr
-
-                # If there's NO hex in this direction, this edge faces outward (ocean)
-                if (neighbor_q, neighbor_r) not in tile_map:
-                    # Get the two vertices for this edge
-                    corners = tile.get_corners()
-                    v1_x, v1_y = round(corners[dir_idx][0], 1), round(corners[dir_idx][1], 1)
-                    v2_x, v2_y = round(corners[(dir_idx + 1) % 6][0], 1), round(corners[(dir_idx + 1) % 6][1], 1)
-
-                    # Find the edge object that matches these vertices
-                    for edge in self.edges:
-                        e1_x, e1_y = round(edge.vertex1.x, 1), round(edge.vertex1.y, 1)
-                        e2_x, e2_y = round(edge.vertex2.x, 1), round(edge.vertex2.y, 1)
-
-                        # Check if this edge matches (either direction)
-                        if ((e1_x, e1_y) == (v1_x, v1_y) and (e2_x, e2_y) == (v2_x, v2_y)) or \
-                           ((e1_x, e1_y) == (v2_x, v2_y) and (e2_x, e2_y) == (v1_x, v1_y)):
-                            coastal_edges.append((edge, tile, dir_idx))
-                            break
-
-        print(f"[PORT DEBUG] Coastal (outer perimeter) edges found: {len(coastal_edges)} (should be {6 * max_distance} for radius {max_distance})")
-
-        if len(coastal_edges) < 9:
-            print(f"⚠ Warning: Only {len(coastal_edges)} coastal edges found (need 9)")
-            return
-
-        # Sort coastal edges by angle around the perimeter for consistent ordering
-        import math
-        def get_angle(edge_tuple):
-            edge = edge_tuple[0]
-            mid_x = (edge.vertex1.x + edge.vertex2.x) / 2
-            mid_y = (edge.vertex1.y + edge.vertex2.y) / 2
-            return math.atan2(mid_y, mid_x)
-
-        coastal_edges.sort(key=get_angle)
-
-        # Select 9 FIXED positions evenly distributed around the coast
-        num_coastal = len(coastal_edges)
-        step = num_coastal / 9.0
-        fixed_indices = [int(i * step) for i in range(9)]
-        fixed_coastal_edges = [coastal_edges[i] for i in fixed_indices]
+            if edge_found:
+                port_edges.append((edge_found, tile, edge_dir))
+            else:
+                print(f"⚠ Warning: Could not find edge for port at ({port_q}, {port_r}) edge {edge_dir}")
 
         # Create port types: 4 generic 3:1, 5 specialized 2:1
         port_types = [
@@ -698,19 +666,24 @@ class GameBoard:
         # RANDOMIZE ONLY THE TYPES (not the positions!)
         random.shuffle(port_types)
 
-        # Assign shuffled types to the FIXED coastal positions
-        print("\n=== PORT PLACEMENT ON OUTER PERIMETER ONLY ===")
-        for i, (edge, tile, direction) in enumerate(fixed_coastal_edges):
+        print(f"\n✓ Found {len(port_edges)} valid port positions")
+        print("\n=== PORT PLACEMENT (FIXED POSITIONS, RANDOMIZED TYPES) ===")
+
+        # Assign shuffled types to the FIXED positions
+        for i, (edge, tile, edge_dir) in enumerate(port_edges):
+            if i >= len(port_types):
+                break
+
             port = Port(port_types[i], edge.vertex1, edge.vertex2)
             self.ports.append(port)
 
-            # Calculate distance of this tile from center
+            # Calculate distance of this tile from center (should always be 2 for outer ring)
             tile_dist = max(abs(tile.q), abs(tile.r), abs(-tile.q - tile.r))
 
-            print(f"  Port {i+1}: {port_types[i].value:12s} | hex ({tile.q:2d},{tile.r:2d}) dist={tile_dist} | edge dir={direction}")
+            print(f"  Port {i+1}: {port_types[i].value:12s} | hex ({tile.q:2d},{tile.r:2d}) | edge dir={edge_dir} | dist={tile_dist}")
 
-        print(f"\n✓ {len(self.ports)} ports placed")
-        print(f"✓ All ports on tiles with distance={max_distance} (outer perimeter)")
+        print(f"\n✓ {len(self.ports)} ports placed at FIXED outer perimeter positions")
+        print(f"✓ Port positions NEVER change - only types are randomized each game")
         print()
 
     def get_player_ports(self, player):
