@@ -166,30 +166,43 @@ class GameServer:
 
         self.game_board = GameBoard(tiles)
 
-        # Create 4 players
+        # Debug: Print port info
+        print(f"\n[SERVER] Port generation:")
+        print(f"  Total edges in board: {len(self.game_board.edges)}")
+        print(f"  Ports generated: {len(self.game_board.ports)}")
+
+        # Check if ports are on coastal edges
+        tile_map = {(tile.q, tile.r): tile for tile in tiles}
+        HEX_DIRECTIONS = [(+1, 0), (+1, -1), (0, -1), (-1, 0), (-1, +1), (0, +1)]
+
+        coastal_edge_count = 0
+        for tile in tiles:
+            for dir_idx, (dq, dr) in enumerate(HEX_DIRECTIONS):
+                neighbor_q = tile.q + dq
+                neighbor_r = tile.r + dr
+                if (neighbor_q, neighbor_r) not in tile_map:
+                    coastal_edge_count += 1
+
+        print(f"  Coastal edges available: {coastal_edge_count}")
+        print(f"  Ports should only be on coastal edges (where land meets ocean)\n")
+
+        # Create 4 players - EXACT same as main.py
         players = [
-            Player("Player 1 (Red)", (255, 50, 50)),
-            Player("Player 2 (Blue)", (50, 50, 255)),
-            Player("Player 3 (Yellow)", (255, 255, 50)),
-            Player("Player 4 (White)", (255, 255, 255))
+            Player("Player 1", (255, 50, 50)),
+            Player("Player 2", (50, 50, 255)),
+            Player("Player 3", (255, 255, 50)),
+            Player("Player 4", (255, 255, 255))
         ]
 
-        # Give starting resources for testing
-        for player in players:
-            player.add_resource(ResourceType.WOOD, 3)
-            player.add_resource(ResourceType.BRICK, 3)
-            player.add_resource(ResourceType.WHEAT, 2)
-            player.add_resource(ResourceType.SHEEP, 2)
-            player.add_resource(ResourceType.ORE, 1)
+        # DO NOT give starting resources - players start with 0 resources
+        # Resources are earned by placing settlements and rolling dice
 
-        # Create game system
+        # Create game system - EXACT same as main.py
         self.game_system = GameSystem(self.game_board, players)
         self.game_system.robber = robber
 
-        # Skip initial placement phase for testing (like main.py when you start playing)
-        self.game_system.game_phase = "NORMAL_PLAY"
-        self.game_system.turn_phase = "ROLL_DICE"
-        self.game_system.dice_rolled = False
+        # DO NOT skip initial placement - game should start with settlement placement
+        # GameSystem defaults to "INITIAL_PLACEMENT_1" phase which is correct
 
         print("✓ Game initialized!")
         print(f"  {len(tiles)} tiles created")
