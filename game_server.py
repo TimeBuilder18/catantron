@@ -226,6 +226,7 @@ class GameServer:
                 'last_roll': self.game_system.last_dice_roll,
                 'game_phase': self.game_system.game_phase,
                 'turn_phase': self.game_system.turn_phase,
+                'waiting_for_road': self.game_system.waiting_for_road,
 
                 # Player's private resources
                 'my_resources': {
@@ -381,6 +382,79 @@ class GameServer:
                         print(f"  ✗ roll_dice() returned None!")
                 else:
                     print(f"  ✗ Cannot roll dice (already rolled or wrong phase)")
+
+            elif action.startswith("PLACE_SETTLEMENT"):
+                # Parse coordinates from action string
+                parts = action.split()
+                if len(parts) == 3:
+                    try:
+                        x, y = float(parts[1]), float(parts[2])
+                        x, y = round(x, 1), round(y, 1)
+
+                        # Find the vertex at these coordinates
+                        vertex = None
+                        for v in self.game_board.vertices:
+                            if round(v.x, 1) == x and round(v.y, 1) == y:
+                                vertex = v
+                                break
+
+                        if vertex:
+                            # Use proper initial placement method
+                            success, message = self.game_system.try_place_initial_settlement(vertex, player)
+                            if success:
+                                player.victory_points += 1  # Settlement = 1 VP
+                                print(f"  ✓ Player {player_index + 1} placed settlement at ({x}, {y})")
+                                print(f"    → {message}")
+                            else:
+                                print(f"  ✗ Player {player_index + 1} cannot place settlement: {message}")
+                        else:
+                            print(f"  ✗ Vertex not found at ({x}, {y})")
+                    except ValueError:
+                        print(f"  ✗ Invalid coordinates in action: {action}")
+
+            elif action.startswith("PLACE_ROAD"):
+                # Parse coordinates from action string
+                parts = action.split()
+                if len(parts) == 5:
+                    try:
+                        x1, y1 = float(parts[1]), float(parts[2])
+                        x2, y2 = float(parts[3]), float(parts[4])
+                        x1, y1 = round(x1, 1), round(y1, 1)
+                        x2, y2 = round(x2, 1), round(y2, 1)
+
+                        # Find the edge at these coordinates
+                        edge = None
+                        for e in self.game_board.edges:
+                            ex1, ey1 = round(e.vertex1.x, 1), round(e.vertex1.y, 1)
+                            ex2, ey2 = round(e.vertex2.x, 1), round(e.vertex2.y, 1)
+
+                            # Check both directions
+                            if ((ex1, ey1) == (x1, y1) and (ex2, ey2) == (x2, y2)) or \
+                               ((ex1, ey1) == (x2, y2) and (ex2, ey2) == (x1, y1)):
+                                edge = e
+                                break
+
+                        if edge:
+                            # Use proper initial placement method
+                            success, message = self.game_system.try_place_initial_road(edge, player)
+                            if success:
+                                print(f"  ✓ Player {player_index + 1} placed road")
+                                print(f"    → {message}")
+
+                                # Check if this player's initial placement is complete
+                                # If so, advance turn
+                                if not self.game_system.waiting_for_road:
+                                    # Automatically end turn after road placement in initial phase
+                                    self.game_system.end_turn()
+                                    new_player = self.game_system.get_current_player()
+                                    new_index = self.game_system.players.index(new_player)
+                                    print(f"  ✓ Initial placement complete. Now: Player {new_index + 1}'s turn")
+                            else:
+                                print(f"  ✗ Player {player_index + 1} cannot place road: {message}")
+                        else:
+                            print(f"  ✗ Edge not found at ({x1}, {y1}) - ({x2}, {y2})")
+                    except ValueError:
+                        print(f"  ✗ Invalid coordinates in action: {action}")
 
             elif action == "END_TURN":
                 success, message = self.game_system.end_turn()
