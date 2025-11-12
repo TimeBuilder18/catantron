@@ -68,11 +68,15 @@ class GameServer:
 
     def initialize_game(self):
         """Set up the game board and system"""
-        print("Initializing game board...")
+        print("[SERVER] Initializing game board...")
+        import time
+        start = time.time()
 
         # Create board
+        print("[SERVER] Creating hexagonal tiles...")
         tile_size = 50
         tiles = create_hexagonal_board(tile_size, radius=2)
+        print(f"[SERVER] ✓ Created {len(tiles)} tiles in {time.time()-start:.2f}s")
 
         for t in tiles:
             t.find_neighbors(tiles)
@@ -119,7 +123,7 @@ class GameServer:
             state = {
                 'current_turn': current_player_index,
                 'dice_rolled': self.game_system.dice_rolled,
-                'last_roll': self.game_system.last_roll,
+                'last_roll': self.game_system.last_dice_roll,
 
                 # Player's private resources
                 'my_resources': {

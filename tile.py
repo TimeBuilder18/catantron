@@ -1,5 +1,11 @@
 import math
-import pygame
+# Pygame is only needed for drawing - make it optional for server
+try:
+    import pygame
+    HAS_PYGAME = True
+except ImportError:
+    HAS_PYGAME = False
+
 from game_system import ResourceType
 
 DIRECTIONS = [
@@ -53,6 +59,9 @@ class Tile:
         return corners
 
     def draw(self, surface, fill_color, offset=(0, 0), show_coords=False):
+        if not HAS_PYGAME:
+            raise ImportError("pygame is required for drawing - install with: pip3 install pygame")
+
         # Draw filled hexagon
         corners = self.get_corners(offset)
         pygame.draw.polygon(surface, fill_color, corners)
