@@ -54,6 +54,9 @@ class ClientWindow:
         self.build_mode = None
         self.show_coords = False
 
+        # Board rendering offset (for click detection)
+        self.board_offset = (0, 0)
+
     def position_window(self):
         """Position window based on player index - adjusted for 1600x1000 windows"""
         # These windows are much larger, so we may need to overlap or stack them
@@ -218,12 +221,14 @@ class ClientWindow:
                 phase_color = (100, 255, 100)
 
                 # Show different instructions based on game phase
+                waiting_for_road = self.game_state.get('waiting_for_road', False)
+
                 if game_phase in ["INITIAL_PLACEMENT_1", "INITIAL_PLACEMENT_2"]:
                     if waiting_for_road:
-                        phase_desc = "▶ Place road (click edge near settlement)"
+                        phase_desc = "▶ Place a road (click edge adjacent to settlement)"
                     else:
-                        round_num = "first" if game_phase == "INITIAL_PLACEMENT_1" else "second"
-                        phase_desc = f"▶ Place {round_num} settlement (click vertex)"
+                        round_name = "first" if game_phase == "INITIAL_PLACEMENT_1" else "second"
+                        phase_desc = f"▶ Place {round_name} settlement (click vertex)"
                 elif not dice_rolled:
                     phase_desc = "▶ Roll dice (D)"
                 else:
@@ -343,6 +348,9 @@ class ClientWindow:
                 offset = (600 - board_cx, self.height / 2 - board_cy)
             else:
                 offset = (0, 0)
+
+            # Store offset for click detection
+            self.board_offset = offset
 
             # Draw tiles (same as main.py)
             for tile in tiles:
@@ -507,102 +515,77 @@ class ClientWindow:
         if not self.game_state:
             return
 
-        # Convert screen coordinates to game coordinates
-        mx, my = pos
-
-        # Skip if clicking on right panel
-        if mx >= 1200:
-            return
-
         with self.state_lock:
+            mouse_x, mouse_y = pos
             game_phase = self.game_state.get('game_phase', 'NORMAL_PLAY')
+            current_turn = self.game_state.get('current_turn', 0)
+            waiting_for_road = self.game_state.get('waiting_for_road', False)
 
-            # Get offset (same calculation as draw_board)
-            from tile import Tile
-            tiles = []
-            for tile_data in self.game_state['tiles']:
-                tile = Tile(tile_data['q'], tile_data['r'], 50, tile_data['resource'], tile_data['number'])
-                tiles.append(tile)
+            # Only allow clicks on your turn
+            if current_turn != self.player_index:
+                self.add_message("Not your turn!", (255, 100, 100))
+                return
 
-            if tiles:
-                xs = [t.x for t in tiles]
-                ys = [t.y for t in tiles]
-                min_x, max_x = min(xs), max(xs)
-                min_y, max_y = min(ys), max(ys)
-                board_cx, board_cy = (min_x + max_x) / 2, (min_y + max_y) / 2
-                offset = (600 - board_cx, self.height / 2 - board_cy)
-            else:
-                offset = (0, 0)
-
-            # Convert to game coordinates
-            game_x = mx - offset[0]
-            game_y = my - offset[1]
-
-            # Find nearest vertex (for settlements/cities)
-            nearest_vertex = None
-            nearest_vertex_dist = float('inf')
-
-            for vertex_data in self.game_state['vertices']:
-                vx, vy = vertex_data['x'], vertex_data['y']
-                dist = ((game_x - vx)**2 + (game_y - vy)**2)**0.5
-                if dist < nearest_vertex_dist:
-                    nearest_vertex_dist = dist
-                    nearest_vertex = (vx, vy)
-
-            # Find nearest edge (for roads)
-            nearest_edge = None
-            nearest_edge_dist = float('inf')
-
-            for edge_data in self.game_state['edges']:
-                x1, y1 = edge_data['x1'], edge_data['y1']
-                x2, y2 = edge_data['x2'], edge_data['y2']
-
-                # Distance from point to line segment
-                dx, dy = x2 - x1, y2 - y1
-                length_sq = dx*dx + dy*dy
-                if length_sq == 0:
-                    dist = ((game_x - x1)**2 + (game_y - y1)**2)**0.5
-                else:
-                    t = max(0, min(1, ((game_x - x1) * dx + (game_y - y1) * dy) / length_sq))
-                    proj_x = x1 + t * dx
-                    proj_y = y1 + t * dy
-                    dist = ((game_x - proj_x)**2 + (game_y - proj_y)**2)**0.5
-
-                if dist < nearest_edge_dist:
-                    nearest_edge_dist = dist
-                    nearest_edge = (x1, y1, x2, y2)
-
-            # Decide what to place based on distance and game phase
+            # During initial placement
             if game_phase in ["INITIAL_PLACEMENT_1", "INITIAL_PLACEMENT_2"]:
-                # Initial placement: settlement then road
-                if nearest_vertex and nearest_vertex_dist < 15:  # 15 pixel tolerance
-                    vx, vy = nearest_vertex
-                    self.send_action(f"PLACE_SETTLEMENT:{vx},{vy}")
-                    self.add_message("Placing settlement...", (100, 255, 100))
-                elif nearest_edge and nearest_edge_dist < 10:  # 10 pixel tolerance
-                    x1, y1, x2, y2 = nearest_edge
-                    self.send_action(f"PLACE_ROAD:{x1},{y1},{x2},{y2}")
-                    self.add_message("Placing road...", (255, 200, 100))
-            else:
-                # Normal play: check what player wants to build
-                # For now, default to settlement if clicking vertex, road if clicking edge
-                if nearest_vertex and nearest_vertex_dist < 15:
-                    vx, vy = nearest_vertex
-                    # Check if there's already a settlement here (then upgrade to city)
-                    has_settlement = any(
-                        abs(s['x'] - vx) < 1 and abs(s['y'] - vy) < 1
-                        for s in self.game_state['settlements']
-                    )
-                    if has_settlement:
-                        self.send_action(f"PLACE_CITY:{vx},{vy}")
-                        self.add_message("Upgrading to city...", (255, 215, 0))
+                # If waiting for road, click edges to place roads
+                if waiting_for_road:
+                    # Find closest edge to click
+                    edges = self.game_state.get('edges', [])
+                    closest_edge = None
+                    min_distance = float('inf')
+                    click_radius = 20  # pixels - slightly larger for edges
+
+                    for edge_data in edges:
+                        # Apply board offset
+                        x1 = edge_data['x1'] + self.board_offset[0]
+                        y1 = edge_data['y1'] + self.board_offset[1]
+                        x2 = edge_data['x2'] + self.board_offset[0]
+                        y2 = edge_data['y2'] + self.board_offset[1]
+
+                        # Calculate distance from click to edge (point-to-line-segment distance)
+                        # Use edge midpoint for simplicity
+                        mid_x = (x1 + x2) / 2
+                        mid_y = (y1 + y2) / 2
+                        distance = ((mouse_x - mid_x) ** 2 + (mouse_y - mid_y) ** 2) ** 0.5
+
+                        if distance < min_distance and distance <= click_radius:
+                            min_distance = distance
+                            closest_edge = edge_data
+
+                    if closest_edge:
+                        # Send placement action to server (using original coordinates without offset)
+                        action = f"PLACE_ROAD {closest_edge['x1']} {closest_edge['y1']} {closest_edge['x2']} {closest_edge['y2']}"
+                        self.send_action(action)
+                        self.add_message("Placing road...", (100, 255, 100))
                     else:
-                        self.send_action(f"PLACE_SETTLEMENT:{vx},{vy}")
-                        self.add_message("Building settlement...", (100, 255, 100))
-                elif nearest_edge and nearest_edge_dist < 10:
-                    x1, y1, x2, y2 = nearest_edge
-                    self.send_action(f"PLACE_ROAD:{x1},{y1},{x2},{y2}")
-                    self.add_message("Building road...", (255, 200, 100))
+                        self.add_message("Click closer to an edge", (255, 200, 100))
+                else:
+                    # Waiting for settlement - click vertices
+                    vertices = self.game_state.get('vertices', [])
+                    closest_vertex = None
+                    min_distance = float('inf')
+                    click_radius = 15  # pixels
+
+                    for vertex_data in vertices:
+                        # Apply board offset
+                        vx = vertex_data['x'] + self.board_offset[0]
+                        vy = vertex_data['y'] + self.board_offset[1]
+
+                        # Calculate distance to mouse click
+                        distance = ((mouse_x - vx) ** 2 + (mouse_y - vy) ** 2) ** 0.5
+
+                        if distance < min_distance and distance <= click_radius:
+                            min_distance = distance
+                            closest_vertex = vertex_data
+
+                    if closest_vertex:
+                        # Send placement action to server (using original coordinates without offset)
+                        action = f"PLACE_SETTLEMENT {closest_vertex['x']} {closest_vertex['y']}"
+                        self.send_action(action)
+                        self.add_message("Placing settlement...", (100, 255, 100))
+                    else:
+                        self.add_message("Click closer to a vertex", (255, 200, 100))
 
     def handle_keypress(self, key):
         """Handle keyboard input"""
