@@ -461,13 +461,105 @@ class ClientWindow:
 
     def handle_mouseclick(self, pos):
         """Handle mouse clicks for building placement"""
-        # TODO: Implement building placement
-        # For now just show a message
-        with self.state_lock:
-            game_phase = self.game_state.get('game_phase', 'NORMAL_PLAY') if self.game_state else 'NORMAL_PLAY'
+        if not self.game_state:
+            return
 
+        # Convert screen coordinates to game coordinates
+        mx, my = pos
+
+        # Skip if clicking on right panel
+        if mx >= 1200:
+            return
+
+        with self.state_lock:
+            game_phase = self.game_state.get('game_phase', 'NORMAL_PLAY')
+
+            # Get offset (same calculation as draw_board)
+            from tile import Tile
+            tiles = []
+            for tile_data in self.game_state['tiles']:
+                tile = Tile(tile_data['q'], tile_data['r'], 50, tile_data['resource'], tile_data['number'])
+                tiles.append(tile)
+
+            if tiles:
+                xs = [t.x for t in tiles]
+                ys = [t.y for t in tiles]
+                min_x, max_x = min(xs), max(xs)
+                min_y, max_y = min(ys), max(ys)
+                board_cx, board_cy = (min_x + max_x) / 2, (min_y + max_y) / 2
+                offset = (600 - board_cx, self.height / 2 - board_cy)
+            else:
+                offset = (0, 0)
+
+            # Convert to game coordinates
+            game_x = mx - offset[0]
+            game_y = my - offset[1]
+
+            # Find nearest vertex (for settlements/cities)
+            nearest_vertex = None
+            nearest_vertex_dist = float('inf')
+
+            for vertex_data in self.game_state['vertices']:
+                vx, vy = vertex_data['x'], vertex_data['y']
+                dist = ((game_x - vx)**2 + (game_y - vy)**2)**0.5
+                if dist < nearest_vertex_dist:
+                    nearest_vertex_dist = dist
+                    nearest_vertex = (vx, vy)
+
+            # Find nearest edge (for roads)
+            nearest_edge = None
+            nearest_edge_dist = float('inf')
+
+            for edge_data in self.game_state['edges']:
+                x1, y1 = edge_data['x1'], edge_data['y1']
+                x2, y2 = edge_data['x2'], edge_data['y2']
+
+                # Distance from point to line segment
+                dx, dy = x2 - x1, y2 - y1
+                length_sq = dx*dx + dy*dy
+                if length_sq == 0:
+                    dist = ((game_x - x1)**2 + (game_y - y1)**2)**0.5
+                else:
+                    t = max(0, min(1, ((game_x - x1) * dx + (game_y - y1) * dy) / length_sq))
+                    proj_x = x1 + t * dx
+                    proj_y = y1 + t * dy
+                    dist = ((game_x - proj_x)**2 + (game_y - proj_y)**2)**0.5
+
+                if dist < nearest_edge_dist:
+                    nearest_edge_dist = dist
+                    nearest_edge = (x1, y1, x2, y2)
+
+            # Decide what to place based on distance and game phase
             if game_phase in ["INITIAL_PLACEMENT_1", "INITIAL_PLACEMENT_2"]:
-                self.add_message("Settlement placement: Coming soon!", (255, 200, 100))
+                # Initial placement: settlement then road
+                if nearest_vertex and nearest_vertex_dist < 15:  # 15 pixel tolerance
+                    vx, vy = nearest_vertex
+                    self.send_action(f"PLACE_SETTLEMENT:{vx},{vy}")
+                    self.add_message("Placing settlement...", (100, 255, 100))
+                elif nearest_edge and nearest_edge_dist < 10:  # 10 pixel tolerance
+                    x1, y1, x2, y2 = nearest_edge
+                    self.send_action(f"PLACE_ROAD:{x1},{y1},{x2},{y2}")
+                    self.add_message("Placing road...", (255, 200, 100))
+            else:
+                # Normal play: check what player wants to build
+                # For now, default to settlement if clicking vertex, road if clicking edge
+                if nearest_vertex and nearest_vertex_dist < 15:
+                    vx, vy = nearest_vertex
+                    # Check if there's already a settlement here (then upgrade to city)
+                    has_settlement = any(
+                        abs(s['x'] - vx) < 1 and abs(s['y'] - vy) < 1
+                        for s in self.game_state['settlements']
+                    )
+                    if has_settlement:
+                        self.send_action(f"PLACE_CITY:{vx},{vy}")
+                        self.add_message("Upgrading to city...", (255, 215, 0))
+                    else:
+                        self.send_action(f"PLACE_SETTLEMENT:{vx},{vy}")
+                        self.add_message("Building settlement...", (100, 255, 100))
+                elif nearest_edge and nearest_edge_dist < 10:
+                    x1, y1, x2, y2 = nearest_edge
+                    self.send_action(f"PLACE_ROAD:{x1},{y1},{x2},{y2}")
+                    self.add_message("Building road...", (255, 200, 100))
 
     def handle_keypress(self, key):
         """Handle keyboard input"""
