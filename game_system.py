@@ -1390,3 +1390,127 @@ class GameSystem:
         self.last_settlement_vertex = None
 
         return True, "Road placed"
+
+    # ==================== TRADING SYSTEM ====================
+
+    def execute_bank_trade(self, player, give_resource, get_resource, amount_to_give=None):
+        """Execute a bank trade using best available port ratio"""
+        if not self.can_trade_or_build():
+            return False, "Cannot trade now - roll dice first"
+
+        # Get the best trade ratio for the resource being given
+        ratio = self.game_board.get_best_trade_ratio(player, give_resource)
+
+        if amount_to_give is None:
+            amount_to_give = ratio
+
+        # Check if player has enough resources
+        if player.resources[give_resource] < amount_to_give:
+            return False, f"Need {amount_to_give} {give_resource.value} (only have {player.resources[give_resource]})"
+
+        # Execute trade
+        player.remove_resource(give_resource, amount_to_give)
+        player.add_resource(get_resource, 1)
+
+        return True, f"Traded {amount_to_give} {give_resource.value} for 1 {get_resource.value} (ratio {ratio}:1)"
+
+    def get_available_trade_partners(self, player):
+        """Get list of other players who can trade"""
+        return [p for p in self.players if p != player]
+
+    def propose_player_trade(self, offering_player, target_player, offered_resources, requested_resources):
+        """Propose a trade to another player"""
+        if not self.can_trade_or_build():
+            return False, None, "Cannot trade now - roll dice first"
+
+        # Validate offering player has the offered resources
+        for resource_type, amount in offered_resources.items():
+            if amount > 0 and offering_player.resources[resource_type] < amount:
+                return False, None, f"You don't have enough {resource_type.value}"
+
+        # Create trade offer
+        trade_offer = TradeOffer(offering_player, target_player, offered_resources, requested_resources)
+        self.pending_trade_offers.append(trade_offer)
+
+        return True, trade_offer, f"Trade proposed to {target_player.name}"
+
+    def get_pending_offers_for_player(self, player):
+        """Get all pending trade offers for a player"""
+        return [offer for offer in self.pending_trade_offers
+                if offer.target_player == player and offer.status == TradeOfferStatus.PENDING]
+
+    def accept_trade_offer(self, trade_offer):
+        """Accept a trade offer"""
+        if not trade_offer.is_valid():
+            return False, "Trade no longer valid - players don't have resources"
+
+        # Execute the trade
+        offering_player = trade_offer.offering_player
+        target_player = trade_offer.target_player
+
+        # Transfer offered resources
+        for resource_type, amount in trade_offer.offered_resources.items():
+            if amount > 0:
+                offering_player.remove_resource(resource_type, amount)
+                target_player.add_resource(resource_type, amount)
+
+        # Transfer requested resources
+        for resource_type, amount in trade_offer.requested_resources.items():
+            if amount > 0:
+                target_player.remove_resource(resource_type, amount)
+                offering_player.add_resource(resource_type, amount)
+
+        trade_offer.status = TradeOfferStatus.ACCEPTED
+        self.pending_trade_offers.remove(trade_offer)
+
+        return True, "Trade completed!"
+
+    def reject_trade_offer(self, trade_offer):
+        """Reject a trade offer"""
+        trade_offer.status = TradeOfferStatus.REJECTED
+        self.pending_trade_offers.remove(trade_offer)
+        return True, "Trade rejected"
+
+    # ==================== BUILDING HELPERS ====================
+
+    def get_buildable_vertices_for_settlements(self):
+        """Get all vertices where current player can build settlements"""
+        if not self.can_trade_or_build():
+            return []
+
+        current_player = self.get_current_player()
+        buildable = []
+
+        for vertex in self.game_board.vertices:
+            if vertex.can_build_settlement(current_player, ignore_road_rule=False):
+                buildable.append(vertex)
+
+        return buildable
+
+    def get_buildable_vertices_for_cities(self):
+        """Get all vertices where current player can upgrade to cities"""
+        if not self.can_trade_or_build():
+            return []
+
+        current_player = self.get_current_player()
+        buildable = []
+
+        for vertex in self.game_board.vertices:
+            if vertex.can_build_city(current_player):
+                buildable.append(vertex)
+
+        return buildable
+
+    def get_buildable_edges(self):
+        """Get all edges where current player can build roads"""
+        if not self.can_trade_or_build():
+            return []
+
+        current_player = self.get_current_player()
+        buildable = []
+
+        for edge in self.game_board.edges:
+            if edge.can_build_road(current_player):
+                buildable.append(edge)
+
+        return buildable
