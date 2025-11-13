@@ -87,9 +87,11 @@ class ClientWindow:
     def receive_game_state(self):
         """Background thread to receive game state updates from server"""
         buffer = ""
+        self.socket.settimeout(5.0)  # 5 second timeout for receives
+
         while self.running:
             try:
-                data = self.socket.recv(4096).decode('utf-8')
+                data = self.socket.recv(8192).decode('utf-8')  # Larger buffer for game state
                 if not data:
                     print(f"[{self.player_name}] Server disconnected")
                     break
@@ -105,10 +107,16 @@ class ClientWindow:
                                 self.game_state = json.loads(line)
                         except json.JSONDecodeError as e:
                             print(f"[{self.player_name}] JSON error: {e}")
+                            print(f"[{self.player_name}] Problematic data: {line[:200]}...")
 
+            except socket.timeout:
+                # This is normal - server might not have new data
+                continue
             except Exception as e:
                 if self.running:
                     print(f"[{self.player_name}] Receive error: {e}")
+                    import traceback
+                    traceback.print_exc()
                 break
 
     def send_action(self, action):
