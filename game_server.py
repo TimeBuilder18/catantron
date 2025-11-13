@@ -371,15 +371,21 @@ class GameServer:
 
             print(f"  [DEBUG] Processing action '{action}' from Player {player_index + 1}")
 
-            if action == "ROLL_DICE":
+            # Parse action (format: "ACTION:x,y" or just "ACTION")
+            parts = action.split(':')
+            action_type = parts[0]
+            coords = parts[1] if len(parts) > 1 else None
+
+            if action_type == "ROLL_DICE":
                 can_roll = self.game_system.can_roll_dice()
                 print(f"  [DEBUG] can_roll_dice() = {can_roll}, dice_rolled = {self.game_system.dice_rolled}")
                 if can_roll:
-                    result = self.game_system.roll_dice()
-                    if result:
-                        print(f"  ✓ Player {player_index + 1} rolled: {result[2]} ({result[0]}+{result[1]})")
+                    success, message = self.game_system.roll_dice_action()
+                    if success:
+                        roll = self.game_system.last_dice_roll
+                        print(f"  ✓ Player {player_index + 1} rolled: {roll[2]} ({roll[0]}+{roll[1]})")
                     else:
-                        print(f"  ✗ roll_dice() returned None!")
+                        print(f"  ✗ roll_dice_action() failed: {message}")
                 else:
                     print(f"  ✗ Cannot roll dice (already rolled or wrong phase)")
 
@@ -465,6 +471,67 @@ class GameServer:
                     print(f"  ✓ Turn ended. Now: Player {new_index + 1}'s turn")
                 else:
                     print(f"  ✗ Could not end turn: {message}")
+
+            elif action_type == "PLACE_SETTLEMENT" and coords:
+                try:
+                    x, y = map(float, coords.split(','))
+                    vertex = self.find_vertex(x, y)
+                    if vertex:
+                        if self.game_system.is_initial_placement_phase():
+                            success, message = self.game_system.try_place_initial_settlement(vertex, player)
+                        else:
+                            success, message = self.game_system.try_build_settlement(vertex, player)
+                        print(f"  {'✓' if success else '✗'} Place settlement: {message}")
+                    else:
+                        print(f"  ✗ Vertex not found at ({x}, {y})")
+                except Exception as e:
+                    print(f"  ✗ Error placing settlement: {e}")
+
+            elif action_type == "PLACE_ROAD" and coords:
+                try:
+                    coords_parts = coords.split(',')
+                    x1, y1, x2, y2 = map(float, coords_parts)
+                    edge = self.find_edge(x1, y1, x2, y2)
+                    if edge:
+                        if self.game_system.is_initial_placement_phase():
+                            success, message = self.game_system.try_place_initial_road(edge, player)
+                        else:
+                            success, message = self.game_system.try_build_road(edge, player)
+                        print(f"  {'✓' if success else '✗'} Place road: {message}")
+                    else:
+                        print(f"  ✗ Edge not found")
+                except Exception as e:
+                    print(f"  ✗ Error placing road: {e}")
+
+            elif action_type == "PLACE_CITY" and coords:
+                try:
+                    x, y = map(float, coords.split(','))
+                    vertex = self.find_vertex(x, y)
+                    if vertex:
+                        success, message = self.game_system.try_build_city(vertex, player)
+                        print(f"  {'✓' if success else '✗'} Place city: {message}")
+                    else:
+                        print(f"  ✗ Vertex not found at ({x}, {y})")
+                except Exception as e:
+                    print(f"  ✗ Error placing city: {e}")
+
+    def find_vertex(self, x, y, tolerance=1.0):
+        """Find vertex by coordinates with tolerance"""
+        for vertex in self.game_board.vertices:
+            if abs(vertex.x - x) < tolerance and abs(vertex.y - y) < tolerance:
+                return vertex
+        return None
+
+    def find_edge(self, x1, y1, x2, y2, tolerance=1.0):
+        """Find edge by endpoint coordinates with tolerance"""
+        for edge in self.game_board.edges:
+            # Check both orderings
+            if ((abs(edge.vertex1.x - x1) < tolerance and abs(edge.vertex1.y - y1) < tolerance and
+                 abs(edge.vertex2.x - x2) < tolerance and abs(edge.vertex2.y - y2) < tolerance) or
+                (abs(edge.vertex1.x - x2) < tolerance and abs(edge.vertex1.y - y2) < tolerance and
+                 abs(edge.vertex2.x - x1) < tolerance and abs(edge.vertex2.y - y1) < tolerance)):
+                return edge
+        return None
 
     def start(self):
         """Start the server"""
