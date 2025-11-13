@@ -1,7 +1,66 @@
 """
 AI Training Interface for Catan
-Allows 4 AI agents to play against each other using the existing game engine
-No networking, no multiple windows - just pure game logic
+
+ENVIRONMENT ONLY - You implement the AI agents yourself!
+
+This provides a clean interface to the Catan game for training 4 AI agents.
+No GUI, no networking, no sockets - just pure game logic.
+
+USAGE EXAMPLE:
+--------------
+from ai_interface import AIGameEnvironment
+
+# 1. Create the environment
+env = AIGameEnvironment()
+
+# 2. Get initial observations (one per agent)
+observations = env.reset()  # Returns list of 4 observations
+
+# 3. Game loop
+done = False
+while not done:
+    current_player = env.game.current_player_index
+
+    # 4. Your AI decides action based on observation
+    obs = observations[current_player]
+    action = your_ai_agent.choose_action(obs)
+    action_params = your_ai_agent.choose_params(obs)
+
+    # 5. Execute action
+    obs, reward, done, info = env.step(current_player, action, action_params)
+    observations[current_player] = obs
+
+    # 6. Your AI learns from reward
+    your_ai_agent.learn(obs, action, reward, done)
+
+# 7. Reset for next game
+observations = env.reset()
+
+OBSERVATION FORMAT:
+-------------------
+obs = {
+    'is_my_turn': bool,
+    'game_phase': str,
+    'my_resources': dict,        # YOUR private hand
+    'my_victory_points': int,
+    'opponents': list,            # Public info only (can't see their cards)
+    'legal_actions': list,        # What you can do right now
+    'tiles': list,                # Board state
+    ...
+}
+
+ACTIONS:
+--------
+- 'roll_dice' (no params needed)
+- 'place_settlement' (params: {'vertex': Vertex object})
+- 'place_road' (params: {'edge': Edge object})
+- 'build_settlement' (params: {'vertex': Vertex object})
+- 'build_city' (params: {'vertex': Vertex object})
+- 'build_road' (params: {'edge': Edge object})
+- 'buy_dev_card' (no params)
+- 'end_turn' (no params)
+
+NOW GO BUILD YOUR AI! This is just the game environment.
 """
 
 import random
@@ -237,47 +296,34 @@ class AIGameEnvironment:
         return [self.get_observation(i) for i in range(4)]
 
 
-# ==================== EXAMPLE: Random AI Agent ====================
-
-class RandomAI:
-    """Simple random agent for testing"""
-
-    def __init__(self, player_index):
-        self.player_index = player_index
-
-    def choose_action(self, observation):
-        """Choose random legal action"""
-        legal_actions = observation['legal_actions']
-        return random.choice(legal_actions)
-
-    def choose_action_params(self, action, env):
-        """Choose random parameters for action (e.g., which vertex to build on)"""
-        # TODO: Implement smart action parameter selection
-        # For now, return None (agents would need to select specific vertices/edges)
-        return None
-
-
 # ==================== EXAMPLE USAGE ====================
 
 if __name__ == "__main__":
     print("="*60)
-    print("CATAN AI TRAINING ENVIRONMENT - DEMO")
+    print("CATAN AI TRAINING ENVIRONMENT - READY")
     print("="*60)
 
     # Create environment
     env = AIGameEnvironment()
 
-    # Create 4 random agents
-    agents = [RandomAI(i) for i in range(4)]
-
-    # Get initial observations
+    # Get initial observations for all 4 players
     observations = env.reset()
 
-    print("\n📊 Initial observations:")
+    print("\n📊 Initial State:")
     for i, obs in enumerate(observations):
-        print(f"   Agent {i+1}: {obs['my_victory_points']} VP, Turn: {obs['is_my_turn']}")
-        print(f"              Legal actions: {obs['legal_actions']}")
+        print(f"   Player {i+1}:")
+        print(f"      • Victory Points: {obs['my_victory_points']}")
+        print(f"      • My Turn: {obs['is_my_turn']}")
+        print(f"      • Legal Actions: {obs['legal_actions']}")
+        print(f"      • Resources: {sum(obs['my_resources'].values())}")
 
-    print("\n✅ Environment ready for AI training!")
-    print("   Use this interface to train reinforcement learning agents")
-    print("   (PyTorch, Stable-Baselines3, etc.)")
+    print("\n" + "="*60)
+    print("✅ ENVIRONMENT READY FOR YOUR AI IMPLEMENTATION")
+    print("="*60)
+    print("\nHow to use:")
+    print("1. Create your AI agents (4 agents)")
+    print("2. Each agent calls: obs = env.get_observation(player_index)")
+    print("3. Agent decides action from obs['legal_actions']")
+    print("4. Execute: obs, reward, done, info = env.step(player_index, action, params)")
+    print("5. Repeat until done == True")
+    print("\n" + "="*60)
