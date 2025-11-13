@@ -70,6 +70,18 @@ while not done:
 
 ---
 
+## Key Game Rules Implemented
+
+### Robber & Discard Rule (7 Rolled)
+When a **7** is rolled:
+1. **All players with 8+ cards must discard half** (rounded down)
+   - Example: 8 cards → discard 4, 9 cards → discard 4, 10 cards → discard 5
+2. Players **choose which cards** to discard
+3. After all discards complete, **robber is moved**
+4. Current player steals from adjacent players
+
+---
+
 ## Observation Format
 
 Each observation contains:
