@@ -596,35 +596,27 @@ class GameBoard:
 
 
     def generate_ports(self):
-        """Generate 9 trading ports on COASTAL edges - FIXED VERSION"""
+        """Generate 9 trading ports on COASTAL edges - ALGORITHMIC VERSION FOR FLAT-TOP HEXAGONS"""
 
-        print("\n" + "=" * 70)
-        print("🚢 PORT PLACEMENT SYSTEM - FIXED VERSION FOR 4-PLAYER BOARD")
-        print("=" * 70)
+        print("\n" + "="*70)
+        print("🚢 PORT PLACEMENT SYSTEM - FOR FLAT-TOP HEXAGONS")
+        print("="*70)
 
-        # Hex neighbor offsets in axial coordinates
-        # These map to flat-top hex edges: 0=E, 1=NE, 2=NW, 3=W, 4=SW, 5=SE
+        # Hex neighbor offsets in axial coordinates for FLAT-TOP hexagons
+        # Direction 0=E, 1=SE, 2=SW, 3=W, 4=NW, 5=NE (based on which neighbor hex)
         HEX_DIRECTIONS = [
-            (+1, 0),  # East (0) - right edge
-            (+1, -1),  # NorthEast (1) - upper-right edge
-            (0, -1),  # NorthWest (2) - upper-left edge
-            (-1, 0),  # West (3) - left edge
-            (-1, +1),  # SouthWest (4) - lower-left edge
-            (0, +1)  # SouthEast (5) - lower-right edge
+            (+1, 0),   # East - right neighbor
+            (+0, +1),  # Southeast - lower-right neighbor
+            (-1, +1),  # Southwest - lower-left neighbor
+            (-1, 0),   # West - left neighbor
+            (0, -1),   # Northwest - upper-left neighbor
+            (+1, -1)   # Northeast - upper-right neighbor
         ]
 
-        # For flat-top hexagons, corners are indexed:
-        # 0=top, 1=upper-right, 2=lower-right, 3=bottom, 4=lower-left, 5=upper-left
-        # Edge between corners i and (i+1)%6
-        #
-        # Direction to corner mapping for flat-top:
-        # East (dir 0): corners 1-2 (right edge)
-        # NE (dir 1): corners 0-1 (upper-right edge)
-        # NW (dir 2): corners 5-0 (upper-left edge)
-        # West (dir 3): corners 4-5 (left edge)
-        # SW (dir 4): corners 3-4 (lower-left edge)
-        # SE (dir 5): corners 2-3 (lower-right edge)
-        DIR_TO_CORNER = [1, 0, 5, 4, 3, 2]  # Maps direction index to starting corner
+        # For FLAT-TOP hexagons with corners: 0=top, 1=upper-right, 2=lower-right, 3=bottom, 4=lower-left, 5=upper-left
+        # Map direction (which neighbor is missing) to which edge faces that direction
+        # If East neighbor is missing, the edge between corners 1-2 faces East
+        DIR_TO_CORNER = [1, 2, 3, 4, 5, 0]  # Maps direction index to starting corner of the edge
 
         # Create lookup map of tile positions
         tile_map = {(tile.q, tile.r): tile for tile in self.tiles}
@@ -647,7 +639,6 @@ class GameBoard:
                 outer_ring_tiles.append(tile)
 
         print(f"   • Outer ring tiles: {len(outer_ring_tiles)}")
-        print(f"   • Coordinates: {sorted([(t.q, t.r) for t in outer_ring_tiles])}")
 
         # Step 3: Find coastal edges (edges facing outward from outer ring)
         coastal_edges = []
@@ -676,27 +667,11 @@ class GameBoard:
                             coastal_edges.append((edge, tile, dir_idx))
                             break
 
-        expected_coastal = 6 * max_distance
         print(f"\n🏖️  Coastal Edge Detection:")
         print(f"   • Coastal edges found: {len(coastal_edges)}")
-        print(f"   • Expected for radius {max_distance}: {expected_coastal}")
-
-        # DEBUG: Show which tiles contributed coastal edges
-        print(f"\n🔍 DEBUG - Coastal edges by tile:")
-        tile_edge_count = {}
-        for edge, tile, dir_idx in coastal_edges:
-            key = (tile.q, tile.r)
-            if key not in tile_edge_count:
-                tile_edge_count[key] = []
-            tile_edge_count[key].append(dir_idx)
-
-        for (q, r), dirs in sorted(tile_edge_count.items()):
-            dist = max(abs(q), abs(r), abs(q + r))
-            print(f"   Tile ({q:2d},{r:2d}) dist={dist}: {len(dirs)} edges (dirs: {dirs})")
 
         if len(coastal_edges) < 9:
             print(f"\n❌ ERROR: Only {len(coastal_edges)} coastal edges found!")
-            print(f"   Need at least 9 for port placement.")
             return
 
         # Step 4: Sort by angle for even distribution
@@ -714,38 +689,28 @@ class GameBoard:
         port_indices = [int(i * step) for i in range(9)]
         selected_coastal_edges = [coastal_edges[i] for i in port_indices]
 
-        print(f"\n🎯 Port Position Selection:")
-        print(f"   • Distributing 9 ports evenly across {num_coastal} coastal edges")
-        print(f"   • Step size: {step:.2f}")
-
-        # Step 6: Create port types (4 generic 3:1, 5 specialized 2:1)
+        # Step 6: Create port types
         port_types = [
             PortType.GENERIC, PortType.GENERIC, PortType.GENERIC, PortType.GENERIC,
             PortType.WOOD, PortType.BRICK, PortType.WHEAT, PortType.SHEEP, PortType.ORE
         ]
-
-        # RANDOMIZE ONLY THE TYPES, NOT THE POSITIONS
         random.shuffle(port_types)
 
         # Step 7: Create and place ports
         print(f"\n🚢 Port Placement Details:")
-        print(f"   {'#':<4} {'Type':<15} {'Hex':<12} {'Distance':<10} {'Direction':<10}")
-        print(f"   {'-' * 4} {'-' * 15} {'-' * 12} {'-' * 10} {'-' * 10}")
+        print(f"   {'#':<4} {'Type':<15} {'Hex':<12} {'Distance':<10}")
+        print(f"   {'-'*4} {'-'*15} {'-'*12} {'-'*10}")
 
         for i, (edge, tile, direction) in enumerate(selected_coastal_edges):
             port = Port(port_types[i], edge.vertex1, edge.vertex2)
             self.ports.append(port)
 
             tile_dist = max(abs(tile.q), abs(tile.r), abs(tile.q + tile.r))
-
-            print(
-                f"   {i + 1:<4} {port_types[i].value:<15} ({tile.q:2d},{tile.r:2d}){'':<5} {tile_dist:<10} {direction:<10}")
+            print(f"   {i+1:<4} {port_types[i].value:<15} ({tile.q:2d},{tile.r:2d}){'':<5} {tile_dist:<10}")
 
         print(f"\n✅ Port Placement Complete!")
-        print(f"   • {len(self.ports)} ports successfully placed")
-        print(f"   • All ports are on outer perimeter (distance = {max_distance})")
-        print(f"   • Port types randomized for game variety")
-        print("=" * 70 + "\n")
+        print(f"   • {len(self.ports)} ports successfully placed on OUTER PERIMETER")
+        print("="*70 + "\n")
 
     def get_player_ports(self, player):
         """Get all ports a player has access to"""
