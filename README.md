@@ -1,52 +1,72 @@
-# Catan AI Training Environment
+# Catan Game - Three Versions
 
-Clean, minimal environment for training AI agents to play Settlers of Catan.
+This project provides **three different ways** to play/train Catan:
 
-## What's Included
+## 🎮 Three Versions
 
-| File | Purpose |
-|------|---------|
-| `ai_interface.py` | **Main environment** - Use this to train your AI |
-| `game_system.py` | Core game logic (players, buildings, resources, ports, etc.) |
-| `tile.py` | Hexagonal tile system |
-| `test_environment.py` | Verify the environment works |
+| File | Purpose | Use Case |
+|------|---------|----------|
+| **`main.py`** | Full pygame game with complete UI | Human play, full features with trading |
+| **`visual_ai_game.py`** | Visual AI training environment | Watch AI train, simplified (no trading) |
+| **`ai_interface.py`** | Headless AI training | Fast AI training, no visualization |
 
-**That's it!** No GUI, no networking, no extra complexity.
+### Supporting Files
+- `game_system.py` - Core game logic (players, buildings, resources, ports)
+- `tile.py` - Hexagonal tile system
+- `test_environment.py` - Test that environment works
 
 ---
 
 ## Quick Start
 
+### 🎮 Option 1: Play the Full Game (Human Players)
 ```bash
-# 1. Test the environment
+python3 main.py
+```
+- Full pygame UI with all features
+- Supports trading, development cards, etc.
+- Mouse + keyboard controls
+- 4 players on one screen
+
+### 🤖 Option 2: Visual AI Training (Watch AI Learn)
+```bash
+python3 visual_ai_game.py
+```
+- See AI agents play in real-time
+- Simplified game (no trading)
+- Better for AI training
+- Manual controls for testing
+
+### ⚡ Option 3: Headless AI Training (Maximum Speed)
+```bash
+# Test the environment
 python3 test_environment.py
 
-# 2. Use in your code
+# Use in your code
 from ai_interface import AIGameEnvironment
 
 env = AIGameEnvironment()
-observations = env.reset()  # Returns list of 4 observations (one per player)
+observations = env.reset()  # Returns list of 4 observations
 
-# Game loop
 done = False
 while not done:
     current_player = env.game.current_player_index
     obs = observations[current_player]
 
-    # Your AI chooses action
+    # Your AI decides
     action = your_ai.choose_action(obs)
     params = your_ai.choose_params(obs)
 
-    # Execute action
+    # Execute
     obs, done, info = env.step(current_player, action, params)
     observations[current_player] = obs
 
-    # Calculate your reward
+    # Calculate reward
     reward = your_reward_function(obs, info)
-
-    # Train your AI
     your_ai.learn(obs, action, reward)
 ```
+
+---
 
 ---
 
