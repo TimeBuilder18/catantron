@@ -211,16 +211,19 @@ class ClientWindow:
             # Turn indicator - handle both initial placement and normal play
             game_phase = self.game_state.get('game_phase', 'NORMAL_PLAY')
             turn_phase = self.game_state.get('turn_phase', 'ROLL_DICE')
+            waiting_for_road = self.game_state.get('waiting_for_road', False)
 
             if current_turn == self.player_index:
                 phase_text = "YOUR TURN"
                 phase_color = (100, 255, 100)
 
                 # Show different instructions based on game phase
-                if game_phase == "INITIAL_PLACEMENT_1":
-                    phase_desc = "▶ Place first settlement (click vertex)"
-                elif game_phase == "INITIAL_PLACEMENT_2":
-                    phase_desc = "▶ Place second settlement (click vertex)"
+                if game_phase in ["INITIAL_PLACEMENT_1", "INITIAL_PLACEMENT_2"]:
+                    if waiting_for_road:
+                        phase_desc = "▶ Place road (click edge near settlement)"
+                    else:
+                        round_num = "first" if game_phase == "INITIAL_PLACEMENT_1" else "second"
+                        phase_desc = f"▶ Place {round_num} settlement (click vertex)"
                 elif not dice_rolled:
                     phase_desc = "▶ Roll dice (D)"
                 else:
@@ -348,19 +351,59 @@ class ClientWindow:
 
             # Draw vertices (from game state)
             if 'vertices' in self.game_state:
+                game_phase = self.game_state.get('game_phase', 'NORMAL_PLAY')
+                current_turn = self.game_state.get('current_turn', 0)
+
                 for vertex_data in self.game_state['vertices']:
                     x = vertex_data['x'] + offset[0]
                     y = vertex_data['y'] + offset[1]
-                    pygame.draw.circle(self.screen, (100, 100, 100), (int(x), int(y)), 3)
+
+                    # Highlight buildable vertices on player's turn
+                    if self.is_my_turn() and game_phase in ["INITIAL_PLACEMENT_1", "INITIAL_PLACEMENT_2"]:
+                        # During initial placement, highlight empty vertices that respect distance rule
+                        is_occupied = any(
+                            abs(s['x'] - vertex_data['x']) < 1 and abs(s['y'] - vertex_data['y']) < 1
+                            for s in self.game_state.get('settlements', [])
+                        ) or any(
+                            abs(c['x'] - vertex_data['x']) < 1 and abs(c['y'] - vertex_data['y']) < 1
+                            for c in self.game_state.get('cities', [])
+                        )
+
+                        if not is_occupied:
+                            # Draw as buildable (green glow)
+                            pygame.draw.circle(self.screen, (100, 255, 100), (int(x), int(y)), 6)
+                            pygame.draw.circle(self.screen, (100, 100, 100), (int(x), int(y)), 3)
+                        else:
+                            pygame.draw.circle(self.screen, (100, 100, 100), (int(x), int(y)), 3)
+                    else:
+                        pygame.draw.circle(self.screen, (100, 100, 100), (int(x), int(y)), 3)
 
             # Draw edges (from game state)
             if 'edges' in self.game_state:
+                game_phase = self.game_state.get('game_phase', 'NORMAL_PLAY')
+                waiting_for_road = self.game_state.get('waiting_for_road', False)
+
                 for edge_data in self.game_state['edges']:
                     x1 = edge_data['x1'] + offset[0]
                     y1 = edge_data['y1'] + offset[1]
                     x2 = edge_data['x2'] + offset[0]
                     y2 = edge_data['y2'] + offset[1]
-                    pygame.draw.line(self.screen, (150, 150, 150), (x1, y1), (x2, y2), 1)
+
+                    # Highlight buildable edges when waiting for road
+                    if self.is_my_turn() and game_phase in ["INITIAL_PLACEMENT_1", "INITIAL_PLACEMENT_2"] and waiting_for_road:
+                        # Check if edge is already occupied
+                        is_occupied = any(
+                            abs(r['x1'] - edge_data['x1']) < 1 and abs(r['y1'] - edge_data['y1']) < 1 and
+                            abs(r['x2'] - edge_data['x2']) < 1 and abs(r['y2'] - edge_data['y2']) < 1
+                            for r in self.game_state.get('roads', [])
+                        )
+                        if not is_occupied:
+                            # Highlight as buildable (thicker yellow line)
+                            pygame.draw.line(self.screen, (255, 255, 100), (x1, y1), (x2, y2), 3)
+                        else:
+                            pygame.draw.line(self.screen, (150, 150, 150), (x1, y1), (x2, y2), 1)
+                    else:
+                        pygame.draw.line(self.screen, (150, 150, 150), (x1, y1), (x2, y2), 1)
 
             # Draw settlements (same as main.py)
             for settlement in self.game_state['settlements']:

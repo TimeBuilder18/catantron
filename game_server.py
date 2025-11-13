@@ -226,6 +226,7 @@ class GameServer:
                 'last_roll': self.game_system.last_dice_roll,
                 'game_phase': self.game_system.game_phase,
                 'turn_phase': self.game_system.turn_phase,
+                'waiting_for_road': self.game_system.waiting_for_road,  # For initial placement
 
                 # Player's private resources
                 'my_resources': {
