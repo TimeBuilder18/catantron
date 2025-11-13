@@ -26,11 +26,14 @@ while not done:
     action = your_ai_agent.choose_action(obs)
     action_params = your_ai_agent.choose_params(obs)
 
-    # 5. Execute action
-    obs, reward, done, info = env.step(current_player, action, action_params)
+    # 5. Execute action (NO REWARD - you calculate that yourself!)
+    obs, done, info = env.step(current_player, action, action_params)
     observations[current_player] = obs
 
-    # 6. Your AI learns from reward
+    # 6. Calculate your own reward based on obs
+    reward = your_reward_function(obs, info)
+
+    # 7. Your AI learns
     your_ai_agent.learn(obs, action, reward, done)
 
 # 7. Reset for next game
@@ -233,67 +236,85 @@ class AIGameEnvironment:
     def step(self, player_index, action, action_params=None):
         """
         Execute an action for a player
-        Returns: (observation, reward, done, info)
+        Returns: (observation, done, info)
+
+        NOTE: No reward calculation - you implement your own reward function!
         """
         player = self.game.players[player_index]
 
         # Validate it's player's turn
         if player != self.game.get_current_player():
-            return self.get_observation(player_index), 0, False, {'error': 'Not your turn'}
+            return self.get_observation(player_index), False, {'error': 'Not your turn'}
 
-        reward = 0
         info = {}
 
         # Execute action
         if action == 'roll_dice':
             success, message = self.game.roll_dice_action()
+            info['success'] = success
             info['message'] = message
 
         elif action == 'end_turn':
             success, message = self.game.end_turn()
+            info['success'] = success
             info['message'] = message
 
         elif action == 'place_settlement':
-            vertex = action_params.get('vertex')
+            vertex = action_params.get('vertex') if action_params else None
             if vertex:
                 if self.game.is_initial_placement_phase():
                     success, message = self.game.try_place_initial_settlement(vertex, player)
                 else:
                     success, message = self.game.try_build_settlement(vertex, player)
+                info['success'] = success
                 info['message'] = message
-                if success:
-                    reward = 1  # Reward for successful building
+            else:
+                info['success'] = False
+                info['message'] = 'No vertex provided'
 
         elif action == 'place_road':
-            edge = action_params.get('edge')
+            edge = action_params.get('edge') if action_params else None
             if edge:
                 if self.game.is_initial_placement_phase():
                     success, message = self.game.try_place_initial_road(edge, player)
                 else:
                     success, message = self.game.try_build_road(edge, player)
+                info['success'] = success
                 info['message'] = message
-                if success:
-                    reward = 0.5
+            else:
+                info['success'] = False
+                info['message'] = 'No edge provided'
 
         # Check for victory
         winner = self.game.check_victory_conditions()
         done = (winner is not None)
 
         if done:
-            if winner == player:
-                reward = 100  # Big reward for winning!
-                info['result'] = 'victory'
-            else:
-                reward = -10  # Penalty for losing
-                info['result'] = 'defeat'
+            if winner:
+                info['winner'] = self.game.players.index(winner)
+                info['result'] = 'game_over'
 
         obs = self.get_observation(player_index)
-        return obs, reward, done, info
+        return obs, done, info
 
     def reset(self):
         """Reset game for new episode"""
         self.__init__()
         return [self.get_observation(i) for i in range(4)]
+
+    def get_game_state(self):
+        """
+        Get raw game state for advanced use cases
+        Returns the actual GameSystem object if you need low-level access
+        """
+        return {
+            'game': self.game,
+            'game_board': self.game.game_board,
+            'players': self.game.players,
+            'current_player_index': self.game.current_player_index,
+            'game_phase': self.game.game_phase,
+            'turn_phase': self.game.turn_phase
+        }
 
 
 # ==================== EXAMPLE USAGE ====================
