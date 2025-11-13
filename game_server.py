@@ -363,10 +363,15 @@ class GameServer:
         print(f"✓ Player {player_index + 1} connected from {address}")
 
         try:
+            import time
             while self.running:
-                # Send current game state
-                state_json = self.serialize_game_state(player_index)
-                client_socket.sendall((state_json + '\n').encode('utf-8'))
+                try:
+                    # Send current game state
+                    state_json = self.serialize_game_state(player_index)
+                    client_socket.sendall((state_json + '\n').encode('utf-8'))
+                except Exception as e:
+                    print(f"[SERVER] Error sending to Player {player_index + 1}: {e}")
+                    break
 
                 # Receive action from client (non-blocking with timeout)
                 client_socket.settimeout(0.1)
@@ -381,9 +386,17 @@ class GameServer:
 
                 except socket.timeout:
                     pass  # No data received, continue loop
+                except Exception as e:
+                    print(f"[SERVER] Error receiving from Player {player_index + 1}: {e}")
+                    break
+
+                # Small delay to prevent flooding the socket (30 FPS = ~33ms)
+                time.sleep(0.033)
 
         except Exception as e:
-            print(f"Client {player_index + 1} error: {e}")
+            print(f"[SERVER] Client {player_index + 1} handler error: {e}")
+            import traceback
+            traceback.print_exc()
         finally:
             client_socket.close()
             print(f"✓ Player {player_index + 1} disconnected")
