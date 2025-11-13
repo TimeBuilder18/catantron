@@ -52,7 +52,9 @@
 | Move on rolling 7 | ✅ |
 | Block resource production | ✅ |
 | Steal from adjacent players | ✅ |
-| Discard if >7 cards on 7 roll | ✅ (constant defined) |
+| **Discard when 7 rolled (8+ cards)** | ✅ **IMPLEMENTED** |
+| Players choose which cards to discard | ✅ |
+| Discard exactly half (rounded down) | ✅ |
 
 ---
 

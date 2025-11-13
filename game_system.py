@@ -872,6 +872,11 @@ class GameSystem:
         # Trade negotiation
         self.pending_trade_offers = []  # List of TradeOffer objects
 
+        # Discard phase (when 7 is rolled)
+        self.waiting_for_discards = False
+        self.players_must_discard = []  # List of players who need to discard
+        self.players_discarded = set()  # Track who has discarded
+
     def can_roll_dice(self):
         """Check if current player can roll dice"""
         return (self.game_phase == "NORMAL_PLAY" and
@@ -941,7 +946,7 @@ class GameSystem:
                             player.add_resource(resource_type, 1)
 
     def roll_dice(self):
-        """Roll dice and distribute resources - EXACT copy from main.py"""
+        """Roll dice and distribute resources"""
         if not self.can_roll_dice():
             return None
 
@@ -951,7 +956,11 @@ class GameSystem:
         self.turn_phase = "TRADE_BUILD"
 
         if total == 7:
-            # Handle robber (discard, move robber, steal)
+            # When 7 is rolled, players with 8+ cards must discard half
+            self.players_must_discard = self.get_players_who_must_discard()
+            if self.players_must_discard:
+                self.waiting_for_discards = True
+                # Game pauses until all discards are done, then robber moves
             return (die1, die2, total)
         else:
             # Distribute resources
@@ -1065,6 +1074,72 @@ class GameSystem:
         """Remove expired trade offers"""
         # Simple implementation - remove all pending offers
         self.pending_trade_offers = []
+
+    # ==================== ROBBER & DISCARD SYSTEM ====================
+
+    def get_players_who_must_discard(self):
+        """Get list of players with 8+ cards who must discard"""
+        players_to_discard = []
+        for player in self.players:
+            if player.get_total_resources() >= 8:
+                players_to_discard.append(player)
+        return players_to_discard
+
+    def player_must_discard(self, player):
+        """Check if a specific player must discard"""
+        return (self.waiting_for_discards and
+                player in self.players_must_discard and
+                player not in self.players_discarded)
+
+    def discard_cards(self, player, cards_to_discard):
+        """
+        Player discards cards when 7 is rolled
+
+        Args:
+            player: The player discarding
+            cards_to_discard: Dict of {ResourceType: amount} to discard
+
+        Returns:
+            (success, message)
+        """
+        if not self.player_must_discard(player):
+            return False, "You don't need to discard"
+
+        total_resources = player.get_total_resources()
+        num_to_discard = total_resources // 2  # Half, rounded down
+
+        # Count total cards being discarded
+        total_discarding = sum(cards_to_discard.values())
+
+        if total_discarding != num_to_discard:
+            return False, f"Must discard exactly {num_to_discard} cards (have {total_resources})"
+
+        # Check player has all the cards they want to discard
+        for resource_type, amount in cards_to_discard.items():
+            if amount > 0:
+                if player.resources[resource_type] < amount:
+                    return False, f"Don't have {amount} {resource_type.value}"
+
+        # Execute discard
+        for resource_type, amount in cards_to_discard.items():
+            if amount > 0:
+                player.remove_resource(resource_type, amount)
+
+        # Mark player as having discarded
+        self.players_discarded.add(player)
+
+        # Check if all players have discarded
+        if len(self.players_discarded) == len(self.players_must_discard):
+            # All discards complete - ready to move robber
+            self.waiting_for_discards = False
+            self.players_must_discard = []
+            self.players_discarded = set()
+
+        return True, f"Discarded {total_discarding} cards"
+
+    def all_players_discarded(self):
+        """Check if all required players have discarded"""
+        return not self.waiting_for_discards
 
     # ==================== BUILDING ACTIONS ====================
 
