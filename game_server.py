@@ -150,77 +150,85 @@ class GameServer:
         """Set up the game board and system"""
         print("[SERVER] Initializing game board...")
         import time
+        import traceback
         start = time.time()
 
-        # Create board
-        print("[SERVER] Creating hexagonal tiles...")
-        tile_size = 50
-        tiles = create_hexagonal_board(tile_size, radius=2)
-        print(f"[SERVER] ✓ Created {len(tiles)} tiles in {time.time()-start:.2f}s")
+        try:
+            # Create board
+            print("[SERVER] Creating hexagonal tiles...")
+            tile_size = 50
+            tiles = create_hexagonal_board(tile_size, radius=2)
+            print(f"[SERVER] ✓ Created {len(tiles)} tiles in {time.time()-start:.2f}s")
 
-        for t in tiles:
-            t.find_neighbors(tiles)
+            for t in tiles:
+                t.find_neighbors(tiles)
 
-        robber = Robber()
-        assign_resources_numbers(tiles, robber)
+            robber = Robber()
+            assign_resources_numbers(tiles, robber)
 
-        self.game_board = GameBoard(tiles)
+            self.game_board = GameBoard(tiles)
 
-        # Debug: Print port info
-        print(f"\n[SERVER] Port generation:")
-        print(f"  Total edges in board: {len(self.game_board.edges)}")
-        print(f"  Ports generated: {len(self.game_board.ports)}")
+            # Debug: Print port info
+            print(f"\n[SERVER] Port generation:")
+            print(f"  Total edges in board: {len(self.game_board.edges)}")
+            print(f"  Ports generated: {len(self.game_board.ports)}")
 
-        # Check if ports are on coastal edges
-        tile_map = {(tile.q, tile.r): tile for tile in tiles}
-        HEX_DIRECTIONS = [(+1, 0), (+1, -1), (0, -1), (-1, 0), (-1, +1), (0, +1)]
+            # Check if ports are on coastal edges
+            tile_map = {(tile.q, tile.r): tile for tile in tiles}
+            HEX_DIRECTIONS = [(+1, 0), (+1, -1), (0, -1), (-1, 0), (-1, +1), (0, +1)]
 
-        coastal_edge_count = 0
-        for tile in tiles:
-            for dir_idx, (dq, dr) in enumerate(HEX_DIRECTIONS):
-                neighbor_q = tile.q + dq
-                neighbor_r = tile.r + dr
-                if (neighbor_q, neighbor_r) not in tile_map:
-                    coastal_edge_count += 1
+            coastal_edge_count = 0
+            for tile in tiles:
+                for dir_idx, (dq, dr) in enumerate(HEX_DIRECTIONS):
+                    neighbor_q = tile.q + dq
+                    neighbor_r = tile.r + dr
+                    if (neighbor_q, neighbor_r) not in tile_map:
+                        coastal_edge_count += 1
 
-        print(f"  Coastal edges available: {coastal_edge_count}")
-        print(f"  Ports should only be on coastal edges (where land meets ocean)\n")
+            print(f"  Coastal edges available: {coastal_edge_count}")
+            print(f"  Ports should only be on coastal edges (where land meets ocean)\n")
 
-        # Create 4 players - EXACT same as main.py
-        players = [
-            Player("Player 1", (255, 50, 50)),
-            Player("Player 2", (50, 50, 255)),
-            Player("Player 3", (255, 255, 50)),
-            Player("Player 4", (255, 255, 255))
-        ]
+            # Create 4 players - EXACT same as main.py
+            players = [
+                Player("Player 1", (255, 50, 50)),
+                Player("Player 2", (50, 50, 255)),
+                Player("Player 3", (255, 255, 50)),
+                Player("Player 4", (255, 255, 255))
+            ]
 
-        # DO NOT give starting resources - players start with 0 resources
-        # Resources are earned by placing settlements and rolling dice
+            # DO NOT give starting resources - players start with 0 resources
+            # Resources are earned by placing settlements and rolling dice
 
-        # Create game system - EXACT same as main.py
-        self.game_system = GameSystem(self.game_board, players)
-        self.game_system.robber = robber
+            # Create game system - EXACT same as main.py
+            self.game_system = GameSystem(self.game_board, players)
+            self.game_system.robber = robber
 
-        # DO NOT skip initial placement - game should start with settlement placement
-        # GameSystem defaults to "INITIAL_PLACEMENT_1" phase which is correct
+            # DO NOT skip initial placement - game should start with settlement placement
+            # GameSystem defaults to "INITIAL_PLACEMENT_1" phase which is correct
 
-        print("✓ Game initialized!")
-        print(f"  {len(tiles)} tiles created")
-        print(f"  {len(self.game_board.ports)} ports generated")
-        print(f"  4 players ready")
-        print(f"  Game phase: {self.game_system.game_phase}")
-        print(f"  Turn phase: {self.game_system.turn_phase}")
+            print("✓ Game initialized!")
+            print(f"  {len(tiles)} tiles created")
+            print(f"  {len(self.game_board.ports)} ports generated")
+            print(f"  4 players ready")
+            print(f"  Game phase: {self.game_system.game_phase}")
+            print(f"  Turn phase: {self.game_system.turn_phase}")
+
+        except Exception as e:
+            print(f"[SERVER] CRITICAL ERROR during game initialization: {e}")
+            traceback.print_exc()
+            raise
 
     def serialize_game_state(self, player_index):
         """Convert game state to JSON for a specific player"""
         with self.state_lock:
-            # Get player-specific data
-            player = self.game_system.players[player_index]
-            current_player_index = self.game_system.players.index(
-                self.game_system.get_current_player()
-            )
+            try:
+                # Get player-specific data
+                player = self.game_system.players[player_index]
+                current_player_index = self.game_system.players.index(
+                    self.game_system.get_current_player()
+                )
 
-            state = {
+                state = {
                 'current_turn': current_player_index,
                 'dice_rolled': self.game_system.dice_rolled,
                 'last_roll': self.game_system.last_dice_roll,
@@ -324,9 +332,31 @@ class GameServer:
                     }
                     for p in self.game_board.ports
                 ]
-            }
+                }
 
-            return json.dumps(state)
+                return json.dumps(state)
+            except Exception as e:
+                print(f"[SERVER] ERROR serializing game state: {e}")
+                import traceback
+                traceback.print_exc()
+                # Return minimal valid state to keep clients alive
+                return json.dumps({
+                    'current_turn': 0,
+                    'dice_rolled': False,
+                    'last_roll': None,
+                    'game_phase': 'INITIAL_PLACEMENT_1',
+                    'turn_phase': 'ROLL_DICE',
+                    'waiting_for_road': False,
+                    'my_resources': {'wood': 0, 'brick': 0, 'wheat': 0, 'sheep': 0, 'ore': 0},
+                    'players': [],
+                    'tiles': [],
+                    'vertices': [],
+                    'edges': [],
+                    'settlements': [],
+                    'cities': [],
+                    'roads': [],
+                    'ports': []
+                })
 
     def handle_client(self, client_socket, player_index, address):
         """Handle a single client connection"""
