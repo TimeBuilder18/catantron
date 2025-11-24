@@ -70,7 +70,7 @@ import random
 from game_system import GameSystem, GameBoard, Player, Robber
 from tile import Tile
 
-# Same board setup as main.py
+# Same board setup as huPlay.py
 NUMBER_TOKENS = [5, 2, 6, 3, 8, 10, 9, 12, 11, 4, 8, 10, 9, 4, 5, 6, 3, 11]
 RESOURCES = ["forest"] * 4 + ["hill"] * 3 + ["field"] * 4 + ["mountain"] * 3 + ["pasture"] * 4 + ["desert"]
 

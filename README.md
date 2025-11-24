@@ -21,7 +21,7 @@ This project provides **three different ways** to play/train Catan:
 
 ### 🎮 Option 1: Play the Full Game (Human Players)
 ```bash
-python3 main.py
+python3 huPlay.py
 ```
 - Full pygame UI with all features
 - Supports trading, development cards, etc.
@@ -154,7 +154,7 @@ obs = {
 
 ```python
 import random
-from ai_interface import AIGameEnvironment
+from scripts.ai_interface import AIGameEnvironment
 
 env = AIGameEnvironment()
 observations = env.reset()

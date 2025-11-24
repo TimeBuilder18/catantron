@@ -167,10 +167,12 @@
 
 ```python
 # Visual training (watch the AI)
-python3 visual_ai_game.py
+python3
+visual_ai_game.py
 
 # Headless training (maximum speed)
-from ai_interface import AIGameEnvironment
+from scripts.ai_interface import AIGameEnvironment
+
 env = AIGameEnvironment()
 observations = env.reset()
 
