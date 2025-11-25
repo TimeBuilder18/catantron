@@ -1429,6 +1429,8 @@ class GameSystem:
         self.waiting_for_road = False
         self.last_settlement_vertex = None
 
+        success, msg = self.advance_initial_placement()
+
         return True, "Road placed"
 
     # ==================== TRADING SYSTEM ====================

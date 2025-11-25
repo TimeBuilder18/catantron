@@ -250,7 +250,9 @@ class AIGameEnvironment:
 
         # Execute action
         if action == 'roll_dice':
-            success, message = self.game.roll_dice_action()
+            dice_result = self.game.roll_dice()
+            success = dice_result is not None
+            message = f"Rolled {dice_result[2]}" if success else "Cannot roll dice"
             info['success'] = success
             info['message'] = message
 

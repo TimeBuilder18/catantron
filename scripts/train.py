@@ -1,4 +1,5 @@
 import sys
+
 sys.path.append('/home/claude')
 
 import torch
@@ -9,6 +10,7 @@ from catan_env_pytorch import CatanEnv
 from network import CatanPolicy
 from agent import CatanAgent, ExperienceBuffer
 from trainer import PPOTrainer
+from rule_based_ai import play_rule_based_turn
 
 def train(total_episodes=10, update_frequency=5, save_frequency=5, model_name="catan_ppo"):
     print("=" * 70)
@@ -22,7 +24,8 @@ def train(total_episodes=10, update_frequency=5, save_frequency=5, model_name="c
     print("✅ Environment created\n")
     agent = CatanAgent()
     print("✅ Agent created\n")
-    trainer = PPOTrainer(policy=agent.policy,learning_rate=3e-4,gamma=0.99,gae_lambda=0.95,clip_epsilon=0.2,n_epochs=10,batch_size=64)
+    trainer = PPOTrainer(policy=agent.policy, learning_rate=3e-4, gamma=0.99, gae_lambda=0.95, clip_epsilon=0.2,
+                         n_epochs=10, batch_size=64)
     print("✅ Trainer created\n")
     buffer = ExperienceBuffer()
     episode_rewards = []
@@ -37,29 +40,84 @@ def train(total_episodes=10, update_frequency=5, save_frequency=5, model_name="c
         episode_reward = 0
         episode_length = 0
 
+        print(f"\n[EPISODE {episode + 1}] Starting new episode")
+
         # Play one episode
         while not done:
-            # Get action from agent
-            action, log_prob, value = agent.choose_action(obs, obs['action_mask'])
+            # Only act if it's our turn
+            # Only act if it's our turn
+            # Only act if it's our turn
+            # Only act if it's our turn
+            # Only act if it's our turn
+            if not info.get('is_my_turn', True):
+                # Let other players (1, 2, 3) play with rule-based AI
+                max_wait = 100
+                waited = 0
 
-            # Take step in environment
-            next_obs, reward, terminated, truncated, info = env.step(action)
-            done = terminated or truncated
+                while not info.get('is_my_turn', True) and not done and waited < max_wait:
+                    # Check turn limit
+                    if env.game_env.game.turn_number > 500:
+                        print(f"[TRUNCATED] Game exceeded 500 turns")
+                        done = True
+                        break
 
-            # Store experience
-            buffer.store(
-                obs['observation'],
-                action,
-                reward,
-                log_prob,
-                value,
-                done,
-                obs['action_mask']
-            )
-            # Update for next step
-            obs = next_obs
-            episode_reward += reward
-            episode_length += 1
+                    # Get current player
+                    current_player = env.game_env.game.current_player_index
+
+                    # Use rule-based AI for other players
+                    success = play_rule_based_turn(env, current_player)
+
+                    if not success:
+                        print(f"[WARNING] Rule-based AI failed for player {current_player}")
+                        # Force end turn as fallback
+                        if env.game_env.game.can_end_turn():
+                            env.game_env.game.end_turn()
+
+                    # Check if game over
+                    winner = env.game_env.game.check_victory_conditions()
+                    if winner:
+                        done = True
+                        print(f"[GAME OVER] Player {env.game_env.game.players.index(winner) + 1} wins!")
+                        break
+
+                    # Update observation
+                    obs = env._get_obs()
+                    info = env._get_info()
+                    waited += 1
+
+                    # Safety: break if we waited too long
+                    if waited >= max_wait:
+                        print(f"[WARNING] Waited {max_wait} iterations, forcing break")
+                        break
+
+                if done:
+                    break
+
+                # Update observation after other players moved
+                obs = env._get_obs()
+                info = env._get_info()
+            # Now it's our turn - take action
+            if info.get('is_my_turn', True):
+                action, log_prob, value = agent.choose_action(obs, obs['action_mask'])
+
+                next_obs, reward, terminated, truncated, info = env.step(action)
+                done = terminated or truncated
+
+                # Store experience
+                buffer.store(
+                    obs['observation'],
+                    action,
+                    reward,
+                    log_prob,
+                    value,
+                    done,
+                    obs['action_mask']
+                )
+
+                # Update for next step
+                obs = next_obs
+                episode_reward += reward
+                episode_length += 1
 
         # Track metrics
         episode_rewards.append(episode_reward)
@@ -67,12 +125,9 @@ def train(total_episodes=10, update_frequency=5, save_frequency=5, model_name="c
         episode_vps.append(info.get('victory_points', 0))
 
         # Print progress
-        if (episode + 1) % 10 == 0:
-            avg_reward = np.mean(episode_rewards[-10:])
-            avg_vp = np.mean(episode_vps[-10:])
-            print(f"Episode {episode + 1}/{total_episodes} | "
-                  f"Reward: {avg_reward:.2f} | VP: {avg_vp:.1f} | "
-                  f"Length: {episode_length}")
+        print(f"Episode {episode + 1}/{total_episodes} | "
+              f"Reward: {episode_reward:.2f} | VP: {info.get('victory_points', 0)} | "
+              f"Length: {episode_length}")
 
         # Update policy
         if (episode + 1) % update_frequency == 0 and len(buffer) > 0:
@@ -141,16 +196,14 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description='Train Catan PPO agent')
-    parser.add_argument('--episodes', type=int, default=1000, help='Total episodes')
-    parser.add_argument('--update-freq', type=int, default=10, help='Update every N episodes')
-    parser.add_argument('--save-freq', type=int, default=100, help='Save every N episodes')
+    parser.add_argument('--episodes', type=int, default=10, help='Total episodes')
+    parser.add_argument('--update-freq', type=int, default=5, help='Update every N episodes')
+    parser.add_argument('--save-freq', type=int, default=5, help='Save every N episodes')
     parser.add_argument('--model-name', type=str, default='catan_ppo', help='Model name')
 
     args = parser.parse_args()
 
     # Create models directory
-    import os
-
     os.makedirs('models', exist_ok=True)
 
     # Train
@@ -162,5 +215,6 @@ if __name__ == "__main__":
     )
 
     print("\n🎉 Training finished!")
-    print(f"Final average reward (last 100): {np.mean(rewards[-100:]):.2f}")
-    print(f"Final average VP (last 100): {np.mean(vps[-100:]):.1f}")
+    if len(rewards) > 0:
+        print(f"Final average reward (last {min(100, len(rewards))}): {np.mean(rewards[-100:]):.2f}")
+        print(f"Final average VP (last {min(100, len(vps))}): {np.mean(vps[-100:]):.1f}")

@@ -77,7 +77,7 @@ class CatanEnv(gym.Env):
         size = 0
 
         # Game state: 10 features
-        size += 10
+        size += 11
 
         # My resources: 5 features
         size += 5
@@ -131,6 +131,7 @@ class CatanEnv(gym.Env):
         features = []
 
         # === GAME STATE (10 features) ===
+        # === GAME STATE (11 features) ===  # Changed from 10 to 11
         features.extend([
             1.0 if raw_obs['is_my_turn'] else 0.0,
             float(raw_obs['current_player']),
@@ -142,6 +143,7 @@ class CatanEnv(gym.Env):
             1.0 if raw_obs['turn_phase'] == 'ROLL_DICE' else 0.0,
             1.0 if raw_obs['turn_phase'] == 'TRADE_BUILD' else 0.0,
             1.0 if raw_obs['turn_phase'] == 'TURN_COMPLETE' else 0.0,
+            1.0 if self.game_env.game.waiting_for_road else 0.0,  # ← ADD THIS!
         ])
 
         # === MY RESOURCES (5 features) ===
@@ -292,34 +294,28 @@ class CatanEnv(gym.Env):
         }
 
     def step(self, action):
-        """
-        Execute action
-
-        Args:
-            action: Integer 0-8
-
-        Returns:
-            observation, reward, terminated, truncated, info
-        """
         raw_obs = self.game_env.get_observation(self.player_id)
 
-        # If not our turn, wait
         if not raw_obs['is_my_turn']:
+            # Return observation with ALL actions masked (can't do anything)
             obs = self._get_obs()
+            obs['action_mask'] = np.zeros(9, dtype=np.int8)  # ← Mask ALL actions
+            obs['action_mask'][8] = 1  # Only 'wait' is valid
             info = self._get_info()
             return obs, 0.0, False, False, info
 
-        # Get current action mask to check if action is valid
+        # Get current action mask
         current_obs = self._get_obs()
         action_mask = current_obs['action_mask']
 
-        # Check if action is legal (masked)
+        # Check if action is legal
         if action_mask[action] == 0:
-            # Illegal action penalty
             obs = self._get_obs()
             info = self._get_info()
             info['illegal_action'] = True
             return obs, -1.0, False, False, info
+
+        # ... rest of your step() method stays the same
 
         # Map action index to action name
         action_names = [
@@ -351,7 +347,6 @@ class CatanEnv(gym.Env):
         truncated = False
 
         return obs, reward, terminated, truncated, info
-
     def _get_action_params(self, action_name):
         """
         Get parameters for actions that need them
