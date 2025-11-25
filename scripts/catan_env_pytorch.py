@@ -226,17 +226,30 @@ class CatanEnv(gym.Env):
             ])
 
         # === ACTION MASK (9 actions) ===
+        # === ACTION MASK (9 actions) ===
         legal_actions = raw_obs['legal_actions']
-        action_names = [
-            'roll_dice', 'place_settlement', 'place_road',
-            'build_settlement', 'build_city', 'build_road',
-            'buy_dev_card', 'end_turn', 'wait'
-        ]
-
         action_mask = np.zeros(9, dtype=np.int8)
-        for i, action_name in enumerate(action_names):
-            if action_name in legal_actions:
-                action_mask[i] = 1
+        # Handle initial placement phase specially
+        if self.game_env.game.is_initial_placement_phase():
+            if self.game_env.game.waiting_for_road:
+                action_mask[2] = 1  # place_road
+            else:
+                action_mask[1] = 1  # place_settlement
+        else:
+            # Normal play - map legal actions to indices
+            action_map = {
+                'roll_dice': 0,
+                'build_settlement': 3,
+                'build_city': 4,
+                'build_road': 5,
+                'buy_dev_card': 6,
+                'end_turn': 7,
+                'wait': 8
+            }
+
+            for action_name in legal_actions:
+                if action_name in action_map:
+                    action_mask[action_map[action_name]] = 1
 
         # Convert to numpy array
         observation = np.array(features, dtype=np.float32)
@@ -296,21 +309,25 @@ class CatanEnv(gym.Env):
             info = self._get_info()
             return obs, 0.0, False, False, info
 
-        # Map action to name
+        # Get current action mask to check if action is valid
+        current_obs = self._get_obs()
+        action_mask = current_obs['action_mask']
+
+        # Check if action is legal (masked)
+        if action_mask[action] == 0:
+            # Illegal action penalty
+            obs = self._get_obs()
+            info = self._get_info()
+            info['illegal_action'] = True
+            return obs, -1.0, False, False, info
+
+        # Map action index to action name
         action_names = [
             'roll_dice', 'place_settlement', 'place_road',
             'build_settlement', 'build_city', 'build_road',
             'buy_dev_card', 'end_turn', 'wait'
         ]
         action_name = action_names[action]
-
-        # Check if action is legal
-        if action_name not in raw_obs['legal_actions']:
-            # Illegal action penalty
-            obs = self._get_obs()
-            info = self._get_info()
-            info['illegal_action'] = True
-            return obs, -1.0, False, False, info
 
         # Get action parameters (if needed)
         action_params = self._get_action_params(action_name)

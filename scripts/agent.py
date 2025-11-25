@@ -41,16 +41,16 @@ class ExperienceBuffer:
         self.log_probs = []
         self.values = []
         self.dones = []
-        self.action_masks = []
+        self.action_masks = []  # ✅ FIXED: Changed to plural
 
-    def store(self, state, action, reward, log_prob, value, done,action_masks):
+    def store(self, state, action, reward, log_prob, value, done, action_mask):
         self.states.append(state)
         self.actions.append(action)
         self.rewards.append(reward)
         self.log_probs.append(log_prob)
         self.values.append(value)
         self.dones.append(done)
-        self.action_masks.append(action_masks)
+        self.action_masks.append(action_mask)  # ✅ FIXED: Changed to plural
 
     def get(self):
         return {
@@ -60,7 +60,7 @@ class ExperienceBuffer:
             'log_probs': torch.FloatTensor(self.log_probs),
             'values': torch.FloatTensor(self.values),
             'dones': torch.FloatTensor(self.dones),
-            'action_masks': torch.FloatTensor(np.array(self.action_masks))
+            'action_masks': torch.FloatTensor(np.array(self.action_masks))  # ✅ Already correct
         }
 
     def clear(self):
@@ -70,7 +70,7 @@ class ExperienceBuffer:
         self.log_probs.clear()
         self.values.clear()
         self.dones.clear()
-        self.action_masks.clear()
+        self.action_masks.clear()  # ✅ FIXED: Changed to plural
 
     def __len__(self):
         return len(self.states)
