@@ -16,9 +16,10 @@ class CatanPolicy(nn.Module):
         
         #print(f"🎮 CatanPolicy using device: {self.device}")
         if self.device.type == 'cuda':
+            pass  # GPU info suppressed during training
             #print(f"   GPU: {torch.cuda.get_device_name(0)}")
             #print(f"   VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
-        
+
         # Network architecture (121-dim input for updated observation space)
         self.fc1 = nn.Linear(121, 512)
         self.fc2 = nn.Linear(512, 512)
