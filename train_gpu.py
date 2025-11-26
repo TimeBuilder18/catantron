@@ -190,16 +190,18 @@ def train(total_episodes=10, update_frequency=5, save_frequency=5, model_name="c
             avg_vp = np.mean(episode_vps[-10:])
             elapsed = time.time() - start_time
             eps_per_min = (episode + 1) / (elapsed / 60)
-            
+
+            pass  # Progress printing suppressed
             #print(f"Episode {episode + 1}/{total_episodes} | "
-            f"Reward: {avg_reward:.2f} | VP: {avg_vp:.1f} | "
-            f"Length: {episode_length} | Time: {episode_time:.1f}s | "
-            f"Speed: {eps_per_min:.1f} eps/min")
-            
+            #      f"Reward: {avg_reward:.2f} | VP: {avg_vp:.1f} | "
+            #      f"Length: {episode_length} | Time: {episode_time:.1f}s | "
+            #      f"Speed: {eps_per_min:.1f} eps/min")
+
             # GPU memory usage
             if device.type == 'cuda':
                 mem_allocated = torch.cuda.memory_allocated(0) / 1e9
                 mem_cached = torch.cuda.memory_reserved(0) / 1e9
+                pass  # GPU memory printing suppressed
                 #print(f"   GPU Memory: {mem_allocated:.2f}GB allocated, {mem_cached:.2f}GB cached")
         
         # Update policy
@@ -237,8 +239,9 @@ def train(total_episodes=10, update_frequency=5, save_frequency=5, model_name="c
     #print(f"Total time: {total_time/60:.1f} minutes")
     #print(f"Average time per episode: {total_time/total_episodes:.2f}s")
     if update_times:
+        pass  # Update time printing suppressed
         #print(f"Average update time: {np.mean(update_times):.2f}s")
-    
+
     # Save final model
     final_path = f"models/{model_name}_final.pt"
     agent.policy.save(final_path)
