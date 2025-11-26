@@ -2,22 +2,35 @@
 import os
 import sys
 import io
-sys.stdout = io.TextIOWrapper(sys.stdout.detach(), encoding='utf-8', errors='replace')
-"""Clean training with minimal output"""
-# rest of code...
 
-# Redirect all print statements from imported modules
+# Fix Windows encoding issues with emojis
+sys.stdout = io.TextIOWrapper(sys.stdout.detach(), encoding='utf-8', errors='replace')
+sys.stderr = io.TextIOWrapper(sys.stderr.detach(), encoding='utf-8', errors='replace')
+
+
+class NullWriter:
+    """A file-like object that discards all output - Windows compatible"""
+    def write(self, text):
+        pass
+
+    def flush(self):
+        pass
+
+    def isatty(self):
+        return False
+
+
 class SuppressOutput:
+    """Context manager to suppress all stdout/stderr output"""
     def __enter__(self):
         self._original_stdout = sys.stdout
         self._original_stderr = sys.stderr
-        sys.stdout = open(os.devnull, 'w')
-        sys.stderr = open(os.devnull, 'w')
+        # Use custom NullWriter instead of os.devnull for better Windows compatibility
+        sys.stdout = NullWriter()
+        sys.stderr = NullWriter()
         return self
 
     def __exit__(self, *args):
-        sys.stdout.close()
-        sys.stderr.close()
         sys.stdout = self._original_stdout
         sys.stderr = self._original_stderr
 
@@ -45,12 +58,16 @@ parser.add_argument('--save-freq', type=int, default=3000)
 parser.add_argument('--model-name', type=str, default='catan_clean')
 args = parser.parse_args()
 
-#print("=" * 70)
-#print("CATAN TRAINING - CLEAN OUTPUT MODE")
-#print("=" * 70)
+print("=" * 70)
+print("CATAN TRAINING - CLEAN OUTPUT MODE")
+print("=" * 70)
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-#print(f"Device: {device}")
+print(f"Device: {device}")
+print(f"Episodes: {args.episodes}")
+print(f"Update frequency: {args.update_freq}")
+print(f"Save frequency: {args.save_freq}")
+print(f"Model name: {args.model_name}")
 
 env = CatanEnv(player_id=0)
 agent = CatanAgent(device=device)
@@ -60,7 +77,7 @@ buffer = ExperienceBuffer()
 episode_rewards = []
 episode_vps = []
 
-#print(f"\nTraining for {args.episodes} episodes...\n")
+print(f"\nStarting training...\n")
 start_time = time.time()
 
 for episode in range(args.episodes):
@@ -105,14 +122,17 @@ for episode in range(args.episodes):
         with SuppressOutput():
             metrics = trainer.update_policy(buffer)
         buffer.clear()
-        #print(f"         Policy updated | Loss: {metrics['policy_loss']:.4f}")
+        print(f"         Policy updated | Loss: {metrics['policy_loss']:.4f}")
 
     # Save model
     if (episode + 1) % args.save_freq == 0:
         save_path = f"models/{args.model_name}_episode_{episode + 1}.pt"
         agent.policy.save(save_path)
-        #print(f"         💾 Checkpoint saved")
+        print(f"         Checkpoint saved -> {save_path}")
 
-#print("\n" + "=" * 70)
-#print("TRAINING COMPLETE!")
-#print("=" * 70)
+print("\n" + "=" * 70)
+print("TRAINING COMPLETE!")
+elapsed_time = time.time() - start_time
+print(f"Total time: {elapsed_time/60:.1f} minutes ({elapsed_time/3600:.2f} hours)")
+print(f"Average speed: {args.episodes / (elapsed_time / 60):.0f} episodes/min")
+print("=" * 70)
