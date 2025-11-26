@@ -114,10 +114,19 @@ for episode in range(args.episodes):
             episode_reward += reward
         if step_count >= max_steps:
             done = True
-        if (episode + 1) % 100 == 0:
-            print(f"         [DEBUG] Last game length: {step_count} steps")
+
     episode_rewards.append(episode_reward)
     episode_vps.append(info.get('victory_points', 0))
+    if (episode + 1) % 10 == 0:
+        avg_reward = np.mean(episode_rewards[-10:])
+        avg_vp = np.mean(episode_vps[-10:])
+        progress = (episode + 1) / args.episodes * 100
+        elapsed = time.time() - start_time
+        speed = (episode + 1) / (elapsed / 60)
+
+        print(
+            f"[{progress:5.1f}%] Ep {episode + 1:5d}/{args.episodes} | VP: {avg_vp:.1f} | Reward: {avg_reward:6.2f} | {speed:4.0f} eps/min")
+        print(f"         [DEBUG] Steps: {step_count}, Reward: {episode_reward:.1f}")
 
     # Print ONLY every 10 episodes
     if (episode + 1) % 10 == 0:
