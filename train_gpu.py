@@ -192,9 +192,9 @@ def train(total_episodes=10, update_frequency=5, save_frequency=5, model_name="c
             eps_per_min = (episode + 1) / (elapsed / 60)
             
             #print(f"Episode {episode + 1}/{total_episodes} | "
-                  f"Reward: {avg_reward:.2f} | VP: {avg_vp:.1f} | "
-                  f"Length: {episode_length} | Time: {episode_time:.1f}s | "
-                  f"Speed: {eps_per_min:.1f} eps/min")
+            f"Reward: {avg_reward:.2f} | VP: {avg_vp:.1f} | "
+            f"Length: {episode_length} | Time: {episode_time:.1f}s | "
+            f"Speed: {eps_per_min:.1f} eps/min")
             
             # GPU memory usage
             if device.type == 'cuda':

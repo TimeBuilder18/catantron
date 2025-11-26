@@ -311,7 +311,7 @@ class CatanEnv(gym.Env):
             obs = self._get_obs()
             info = self._get_info()
             info['illegal_action'] = True
-            return obs, -1.0, False, False, info
+            return obs, -10.0, False, False, info
 
         # ... rest of your step() method stays the same
 
@@ -417,37 +417,40 @@ class CatanEnv(gym.Env):
 
         # Victory points (main goal)
         vp_diff = new_obs['my_victory_points'] - old_obs['my_victory_points']
-        reward += vp_diff * 10.0
+        reward += vp_diff * 20.0
 
         # Building rewards
         settlement_diff = new_obs['my_settlements'] - old_obs['my_settlements']
         city_diff = new_obs['my_cities'] - old_obs['my_cities']
         road_diff = new_obs['my_roads'] - old_obs['my_roads']
 
-        reward += settlement_diff * 2.0
-        reward += city_diff * 3.0
-        reward += road_diff * 0.5
+        reward += settlement_diff * 10.0
+        reward += city_diff * 20.0
+        reward += road_diff * 2
 
         # Resource collection
         old_resources = sum(old_obs['my_resources'].values())
         new_resources = sum(new_obs['my_resources'].values())
         resource_diff = new_resources - old_resources
-        reward += resource_diff * 0.1
+        reward += resource_diff * 0.05
 
-        # Small negative reward each step (encourage efficiency)
+        total_resources = sum(new_obs['my_resources'].values())
+        if total_resources > 7:  # If hoarding 10+ resources
+            reward -= 1
+            # Small negative reward each step (encourage efficiency)
         reward -= 0.01
 
         # Big win/loss bonus
         if step_info.get('result') == 'game_over':
             winner_id = step_info.get('winner')
             if winner_id == self.player_id:
-                reward += 100.0  # Win!
+                reward += 200  # Win!
             else:
                 reward -= 10.0  # Loss
 
         # Illegal action penalty
         if not step_info.get('success', True):
-            reward -= 0.5
+            reward -= 10
 
         return reward
 

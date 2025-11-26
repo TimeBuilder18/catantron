@@ -78,7 +78,7 @@ sys.stdout.flush()
 
 env = CatanEnv(player_id=0)
 agent = CatanAgent(device=device)
-trainer = PPOTrainer(policy=agent.policy, batch_size=512, n_epochs=15)
+trainer = PPOTrainer(policy=agent.policy, batch_size=768, n_epochs=15)
 buffer = ExperienceBuffer()
 
 episode_rewards = []
@@ -94,8 +94,10 @@ for episode in range(args.episodes):
         obs, info = env.reset()
         done = False
         episode_reward = 0
-
-        while not done:
+        step_count = 0
+        max_steps = 1000
+        while not done and step_count < max_steps:
+            step_count += 1
             if not info.get('is_my_turn', True):
                 current_player = env.game_env.game.current_player_index
                 play_rule_based_turn(env, current_player)
@@ -110,7 +112,10 @@ for episode in range(args.episodes):
             buffer.store(obs['observation'], action, reward, log_prob, value, done, obs['action_mask'])
             obs = next_obs
             episode_reward += reward
-
+        if step_count >= max_steps:
+            done = True
+        if (episode + 1) % 100 == 0:
+            print(f"         [DEBUG] Last game length: {step_count} steps")
     episode_rewards.append(episode_reward)
     episode_vps.append(info.get('victory_points', 0))
 

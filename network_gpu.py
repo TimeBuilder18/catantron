@@ -21,9 +21,9 @@ class CatanPolicy(nn.Module):
             #print(f"   VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
 
         # Network architecture (121-dim input for updated observation space)
-        self.fc1 = nn.Linear(121, 512)
-        self.fc2 = nn.Linear(512, 512)
-        self.fc3 = nn.Linear(512, 512)
+        self.fc1 = nn.Linear(121, 768)
+        self.fc2 = nn.Linear(768, 768)
+        self.fc3 = nn.Linear(768, 512)
         self.fc4 = nn.Linear(512, 256)
         self.policy_head = nn.Linear(256, 9)
         self.value_head = nn.Linear(256, 1)
