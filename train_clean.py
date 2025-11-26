@@ -105,11 +105,34 @@ for episode in range(args.episodes):
                 info = env._get_info()
                 continue
 
-            action, log_prob, value = agent.choose_action(obs, obs['action_mask'])
+            # Get hierarchical action from agent (7 values now!)
+            action, vertex, edge, action_log_prob, vertex_log_prob, edge_log_prob, value = agent.choose_action(
+                obs,
+                obs['action_mask'],
+                obs['vertex_mask'],
+                obs['edge_mask']
+            )
+
+            # Take step in environment
             next_obs, reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated
 
-            buffer.store(obs['observation'], action, reward, log_prob, value, done, obs['action_mask'])
+            # Store ALL hierarchical data in buffer (10 values!)
+            buffer.store(
+                state=obs['observation'],
+                action=action,
+                vertex=vertex,
+                edge=edge,
+                reward=reward,
+                action_log_prob=action_log_prob,
+                vertex_log_prob=vertex_log_prob,
+                edge_log_prob=edge_log_prob,
+                value=value,
+                done=done,
+                action_mask=obs['action_mask'],
+                vertex_mask=obs['vertex_mask'],
+                edge_mask=obs['edge_mask']
+            )
             obs = next_obs
             episode_reward += reward
         if step_count >= max_steps:
