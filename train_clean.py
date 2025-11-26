@@ -3,9 +3,14 @@ import os
 import sys
 import io
 
-# Fix Windows encoding issues with emojis
-sys.stdout = io.TextIOWrapper(sys.stdout.detach(), encoding='utf-8', errors='replace')
-sys.stderr = io.TextIOWrapper(sys.stderr.detach(), encoding='utf-8', errors='replace')
+# Fix Windows encoding issues with emojis - use reconfigure for Python 3.7+
+try:
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+except AttributeError:
+    # Fallback for older Python versions
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace', line_buffering=True)
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace', line_buffering=True)
 
 
 class NullWriter:
@@ -61,6 +66,7 @@ args = parser.parse_args()
 print("=" * 70)
 print("CATAN TRAINING - CLEAN OUTPUT MODE")
 print("=" * 70)
+sys.stdout.flush()
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Device: {device}")
@@ -68,6 +74,7 @@ print(f"Episodes: {args.episodes}")
 print(f"Update frequency: {args.update_freq}")
 print(f"Save frequency: {args.save_freq}")
 print(f"Model name: {args.model_name}")
+sys.stdout.flush()
 
 env = CatanEnv(player_id=0)
 agent = CatanAgent(device=device)
@@ -78,6 +85,7 @@ episode_rewards = []
 episode_vps = []
 
 print(f"\nStarting training...\n")
+sys.stdout.flush()
 start_time = time.time()
 
 for episode in range(args.episodes):
@@ -116,6 +124,7 @@ for episode in range(args.episodes):
 
         print(
             f"[{progress:5.1f}%] Ep {episode + 1:5d}/{args.episodes} | VP: {avg_vp:.1f} | Reward: {avg_reward:6.2f} | {speed:4.0f} eps/min")
+        sys.stdout.flush()
 
     # Update policy
     if (episode + 1) % args.update_freq == 0 and len(buffer) > 0:
@@ -123,12 +132,14 @@ for episode in range(args.episodes):
             metrics = trainer.update_policy(buffer)
         buffer.clear()
         print(f"         Policy updated | Loss: {metrics['policy_loss']:.4f}")
+        sys.stdout.flush()
 
     # Save model
     if (episode + 1) % args.save_freq == 0:
         save_path = f"models/{args.model_name}_episode_{episode + 1}.pt"
         agent.policy.save(save_path)
         print(f"         Checkpoint saved -> {save_path}")
+        sys.stdout.flush()
 
 print("\n" + "=" * 70)
 print("TRAINING COMPLETE!")
@@ -136,3 +147,4 @@ elapsed_time = time.time() - start_time
 print(f"Total time: {elapsed_time/60:.1f} minutes ({elapsed_time/3600:.2f} hours)")
 print(f"Average speed: {args.episodes / (elapsed_time / 60):.0f} episodes/min")
 print("=" * 70)
+sys.stdout.flush()

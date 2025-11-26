@@ -3,9 +3,14 @@ import os
 import sys
 import io
 
-# Fix Windows encoding issues with emojis
-sys.stdout = io.TextIOWrapper(sys.stdout.detach(), encoding='utf-8', errors='replace')
-sys.stderr = io.TextIOWrapper(sys.stderr.detach(), encoding='utf-8', errors='replace')
+# Fix Windows encoding issues with emojis - use reconfigure for Python 3.7+
+try:
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+except AttributeError:
+    # Fallback for older Python versions
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace', line_buffering=True)
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace', line_buffering=True)
 
 
 class NullWriter:
@@ -38,11 +43,14 @@ class SuppressOutput:
 print("=" * 50)
 print("Testing output suppression...")
 print("=" * 50)
+sys.stdout.flush()
 
 print("\n1. Normal output (visible):")
 print("   This line should be visible")
+sys.stdout.flush()
 
 print("\n2. Suppressed output (not visible):")
+sys.stdout.flush()
 with SuppressOutput():
     print("   [DEBUG] This should NOT appear")
     print("   [RULE AI] This should NOT appear")
@@ -51,18 +59,23 @@ with SuppressOutput():
         print(f"   Loop {i} - should NOT appear")
 
 print("   Back to normal - this SHOULD be visible")
+sys.stdout.flush()
 
 print("\n3. Testing with emojis in normal mode:")
 print("   Emoji test: 🏠 🌾 🐑 🪨 🧱 (should be visible or replaced)")
+sys.stdout.flush()
 
 print("\n4. Testing imports with suppression:")
+sys.stdout.flush()
 with SuppressOutput():
     # Simulate importing a module that prints during import
     print("This is during import - should NOT appear")
 
 print("   Import complete - this SHOULD be visible")
+sys.stdout.flush()
 
 print("\n" + "=" * 50)
 print("Test complete! If you only see numbered sections,")
 print("the suppression is working correctly.")
 print("=" * 50)
+sys.stdout.flush()
