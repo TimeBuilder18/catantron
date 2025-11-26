@@ -404,53 +404,46 @@ class CatanEnv(gym.Env):
         return None
 
     def _calculate_reward(self, old_obs, new_obs, step_info):
-        """
-        Reward shaping for Catan
-
-        Goals:
-        - Win the game (10 VP)
-        - Gain victory points
-        - Build structures
-        - Collect resources
-        """
         reward = 0.0
 
-        # Victory points (main goal)
+        # VP gain - INCREASE THIS!
         vp_diff = new_obs['my_victory_points'] - old_obs['my_victory_points']
-        reward += vp_diff * 20.0
+        reward += vp_diff * 50.0  # Changed from 20.0 to 50.0!
 
-        # Building rewards
+        # Building rewards - INCREASE THESE!
         settlement_diff = new_obs['my_settlements'] - old_obs['my_settlements']
         city_diff = new_obs['my_cities'] - old_obs['my_cities']
         road_diff = new_obs['my_roads'] - old_obs['my_roads']
 
-        reward += settlement_diff * 10.0
-        reward += city_diff * 20.0
-        reward += road_diff * 2
+        reward += settlement_diff * 30.0  # Changed from 10.0 to 30.0!
+        reward += city_diff * 60.0  # Changed from 20.0 to 60.0!
+        reward += road_diff * 5.0  # Changed from 2.0 to 5.0!
 
-        # Resource collection
+        # Resource collection - REDUCE THIS!
         old_resources = sum(old_obs['my_resources'].values())
         new_resources = sum(new_obs['my_resources'].values())
         resource_diff = new_resources - old_resources
-        reward += resource_diff * 0.05
+        reward += resource_diff * 0.01  # Changed from 0.1 to 0.01!
 
+        # Robber risk - keep your smart 7-card rule
         total_resources = sum(new_obs['my_resources'].values())
-        if total_resources > 7:  # If hoarding 10+ resources
-            reward -= 1
-            # Small negative reward each step (encourage efficiency)
+        if total_resources > 7:
+            reward -= 0.1
+
+        # Step penalty
         reward -= 0.01
 
-        # Big win/loss bonus
+        # Win/loss
         if step_info.get('result') == 'game_over':
             winner_id = step_info.get('winner')
             if winner_id == self.player_id:
-                reward += 200  # Win!
+                reward += 200.0
             else:
-                reward -= 10.0  # Loss
+                reward -= 10.0
 
-        # Illegal action penalty
+        # Illegal actions
         if not step_info.get('success', True):
-            reward -= 10
+            reward -= 10.0
 
         return reward
 
