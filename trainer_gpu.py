@@ -77,25 +77,54 @@ class PPOTrainer:
         return torch.FloatTensor(advantages).to(self.device), torch.FloatTensor(returns).to(self.device)
 
     def update_policy(self, experience_buffer):
-        """Update policy using PPO algorithm"""
-        # Get experience data and move to device
-        experience = experience_buffer.get(device=self.device)
-        
+        """
+        Update policy with hierarchical actions
+
+        Args:
+            experience_buffer: Buffer containing hierarchical experiences
+
+        Returns:
+            dict: Training metrics
+        """
+        experience = experience_buffer.get()
+
+        # Extract ALL the hierarchical data
         states = experience['states']
         actions = experience['actions']
-        old_log_probs = experience['log_probs']
+        vertices = experience['vertices']  # NEW
+        edges = experience['edges']  # NEW
+        old_action_log_probs = experience['action_log_probs']  # NEW: Separated
+        old_vertex_log_probs = experience['vertex_log_probs']  # NEW
+        old_edge_log_probs = experience['edge_log_probs']  # NEW
         values = experience['values']
         rewards = experience['rewards']
         dones = experience['dones']
         action_masks = experience['action_masks']
+        vertex_masks = experience['vertex_masks']  # NEW
+        edge_masks = experience['edge_masks']  # NEW
 
-        # Compute advantages (on CPU for numpy operations, then move to GPU)
+        # Move to GPU
+        states = states.to(self.policy.device)
+        actions = actions.to(self.policy.device)
+        vertices = vertices.to(self.policy.device)  # NEW
+        edges = edges.to(self.policy.device)  # NEW
+        old_action_log_probs = old_action_log_probs.to(self.policy.device)
+        old_vertex_log_probs = old_vertex_log_probs.to(self.policy.device)  # NEW
+        old_edge_log_probs = old_edge_log_probs.to(self.policy.device)  # NEW
+        values = values.to(self.policy.device)
+        rewards = rewards.to(self.policy.device)
+        dones = dones.to(self.policy.device)
+        action_masks = action_masks.to(self.policy.device)
+        vertex_masks = vertex_masks.to(self.policy.device)  # NEW
+        edge_masks = edge_masks.to(self.policy.device)  # NEW
+
+        # Compute advantages (stays the same)
         advantages, returns = self.compute_advantages(
             rewards.cpu().numpy(),
             values.cpu().numpy(),
             dones.cpu().numpy()
         )
-        
+
         # Training metrics
         total_policy_loss = 0
         total_value_loss = 0
@@ -112,23 +141,63 @@ class PPOTrainer:
                 end = start + self.batch_size
                 batch_indices = indices[start:end]
 
-                # Get batch data (already on device)
+                # Get batch data (hierarchical)
                 batch_states = states[batch_indices]
                 batch_actions = actions[batch_indices]
-                batch_old_log_probs = old_log_probs[batch_indices]
+                batch_vertices = vertices[batch_indices]  # NEW
+                batch_edges = edges[batch_indices]  # NEW
+                batch_old_action_log_probs = old_action_log_probs[batch_indices]  # NEW
+                batch_old_vertex_log_probs = old_vertex_log_probs[batch_indices]  # NEW
+                batch_old_edge_log_probs = old_edge_log_probs[batch_indices]  # NEW
                 batch_advantages = advantages[batch_indices]
                 batch_returns = returns[batch_indices]
-                batch_masks = action_masks[batch_indices]
+                batch_action_masks = action_masks[batch_indices]
+                batch_vertex_masks = vertex_masks[batch_indices]  # NEW
+                batch_edge_masks = edge_masks[batch_indices]  # NEW
 
-                # Evaluate actions with current policy
-                action_probs, state_values = self.policy.forward(batch_states, batch_masks)
-                dist = torch.distributions.Categorical(action_probs)
+                # Evaluate actions with current policy (hierarchical)
+                action_probs, vertex_probs, edge_probs, state_values = self.policy.forward(
+                    batch_states,
+                    batch_action_masks,
+                    batch_vertex_masks,
+                    batch_edge_masks
+                )
 
-                new_log_probs = dist.log_prob(batch_actions)
-                entropy = dist.entropy().mean()
+                # Action distribution
+                action_dist = torch.distributions.Categorical(action_probs)
+                new_action_log_probs = action_dist.log_prob(batch_actions)
+                action_entropy = action_dist.entropy().mean()
+
+                # Vertex distribution
+                vertex_dist = torch.distributions.Categorical(vertex_probs)
+                new_vertex_log_probs = vertex_dist.log_prob(batch_vertices)
+
+                # Edge distribution
+                edge_dist = torch.distributions.Categorical(edge_probs)
+                new_edge_log_probs = edge_dist.log_prob(batch_edges)
+
+                # Determine which actions need locations
+                # Actions: 0=roll, 1=place_settlement, 2=place_road, 3=build_settlement,
+                #          4=build_city, 5=build_road, 6=buy_dev, 7=end, 8=wait
+                needs_vertex = (batch_actions == 1) | (batch_actions == 3) | (batch_actions == 4)
+                needs_edge = (batch_actions == 2) | (batch_actions == 5)
+
+                # Combined log probability
+                # Only add location log_prob if action needed it
+                new_log_probs = new_action_log_probs.clone()
+                new_log_probs = new_log_probs + (new_vertex_log_probs * needs_vertex.float())
+                new_log_probs = new_log_probs + (new_edge_log_probs * needs_edge.float())
+
+                # Combined old log probs
+                old_log_probs = batch_old_action_log_probs.clone()
+                old_log_probs = old_log_probs + (batch_old_vertex_log_probs * needs_vertex.float())
+                old_log_probs = old_log_probs + (batch_old_edge_log_probs * needs_edge.float())
+
+                # Entropy (use action entropy as primary signal)
+                entropy = action_entropy
 
                 # PPO clipped objective
-                ratio = torch.exp(new_log_probs - batch_old_log_probs)
+                ratio = torch.exp(new_log_probs - old_log_probs)
                 surr1 = ratio * batch_advantages
                 surr2 = torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon) * batch_advantages
                 policy_loss = -torch.min(surr1, surr2).mean()
