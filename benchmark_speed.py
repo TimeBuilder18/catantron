@@ -18,9 +18,9 @@ from rule_based_ai import play_rule_based_turn
 
 def benchmark_device(device_name, episodes=5):
     """Run training on specified device and measure speed"""
-    print(f"\n{'='*60}")
-    print(f"🧪 Benchmarking: {device_name.upper()}")
-    print(f"{'='*60}")
+    #print(f"\n{'='*60}")
+    #print(f"🧪 Benchmarking: {device_name.upper()}")
+    #print(f"{'='*60}")
     
     device = torch.device(device_name)
     
@@ -90,34 +90,34 @@ def benchmark_device(device_name, episodes=5):
     
     elapsed = time.time() - start_time
     
-    print(f"\n📊 Results:")
-    print(f"   Episodes: {episodes}")
-    print(f"   Total time: {elapsed:.2f}s")
-    print(f"   Time per episode: {elapsed/episodes:.2f}s")
-    print(f"   Episodes per minute: {(episodes / elapsed) * 60:.1f}")
+    #print(f"\n📊 Results:")
+    #print(f"   Episodes: {episodes}")
+    #print(f"   Total time: {elapsed:.2f}s")
+    #print(f"   Time per episode: {elapsed/episodes:.2f}s")
+    #print(f"   Episodes per minute: {(episodes / elapsed) * 60:.1f}")
     
     if device.type == 'cuda':
         mem_allocated = torch.cuda.memory_allocated(0) / 1e9
-        print(f"   GPU memory used: {mem_allocated:.2f} GB")
+        #print(f"   GPU memory used: {mem_allocated:.2f} GB")
     
     return elapsed
 
 
 def main():
-    print("="*60)
-    print("⚡ CPU vs GPU Training Speed Benchmark")
-    print("="*60)
-    print("\nThis will run 5 episodes on each device to compare speed.")
-    print("Smaller batch size for CPU, larger for GPU.")
-    print("")
+    #print("="*60)
+    #print("⚡ CPU vs GPU Training Speed Benchmark")
+    #print("="*60)
+    #print("\nThis will run 5 episodes on each device to compare speed.")
+    #print("Smaller batch size for CPU, larger for GPU.")
+    #print("")
     
     # Check what's available
     has_cuda = torch.cuda.is_available()
     
     if has_cuda:
-        print(f"✅ GPU detected: {torch.cuda.get_device_name(0)}")
+        #print(f"✅ GPU detected: {torch.cuda.get_device_name(0)}")
     else:
-        print("❌ No GPU detected - will only benchmark CPU")
+        #print("❌ No GPU detected - will only benchmark CPU")
     
     input("\nPress Enter to start benchmark...")
     
@@ -128,24 +128,24 @@ def main():
     if has_cuda:
         gpu_time = benchmark_device('cuda', episodes=5)
         
-        print(f"\n{'='*60}")
-        print("🏆 COMPARISON")
-        print(f"{'='*60}")
-        print(f"CPU time:     {cpu_time:.2f}s")
-        print(f"GPU time:     {gpu_time:.2f}s")
-        print(f"Speedup:      {cpu_time/gpu_time:.1f}x faster on GPU! 🚀")
-        print(f"{'='*60}")
+        #print(f"\n{'='*60}")
+        #print("🏆 COMPARISON")
+        #print(f"{'='*60}")
+        #print(f"CPU time:     {cpu_time:.2f}s")
+        #print(f"GPU time:     {gpu_time:.2f}s")
+        #print(f"Speedup:      {cpu_time/gpu_time:.1f}x faster on GPU! 🚀")
+        #print(f"{'='*60}")
         
         # Estimate time for full training
-        print(f"\n⏱️  Estimated time for 5000 episodes:")
-        print(f"   CPU: {(cpu_time/5) * 5000 / 3600:.1f} hours")
-        print(f"   GPU: {(gpu_time/5) * 5000 / 3600:.1f} hours")
-        print(f"   Time saved: {((cpu_time - gpu_time)/5) * 5000 / 3600:.1f} hours! 🎉")
+        #print(f"\n⏱️  Estimated time for 5000 episodes:")
+        #print(f"   CPU: {(cpu_time/5) * 5000 / 3600:.1f} hours")
+        #print(f"   GPU: {(gpu_time/5) * 5000 / 3600:.1f} hours")
+        #print(f"   Time saved: {((cpu_time - gpu_time)/5) * 5000 / 3600:.1f} hours! 🎉")
     else:
-        print(f"\n⚠️  GPU not available. CPU training will work but be ~20-50x slower.")
-        print(f"   Estimated time for 5000 episodes: {(cpu_time/5) * 5000 / 3600:.1f} hours")
+        #print(f"\n⚠️  GPU not available. CPU training will work but be ~20-50x slower.")
+        #print(f"   Estimated time for 5000 episodes: {(cpu_time/5) * 5000 / 3600:.1f} hours")
     
-    print(f"\n{'='*60}")
+    #print(f"\n{'='*60}")
 
 
 if __name__ == "__main__":

@@ -14,15 +14,16 @@ class CatanPolicy(nn.Module):
         else:
             self.device = device
         
-        print(f"🎮 CatanPolicy using device: {self.device}")
+        #print(f"🎮 CatanPolicy using device: {self.device}")
         if self.device.type == 'cuda':
-            print(f"   GPU: {torch.cuda.get_device_name(0)}")
-            print(f"   VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
+            #print(f"   GPU: {torch.cuda.get_device_name(0)}")
+            #print(f"   VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
         
         # Network architecture (121-dim input for updated observation space)
-        self.fc1 = nn.Linear(121, 256)
-        self.fc2 = nn.Linear(256, 256)
-        self.fc3 = nn.Linear(256, 256)
+        self.fc1 = nn.Linear(121, 512)
+        self.fc2 = nn.Linear(512, 512)
+        self.fc3 = nn.Linear(512, 512)
+        self.fc4 = nn.Linear(512, 256)
         self.policy_head = nn.Linear(256, 9)
         self.value_head = nn.Linear(256, 1)
         
@@ -42,6 +43,7 @@ class CatanPolicy(nn.Module):
         x = F.relu(self.fc1(obs))
         x = F.relu(self.fc2(x))
         x = F.relu(self.fc3(x))
+        x = F.relu(self.fc4(x))
 
         action_logits = self.policy_head(x)
         
@@ -77,12 +79,12 @@ class CatanPolicy(nn.Module):
             'model_state_dict': self.state_dict(),
             'device': str(self.device)
         }, path)
-        print(f"💾 Model saved to {path}")
+        #print(f"💾 Model saved to {path}")
     
     def load(self, path, device=None):
         """Load model from file"""
         checkpoint = torch.load(path, map_location=device if device else self.device)
         self.load_state_dict(checkpoint['model_state_dict'])
-        print(f"📂 Model loaded from {path}")
-        print(f"   Original device: {checkpoint.get('device', 'unknown')}")
-        print(f"   Current device: {self.device}")
+        #print(f"📂 Model loaded from {path}")
+        #print(f"   Original device: {checkpoint.get('device', 'unknown')}")
+        #print(f"   Current device: {self.device}")

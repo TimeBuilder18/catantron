@@ -7,31 +7,30 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 from catan_env_pytorch import CatanEnv
-from network import CatanPolicy
 from agent import CatanAgent, ExperienceBuffer
 from trainer import PPOTrainer
 from rule_based_ai import play_rule_based_turn
 
 def train(total_episodes=10, update_frequency=5, save_frequency=5, model_name="catan_ppo"):
-    print("=" * 70)
-    print("CATAN PPO TRAINING")
-    print("=" * 70)
-    print(f"Total episodes: {total_episodes}")
-    print(f"Update frequency: {update_frequency} episodes")
-    print(f"Save frequency: {save_frequency} episodes")
-    print("=" * 70 + "\n")
+    #print("=" * 70)
+    #print("CATAN PPO TRAINING")
+    #print("=" * 70)
+    #print(f"Total episodes: {total_episodes}")
+    #print(f"Update frequency: {update_frequency} episodes")
+    #print(f"Save frequency: {save_frequency} episodes")
+    #print("=" * 70 + "\n")
     env = CatanEnv(player_id=0)
-    print("✅ Environment created\n")
+    #print("✅ Environment created\n")
     agent = CatanAgent()
-    print("✅ Agent created\n")
+    #print("✅ Agent created\n")
     trainer = PPOTrainer(policy=agent.policy, learning_rate=3e-4, gamma=0.99, gae_lambda=0.95, clip_epsilon=0.2,
                          n_epochs=10, batch_size=64)
-    print("✅ Trainer created\n")
+    #print("✅ Trainer created\n")
     buffer = ExperienceBuffer()
     episode_rewards = []
     episode_lengths = []
     episode_vps = []
-    print("🚀 Starting training...\n")
+    #print("🚀 Starting training...\n")
 
     for episode in range(total_episodes):
         # Reset environment
@@ -40,7 +39,7 @@ def train(total_episodes=10, update_frequency=5, save_frequency=5, model_name="c
         episode_reward = 0
         episode_length = 0
 
-        print(f"\n[EPISODE {episode + 1}] Starting new episode")
+        #print(f"\n[EPISODE {episode + 1}] Starting new episode")
 
         # Play one episode
         while not done:
@@ -57,7 +56,7 @@ def train(total_episodes=10, update_frequency=5, save_frequency=5, model_name="c
                 while not info.get('is_my_turn', True) and not done and waited < max_wait:
                     # Check turn limit
                     if env.game_env.game.turn_number > 500:
-                        print(f"[TRUNCATED] Game exceeded 500 turns")
+                        #print(f"[TRUNCATED] Game exceeded 500 turns")
                         done = True
                         break
 
@@ -68,7 +67,7 @@ def train(total_episodes=10, update_frequency=5, save_frequency=5, model_name="c
                     success = play_rule_based_turn(env, current_player)
 
                     if not success:
-                        print(f"[WARNING] Rule-based AI failed for player {current_player}")
+                        #print(f"[WARNING] Rule-based AI failed for player {current_player}")
                         # Force end turn as fallback
                         if env.game_env.game.can_end_turn():
                             env.game_env.game.end_turn()
@@ -77,7 +76,7 @@ def train(total_episodes=10, update_frequency=5, save_frequency=5, model_name="c
                     winner = env.game_env.game.check_victory_conditions()
                     if winner:
                         done = True
-                        print(f"[GAME OVER] Player {env.game_env.game.players.index(winner) + 1} wins!")
+                        #print(f"[GAME OVER] Player {env.game_env.game.players.index(winner) + 1} wins!")
                         break
 
                     # Update observation
@@ -87,7 +86,7 @@ def train(total_episodes=10, update_frequency=5, save_frequency=5, model_name="c
 
                     # Safety: break if we waited too long
                     if waited >= max_wait:
-                        print(f"[WARNING] Waited {max_wait} iterations, forcing break")
+                        #print(f"[WARNING] Waited {max_wait} iterations, forcing break")
                         break
 
                 if done:
@@ -125,33 +124,33 @@ def train(total_episodes=10, update_frequency=5, save_frequency=5, model_name="c
         episode_vps.append(info.get('victory_points', 0))
 
         # Print progress
-        print(f"Episode {episode + 1}/{total_episodes} | "
+        #print(f"Episode {episode + 1}/{total_episodes} | "
               f"Reward: {episode_reward:.2f} | VP: {info.get('victory_points', 0)} | "
               f"Length: {episode_length}")
 
         # Update policy
         if (episode + 1) % update_frequency == 0 and len(buffer) > 0:
-            print(f"\n📊 Updating policy (buffer size: {len(buffer)})...")
+            #print(f"\n📊 Updating policy (buffer size: {len(buffer)})...")
             metrics = trainer.update_policy(buffer)
-            print(f"   Policy loss: {metrics['policy_loss']:.4f}")
-            print(f"   Value loss: {metrics['value_loss']:.4f}")
-            print(f"   Entropy: {metrics['entropy']:.4f}\n")
+            #print(f"   Policy loss: {metrics['policy_loss']:.4f}")
+            #print(f"   Value loss: {metrics['value_loss']:.4f}")
+            #print(f"   Entropy: {metrics['entropy']:.4f}\n")
             buffer.clear()
 
         # Save model
         if (episode + 1) % save_frequency == 0:
             save_path = f"models/{model_name}_episode_{episode + 1}.pt"
             torch.save(agent.policy.state_dict(), save_path)
-            print(f"💾 Model saved: {save_path}\n")
+            #print(f"💾 Model saved: {save_path}\n")
 
-    print("\n" + "=" * 70)
-    print("✅ TRAINING COMPLETE!")
-    print("=" * 70)
+    #print("\n" + "=" * 70)
+    #print("✅ TRAINING COMPLETE!")
+    #print("=" * 70)
 
     # Save final model
     final_path = f"models/{model_name}_final.pt"
     torch.save(agent.policy.state_dict(), final_path)
-    print(f"💾 Final model saved: {final_path}")
+    #print(f"💾 Final model saved: {final_path}")
 
     # Plot results
     plot_training_progress(episode_rewards, episode_vps, model_name)
@@ -188,7 +187,7 @@ def plot_training_progress(rewards, vps, model_name):
 
     plt.tight_layout()
     plt.savefig(f'{model_name}_training.png')
-    print(f"📊 Training plot saved: {model_name}_training.png")
+    #print(f"📊 Training plot saved: {model_name}_training.png")
     plt.close()
 
 
@@ -214,7 +213,7 @@ if __name__ == "__main__":
         model_name=args.model_name
     )
 
-    print("\n🎉 Training finished!")
+    #print("\n🎉 Training finished!")
     if len(rewards) > 0:
-        print(f"Final average reward (last {min(100, len(rewards))}): {np.mean(rewards[-100:]):.2f}")
-        print(f"Final average VP (last {min(100, len(vps))}): {np.mean(vps[-100:]):.1f}")
+        #print(f"Final average reward (last {min(100, len(rewards))}): {np.mean(rewards[-100:]):.2f}")
+        #print(f"Final average VP (last {min(100, len(vps))}): {np.mean(vps[-100:]):.1f}")

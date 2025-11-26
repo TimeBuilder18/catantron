@@ -17,7 +17,20 @@ Usage:
 
 import sys
 sys.path.append('/home/claude')
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Suppress warnings
 
+# Suppress game debug output
+class QuietMode:
+    def write(self, x): pass
+    def flush(self): pass
+
+import warnings
+warnings.filterwarnings('ignore')
+import os
+os.environ['PYTHONWARNINGS'] = 'ignore'
+
+# Rest of your imports...
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
@@ -41,9 +54,9 @@ def train(total_episodes=10, update_frequency=5, save_frequency=5, model_name="c
         model_name: Base name for saved models
         device: 'cuda', 'cpu', or None (auto-detect)
     """
-    print("=" * 70)
-    print("CATAN PPO TRAINING - GPU ACCELERATED")
-    print("=" * 70)
+    #print("=" * 70)
+    #print("CATAN PPO TRAINING - GPU ACCELERATED")
+    #print("=" * 70)
     
     # Set device
     if device is None:
@@ -51,39 +64,39 @@ def train(total_episodes=10, update_frequency=5, save_frequency=5, model_name="c
     else:
         device = torch.device(device)
     
-    print(f"\n🎮 Using device: {device}")
+    #print(f"\n🎮 Using device: {device}")
     if device.type == 'cuda':
-        print(f"   GPU: {torch.cuda.get_device_name(0)}")
-        print(f"   VRAM Available: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
+        #print(f"   GPU: {torch.cuda.get_device_name(0)}")
+        #print(f"   VRAM Available: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
         # Clear cache
         torch.cuda.empty_cache()
     
-    print(f"\n📋 Training Configuration:")
-    print(f"   Total episodes: {total_episodes}")
-    print(f"   Update frequency: {update_frequency} episodes")
-    print(f"   Save frequency: {save_frequency} episodes")
-    print("=" * 70 + "\n")
+    #print(f"\n📋 Training Configuration:")
+    #print(f"   Total episodes: {total_episodes}")
+    #print(f"   Update frequency: {update_frequency} episodes")
+    #print(f"   Save frequency: {save_frequency} episodes")
+    #print("=" * 70 + "\n")
     
     # Create environment
     env = CatanEnv(player_id=0)
-    print("✅ Environment created\n")
+    #print("✅ Environment created\n")
     
     # Create agent with GPU support
     agent = CatanAgent(device=device)
-    print("✅ Agent created\n")
+    #print("✅ Agent created\n")
     
     # Create trainer with larger batch size for GPU
-    batch_size = 256 if device.type == 'cuda' else 64
+    batch_size = 512 if device.type == 'cuda' else 64
     trainer = PPOTrainer(
         policy=agent.policy,
         learning_rate=3e-4,
         gamma=0.99,
         gae_lambda=0.95,
         clip_epsilon=0.2,
-        n_epochs=10,
+        n_epochs=15,
         batch_size=batch_size
     )
-    print("✅ Trainer created\n")
+    #print("✅ Trainer created\n")
     
     buffer = ExperienceBuffer()
     
@@ -93,7 +106,7 @@ def train(total_episodes=10, update_frequency=5, save_frequency=5, model_name="c
     episode_vps = []
     update_times = []
     
-    print("🚀 Starting training...\n")
+    #print("🚀 Starting training...\n")
     start_time = time.time()
     
     for episode in range(total_episodes):
@@ -178,7 +191,7 @@ def train(total_episodes=10, update_frequency=5, save_frequency=5, model_name="c
             elapsed = time.time() - start_time
             eps_per_min = (episode + 1) / (elapsed / 60)
             
-            print(f"Episode {episode + 1}/{total_episodes} | "
+            #print(f"Episode {episode + 1}/{total_episodes} | "
                   f"Reward: {avg_reward:.2f} | VP: {avg_vp:.1f} | "
                   f"Length: {episode_length} | Time: {episode_time:.1f}s | "
                   f"Speed: {eps_per_min:.1f} eps/min")
@@ -187,11 +200,11 @@ def train(total_episodes=10, update_frequency=5, save_frequency=5, model_name="c
             if device.type == 'cuda':
                 mem_allocated = torch.cuda.memory_allocated(0) / 1e9
                 mem_cached = torch.cuda.memory_reserved(0) / 1e9
-                print(f"   GPU Memory: {mem_allocated:.2f}GB allocated, {mem_cached:.2f}GB cached")
+                #print(f"   GPU Memory: {mem_allocated:.2f}GB allocated, {mem_cached:.2f}GB cached")
         
         # Update policy
         if (episode + 1) % update_frequency == 0 and len(buffer) > 0:
-            print(f"\n📊 Updating policy (buffer size: {len(buffer)})...")
+            #print(f"\n📊 Updating policy (buffer size: {len(buffer)})...")
             update_start = time.time()
             
             metrics = trainer.update_policy(buffer)
@@ -199,10 +212,10 @@ def train(total_episodes=10, update_frequency=5, save_frequency=5, model_name="c
             update_time = time.time() - update_start
             update_times.append(update_time)
             
-            print(f"   Policy loss: {metrics['policy_loss']:.4f}")
-            print(f"   Value loss: {metrics['value_loss']:.4f}")
-            print(f"   Entropy: {metrics['entropy']:.4f}")
-            print(f"   Update time: {update_time:.2f}s\n")
+            #print(f"   Policy loss: {metrics['policy_loss']:.4f}")
+            #print(f"   Value loss: {metrics['value_loss']:.4f}")
+            #print(f"   Entropy: {metrics['entropy']:.4f}")
+            #print(f"   Update time: {update_time:.2f}s\n")
             
             buffer.clear()
             
@@ -214,22 +227,22 @@ def train(total_episodes=10, update_frequency=5, save_frequency=5, model_name="c
         if (episode + 1) % save_frequency == 0:
             save_path = f"models/{model_name}_episode_{episode + 1}.pt"
             agent.policy.save(save_path)
-            print(f"💾 Model saved: {save_path}\n")
+            #print(f"💾 Model saved: {save_path}\n")
     
     total_time = time.time() - start_time
     
-    print("\n" + "=" * 70)
-    print("✅ TRAINING COMPLETE!")
-    print("=" * 70)
-    print(f"Total time: {total_time/60:.1f} minutes")
-    print(f"Average time per episode: {total_time/total_episodes:.2f}s")
+    #print("\n" + "=" * 70)
+    #print("✅ TRAINING COMPLETE!")
+    #print("=" * 70)
+    #print(f"Total time: {total_time/60:.1f} minutes")
+    #print(f"Average time per episode: {total_time/total_episodes:.2f}s")
     if update_times:
-        print(f"Average update time: {np.mean(update_times):.2f}s")
+        #print(f"Average update time: {np.mean(update_times):.2f}s")
     
     # Save final model
     final_path = f"models/{model_name}_final.pt"
     agent.policy.save(final_path)
-    print(f"💾 Final model saved: {final_path}")
+    #print(f"💾 Final model saved: {final_path}")
     
     # Plot results
     plot_training_progress(episode_rewards, episode_vps, model_name)
@@ -266,7 +279,7 @@ def plot_training_progress(rewards, vps, model_name):
     
     plt.tight_layout()
     plt.savefig(f'{model_name}_training.png', dpi=150)
-    print(f"📊 Training plot saved: {model_name}_training.png")
+    #print(f"📊 Training plot saved: {model_name}_training.png")
     plt.close()
 
 
@@ -294,11 +307,11 @@ if __name__ == "__main__":
         device=args.device
     )
     
-    print("\n🎉 Training finished!")
-    print(f"Final average reward (last 100): {np.mean(rewards[-100:]):.2f}")
-    print(f"Final average VP (last 100): {np.mean(vps[-100:]):.1f}")
+    #print("\n🎉 Training finished!")
+    #print(f"Final average reward (last 100): {np.mean(rewards[-100:]):.2f}")
+    #print(f"Final average VP (last 100): {np.mean(vps[-100:]):.1f}")
     
     # GPU cleanup
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
-        print("🧹 GPU cache cleared")
+        #print("🧹 GPU cache cleared")

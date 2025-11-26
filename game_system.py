@@ -598,9 +598,9 @@ class GameBoard:
     def generate_ports(self):
         """Generate 9 trading ports on COASTAL edges - ALGORITHMIC VERSION FOR FLAT-TOP HEXAGONS"""
 
-        print("\n" + "="*70)
-        print("🚢 PORT PLACEMENT SYSTEM - FOR FLAT-TOP HEXAGONS")
-        print("="*70)
+        ###print("\n" + "="*70)
+        ####print("🚢 PORT PLACEMENT SYSTEM - FOR FLAT-TOP HEXAGONS")
+        ###print("="*70)
 
         # Hex neighbor offsets in axial coordinates for FLAT-TOP hexagons
         # Direction 0=E, 1=SE, 2=SW, 3=W, 4=NW, 5=NE (based on which neighbor hex)
@@ -627,9 +627,9 @@ class GameBoard:
             distance = max(abs(tile.q), abs(tile.r), abs(tile.q + tile.r))
             max_distance = max(max_distance, distance)
 
-        print(f"\n📊 Board Analysis:")
-        print(f"   • Total tiles: {len(self.tiles)}")
-        print(f"   • Board radius: {max_distance}")
+        ##print(f"\n📊 Board Analysis:")
+        ##print(f"   • Total tiles: {len(self.tiles)}")
+        ##print(f"   • Board radius: {max_distance}")
 
         # Step 2: Identify outer ring tiles
         outer_ring_tiles = []
@@ -638,7 +638,7 @@ class GameBoard:
             if distance == max_distance:
                 outer_ring_tiles.append(tile)
 
-        print(f"   • Outer ring tiles: {len(outer_ring_tiles)}")
+        ##print(f"   • Outer ring tiles: {len(outer_ring_tiles)}")
 
         # Step 3: Find coastal edges (edges facing outward from outer ring)
         coastal_edges = []
@@ -667,11 +667,11 @@ class GameBoard:
                             coastal_edges.append((edge, tile, dir_idx))
                             break
 
-        print(f"\n🏖️  Coastal Edge Detection:")
-        print(f"   • Coastal edges found: {len(coastal_edges)}")
+        ###print(f"\n🏖️  Coastal Edge Detection:")
+        ##print(f"   • Coastal edges found: {len(coastal_edges)}")
 
         if len(coastal_edges) < 9:
-            print(f"\n❌ ERROR: Only {len(coastal_edges)} coastal edges found!")
+            ##print(f"\n ERROR: Only {len(coastal_edges)} coastal edges found!")
             return
 
         # Step 4: Sort by angle for even distribution
@@ -697,20 +697,20 @@ class GameBoard:
         random.shuffle(port_types)
 
         # Step 7: Create and place ports
-        print(f"\n🚢 Port Placement Details:")
-        print(f"   {'#':<4} {'Type':<15} {'Hex':<12} {'Distance':<10}")
-        print(f"   {'-'*4} {'-'*15} {'-'*12} {'-'*10}")
+        ###print(f"\n🚢 Port Placement Details:")
+        ##print(f"   {'#':<4} {'Type':<15} {'Hex':<12} {'Distance':<10}")
+        ##print(f"   {'-'*4} {'-'*15} {'-'*12} {'-'*10}")
 
         for i, (edge, tile, direction) in enumerate(selected_coastal_edges):
             port = Port(port_types[i], edge.vertex1, edge.vertex2)
             self.ports.append(port)
 
             tile_dist = max(abs(tile.q), abs(tile.r), abs(tile.q + tile.r))
-            print(f"   {i+1:<4} {port_types[i].value:<15} ({tile.q:2d},{tile.r:2d}){'':<5} {tile_dist:<10}")
+            ##print(f"   {i+1:<4} {port_types[i].value:<15} ({tile.q:2d},{tile.r:2d}){'':<5} {tile_dist:<10}")
 
-        print(f"\n✅ Port Placement Complete!")
-        print(f"   • {len(self.ports)} ports successfully placed on OUTER PERIMETER")
-        print("="*70 + "\n")
+        ##print(f"\n Port Placement Complete!")
+        ##print(f"   • {len(self.ports)} ports successfully placed on OUTER PERIMETER")
+        ###print("="*70 + "\n")
 
     def get_player_ports(self, player):
         """Get all ports a player has access to"""
@@ -953,9 +953,9 @@ class GameSystem:
             self.current_player_index = (self.current_player_index + 1) % len(self.players)
             self.turn_number += 1
 
-            print(f"\n=== TURN {self.turn_number} ===")
-            print(f"{self.get_current_player().name}'s turn")
-            print("Press 'D' to roll dice and start your turn")
+            ##print(f"\n=== TURN {self.turn_number} ===")
+            ##print(f"{self.get_current_player().name}'s turn")
+            ###print("Press 'D' to roll dice and start your turn")
 
             return True, f"Turn ended. Now {self.get_current_player().name}'s turn"
         else:
@@ -982,22 +982,22 @@ class GameSystem:
                     # In second round, go in reverse order (last player goes first)
                     self.current_player_index = len(self.players) - 1
                     self.waiting_for_road = False  # Reset waiting_for_road for new round
-                    print("\n" + "="*60)
-                    print("=== INITIAL PLACEMENT ROUND 2 ===")
-                    print("Players place in REVERSE order: 4 → 3 → 2 → 1")
-                    print(f"Starting with Player {self.current_player_index + 1}")
-                    print("="*60 + "\n")
+                    ###print("\n" + "="*60)
+                    ###print("=== INITIAL PLACEMENT ROUND 2 ===")
+                    ###print("Players place in REVERSE order: 4 → 3 → 2 → 1")
+                    ##print(f"Starting with Player {self.current_player_index + 1}")
+                    ###print("="*60 + "\n")
 
             elif self.game_phase == "INITIAL_PLACEMENT_2":
                 # In second round, go in reverse order
                 self.current_player_index -= 1
-                print(f"  [Round 2] Moving to previous player: Player {self.current_player_index + 1}")
+                ##print(f"  [Round 2] Moving to previous player: Player {self.current_player_index + 1}")
 
                 if self.current_player_index < 0:
-                    print("\n" + "="*60)
-                    print("=== INITIAL PLACEMENT COMPLETE ===")
-                    print("Starting normal gameplay...")
-                    print("="*60 + "\n")
+                    ###print("\n" + "="*60)
+                    ###print("=== INITIAL PLACEMENT COMPLETE ===")
+                    ###print("Starting normal gameplay...")
+                    ###print("="*60 + "\n")
 
                     self.game_phase = "NORMAL_PLAY"
                     self.turn_phase = "ROLL_DICE"
@@ -1028,8 +1028,8 @@ class GameSystem:
                                 elif tile_resource == "pasture":
                                     player.resources[ResourceType.SHEEP] += 1
 
-                    print(f"\n=== NORMAL PLAY BEGINS ===")
-                    print(f"{self.get_current_player().name}'s turn")
+                    ##print(f"\n=== NORMAL PLAY BEGINS ===")
+                    ##print(f"{self.get_current_player().name}'s turn")
 
             return True, f"{self.get_current_player().name}'s turn"
 
@@ -1374,13 +1374,13 @@ class GameSystem:
             return False, "Not in initial placement phase"
 
         if self.waiting_for_road:
-            print(f"  [DEBUG] Cannot place settlement - waiting_for_road is True")
+            ##print(f"  [DEBUG] Cannot place settlement - waiting_for_road is True")
             return False, "Must place road first"
 
         placements = self.player_initial_placements[player]
         expected_settlements = 1 if self.game_phase == "INITIAL_PLACEMENT_1" else 2
 
-        print(f"  [DEBUG] Phase: {self.game_phase}, Player has {placements['settlements']} settlements, expected: {expected_settlements}")
+        ##print(f"  [DEBUG] Phase: {self.game_phase}, Player has {placements['settlements']} settlements, expected: {expected_settlements}")
 
         if placements["settlements"] >= expected_settlements:
             return False, f"Already placed {expected_settlements} settlement(s) this round"

@@ -171,7 +171,7 @@ python3
 visual_ai_game.py
 
 # Headless training (maximum speed)
-from scripts.ai_interface import AIGameEnvironment
+from ai_interface import AIGameEnvironment
 
 env = AIGameEnvironment()
 observations = env.reset()

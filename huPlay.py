@@ -105,7 +105,7 @@ def assign_numbers_with_constraints(tiles):
             if is_board_valid(tiles):
                 return
 
-    print("Warning: Could not assign numbers without red adjacency.")
+    #print("Warning: Could not assign numbers without red adjacency.")
     random.shuffle(nums)
     for i, tile in enumerate(tiles):
         if i < len(nums):
@@ -353,8 +353,8 @@ def main():
     game_system = GameSystem(game_board, players)
     game_system.robber = robber
 
-    print("=== CATAN GAME STARTED ===")
-    print(f"{game_system.get_current_player().name} starts")
+    #print("=== CATAN GAME STARTED ===")
+    #print(f"{game_system.get_current_player().name} starts")
 
     offset = compute_center_offset(tiles, 800, SCREEN_H)
     show_coords = False
@@ -392,7 +392,7 @@ def main():
                     if game_system.can_roll_dice():
                         dice_result = game_system.roll_dice()
                         if dice_result:
-                            print(f"Rolled: {dice_result[2]}")
+                            #print(f"Rolled: {dice_result[2]}")
                             # Automatically enter robber mode if 7 was rolled
                             if dice_result[2] == 7:
                                 robber_move_mode = True
@@ -432,7 +432,7 @@ def main():
                     if game_system.can_trade_or_build():
                         trade_mode = not trade_mode
                         if trade_mode:
-                            print("TRADE MODE: Use arrows/WASD to adjust, ENTER to trade")
+                            #print("TRADE MODE: Use arrows/WASD to adjust, ENTER to trade")
                             add_message("TRADE MODE: Use arrows/WASD", (255, 200, 255), game_messages)
                             # Reset trade amounts
                             for res in offering_resources:

@@ -142,11 +142,11 @@ class AIGameEnvironment:
         self.game = GameSystem(game_board, players)
         self.game.robber = robber
 
-        print("✅ AI Training Environment Ready!")
-        print(f"   • 4 AI agents initialized")
-        print(f"   • {len(tiles)} tiles")
-        print(f"   • {len(game_board.ports)} ports")
-        print(f"   • Game phase: {self.game.game_phase}")
+        pass  # print("✅ AI Training Environment Ready!")
+        pass  # print(f"   • 4 AI agents initialized")
+        pass  # print(f"   • {len(tiles)} tiles")
+        pass  # print(f"   • {len(game_board.ports)} ports")
+        pass  # print(f"   • Game phase: {self.game.game_phase}")
 
     def get_observation(self, player_index):
         """
@@ -322,9 +322,9 @@ class AIGameEnvironment:
 # ==================== EXAMPLE USAGE ====================
 
 if __name__ == "__main__":
-    print("="*60)
-    print("CATAN AI TRAINING ENVIRONMENT - READY")
-    print("="*60)
+    pass  # print("="*60)
+    pass  # print("CATAN AI TRAINING ENVIRONMENT - READY")
+    pass  # print("="*60)
 
     # Create environment
     env = AIGameEnvironment()
@@ -332,21 +332,21 @@ if __name__ == "__main__":
     # Get initial observations for all 4 players
     observations = env.reset()
 
-    print("\n📊 Initial State:")
+    pass  # print("\n📊 Initial State:")
     for i, obs in enumerate(observations):
-        print(f"   Player {i+1}:")
-        print(f"      • Victory Points: {obs['my_victory_points']}")
-        print(f"      • My Turn: {obs['is_my_turn']}")
-        print(f"      • Legal Actions: {obs['legal_actions']}")
-        print(f"      • Resources: {sum(obs['my_resources'].values())}")
+        pass  # print(f"   Player {i+1}:")
+        pass  # print(f"      • Victory Points: {obs['my_victory_points']}")
+        pass  # print(f"      • My Turn: {obs['is_my_turn']}")
+        pass  # print(f"      • Legal Actions: {obs['legal_actions']}")
+        pass  # print(f"      • Resources: {sum(obs['my_resources'].values())}")
 
-    print("\n" + "="*60)
-    print("✅ ENVIRONMENT READY FOR YOUR AI IMPLEMENTATION")
-    print("="*60)
-    print("\nHow to use:")
-    print("1. Create your AI agents (4 agents)")
-    print("2. Each agent calls: obs = env.get_observation(player_index)")
-    print("3. Agent decides action from obs['legal_actions']")
-    print("4. Execute: obs, reward, done, info = env.step(player_index, action, params)")
-    print("5. Repeat until done == True")
-    print("\n" + "="*60)
+    pass  # print("\n" + "="*60)
+    pass  # print("✅ ENVIRONMENT READY FOR YOUR AI IMPLEMENTATION")
+    pass  # print("="*60)
+    pass  # print("\nHow to use:")
+    pass  # print("1. Create your AI agents (4 agents)")
+    pass  # print("2. Each agent calls: obs = env.get_observation(player_index)")
+    pass  # print("3. Agent decides action from obs['legal_actions']")
+    pass  # print("4. Execute: obs, reward, done, info = env.step(player_index, action, params)")
+    pass  # print("5. Repeat until done == True")
+    pass  # print("\n" + "="*60)

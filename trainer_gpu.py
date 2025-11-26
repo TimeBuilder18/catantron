@@ -30,10 +30,10 @@ class PPOTrainer:
         self.n_epochs = n_epochs
         self.batch_size = batch_size
         
-        print(f"📊 PPO Trainer initialized:")
-        print(f"   Device: {self.device}")
-        print(f"   Batch size: {batch_size}")
-        print(f"   Learning rate: {learning_rate}")
+        #print(f"📊 PPO Trainer initialized:")
+        #print(f"   Device: {self.device}")
+        #print(f"   Batch size: {batch_size}")
+        #print(f"   Learning rate: {learning_rate}")
 
     def compute_advantages(self, rewards, values, dones):
         """Compute advantages using GAE (Generalized Advantage Estimation)"""

@@ -8,14 +8,12 @@ import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
 import sys
-import os
 
 sys.path.append('/mnt/project')
 
 from ai_interface import AIGameEnvironment
 from game_system import ResourceType
-
-
+from game_system import DevelopmentCardType
 class CatanEnv(gym.Env):
     """
     Gymnasium environment for Catan - optimized for PyTorch PPO
@@ -68,9 +66,9 @@ class CatanEnv(gym.Env):
             )
         })
 
-        print(f"✅ CatanEnv initialized for Player {player_id}")
-        print(f"   Observation size: {obs_size}")
-        print(f"   Action space: {self.action_space.n}")
+        #print(f"✅ CatanEnv initialized for Player {player_id}")
+        #print(f"   Observation size: {obs_size}")
+        #print(f"   Action space: {self.action_space.n}")
 
     def _calculate_obs_size(self):
         """Calculate total observation vector size"""
@@ -165,7 +163,7 @@ class CatanEnv(gym.Env):
 
         # === MY DEV CARDS (5 features) ===
         dev_cards = raw_obs['my_dev_cards']
-        from game_system import DevelopmentCardType
+
         features.extend([
             float(dev_cards.get(DevelopmentCardType.KNIGHT, 0)),
             float(dev_cards.get(DevelopmentCardType.VICTORY_POINT, 0)),
@@ -457,14 +455,14 @@ class CatanEnv(gym.Env):
         """Render the environment (text mode)"""
         raw_obs = self.game_env.get_observation(self.player_id)
 
-        print(f"\n{'=' * 50}")
-        print(f"Player {self.player_id} | VP: {raw_obs['my_victory_points']}/10")
-        print(f"{'=' * 50}")
-        print(f"Phase: {raw_obs['game_phase']}")
-        print(f"Resources: {sum(raw_obs['my_resources'].values())}")
-        print(f"Buildings: S:{raw_obs['my_settlements']} C:{raw_obs['my_cities']} R:{raw_obs['my_roads']}")
-        print(f"Legal Actions: {raw_obs['legal_actions']}")
-        print(f"{'=' * 50}\n")
+        #print(f"\n{'=' * 50}")
+        #print(f"Player {self.player_id} | VP: {raw_obs['my_victory_points']}/10")
+        #print(f"{'=' * 50}")
+        #print(f"Phase: {raw_obs['game_phase']}")
+        #print(f"Resources: {sum(raw_obs['my_resources'].values())}")
+        #print(f"Buildings: S:{raw_obs['my_settlements']} C:{raw_obs['my_cities']} R:{raw_obs['my_roads']}")
+        #print(f"Legal Actions: {raw_obs['legal_actions']}")
+        #print(f"{'=' * 50}\n")
 
     def close(self):
         """Cleanup"""
@@ -474,26 +472,26 @@ class CatanEnv(gym.Env):
 # ==================== TEST ====================
 
 if __name__ == "__main__":
-    print("=" * 60)
-    print("TESTING CATAN GYMNASIUM ENVIRONMENT (PYTORCH)")
-    print("=" * 60)
+    #print("=" * 60)
+    #print("TESTING CATAN GYMNASIUM ENVIRONMENT (PYTORCH)")
+    #print("=" * 60)
 
     # Create environment
     env = CatanEnv(player_id=0)
 
     # Check spaces
-    print(f"\n✅ Observation Space: {env.observation_space}")
-    print(f"✅ Action Space: {env.action_space}")
+    #print(f"\n✅ Observation Space: {env.observation_space}")
+    #print(f"✅ Action Space: {env.action_space}")
 
     # Reset
     obs, info = env.reset()
 
-    print(f"\n✅ Observation shape: {obs['observation'].shape}")
-    print(f"✅ Action mask: {obs['action_mask']}")
-    print(f"✅ Info: {info}")
+    #print(f"\n✅ Observation shape: {obs['observation'].shape}")
+    #print(f"✅ Action mask: {obs['action_mask']}")
+    #print(f"✅ Info: {info}")
 
     # Take random actions
-    print("\n🎮 Taking 10 random actions...")
+    #print("\n🎮 Taking 10 random actions...")
     total_reward = 0.0
 
     for step in range(10):
@@ -506,11 +504,11 @@ if __name__ == "__main__":
 
             total_reward += reward
 
-            print(f"Step {step + 1}: Action={action}, Reward={reward:.3f}, VP={info['victory_points']}")
+            #print(f"Step {step + 1}: Action={action}, Reward={reward:.3f}, VP={info['victory_points']}")
 
             if terminated or truncated:
-                print("   Game ended!")
+                #print("   Game ended!")
                 break
 
-    print(f"\n✅ Total reward: {total_reward:.3f}")
-    print("✅ Environment test complete!")
+    #print(f"\n✅ Total reward: {total_reward:.3f}")
+    #print("✅ Environment test complete!")

@@ -154,7 +154,7 @@ obs = {
 
 ```python
 import random
-from scripts.ai_interface import AIGameEnvironment
+from ai_interface import AIGameEnvironment
 
 env = AIGameEnvironment()
 observations = env.reset()
@@ -186,7 +186,7 @@ while not done:
     observations[current_player] = obs
 
     if done:
-        print(f"Game over! Winner: Player {info['winner'] + 1}")
+        #print(f"Game over! Winner: Player {info['winner'] + 1}")
 ```
 
 ---

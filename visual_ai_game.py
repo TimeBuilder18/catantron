@@ -344,7 +344,7 @@ class VisualAIEnvironment:
         self.game = GameSystem(game_board, players)
         self.game.robber = self.robber
 
-        print("✅ Visual AI Environment Ready!")
+        #print("✅ Visual AI Environment Ready!")
 
     def draw(self):
         """Draw the game state"""
@@ -447,16 +447,16 @@ def main():
     # Manual control mode
     build_mode = "SETTLEMENT"
 
-    print("\n" + "="*60)
-    print("VISUAL AI TRAINING ENVIRONMENT")
-    print("="*60)
-    print("Manual controls for testing:")
-    print("  D - Roll dice")
-    print("  T - End turn")
-    print("  1/2/3 - Switch build mode")
-    print("  X - Buy dev card")
-    print("  Mouse - Build")
-    print("="*60 + "\n")
+    #print("\n" + "="*60)
+    #print("VISUAL AI TRAINING ENVIRONMENT")
+    #print("="*60)
+    #print("Manual controls for testing:")
+    #print("  D - Roll dice")
+    #print("  T - End turn")
+    #print("  1/2/3 - Switch build mode")
+    #print("  X - Buy dev card")
+    #print("  Mouse - Build")
+    #print("="*60 + "\n")
 
     running = True
     while running:
@@ -469,28 +469,28 @@ def main():
                     if env.game.can_roll_dice():
                         result = env.game.roll_dice()
                         if result:
-                            print(f"🎲 Rolled: {result[2]} ({result[0]}+{result[1]})")
+                            #print(f"🎲 Rolled: {result[2]} ({result[0]}+{result[1]})")
 
                 elif event.key == pygame.K_t:
                     success, msg = env.game.end_turn()
                     if success:
-                        print(f"✓ {msg}")
+                        #print(f"✓ {msg}")
                         # Check for winner
                         winner = env.game.check_victory_conditions()
                         if winner:
-                            print(f"\n🏆 {winner.name} WINS with {winner.victory_points} points!")
+                            #print(f"\n🏆 {winner.name} WINS with {winner.victory_points} points!")
 
                 elif event.key == pygame.K_1:
                     build_mode = "SETTLEMENT"
-                    print("Mode: Settlement")
+                    #print("Mode: Settlement")
 
                 elif event.key == pygame.K_2:
                     build_mode = "CITY"
-                    print("Mode: City")
+                    #print("Mode: City")
 
                 elif event.key == pygame.K_3:
                     build_mode = "ROAD"
-                    print("Mode: Road")
+                    #print("Mode: Road")
 
                 elif event.key == pygame.K_x:
                     if env.game.can_trade_or_build():
