@@ -132,8 +132,10 @@ class RuleBasedAI:
                         #print(f"[RULE AI] Player {player_id+1} placed initial road")
                         return True
                 else:
+                    pass  # No valid edges found
                     #print(f"[RULE AI DEBUG] No valid edges found!")
             else:
+                pass  # No last_settlement_vertex
                 #print(f"[RULE AI DEBUG] No last_settlement_vertex!")
         else:
             #print(f"[RULE AI DEBUG] Need to place settlement")
@@ -158,6 +160,7 @@ class RuleBasedAI:
                     #print(f"[RULE AI] Player {player_id+1} placed initial settlement")
                     return True
             else:
+                pass  # No valid vertices found
                 #print(f"[RULE AI DEBUG] No valid vertices found!")
 
         return False
