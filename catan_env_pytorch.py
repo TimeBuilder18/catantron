@@ -477,12 +477,6 @@ class CatanEnv(gym.Env):
         # Calculate reward (AFTER checking victory so win bonus applies)
         reward = self._calculate_reward(raw_obs, new_obs, step_info)
 
-        # CRITICAL: Add reward for rolling dice during normal play!
-        # This encourages the agent to start turns properly
-        if not self.game_env.game.is_initial_placement_phase():
-            if action_name == 'roll_dice' and step_info.get('success', False):
-                reward += 2.0  # Small reward for rolling dice
-
         # Get formatted observation
         obs = self._get_obs()
         info = self._get_info()

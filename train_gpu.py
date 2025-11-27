@@ -160,6 +160,15 @@ def train(total_episodes=10, update_frequency=5, save_frequency=5, model_name="c
                 obs, obs['action_mask'], obs.get('vertex_mask'), obs.get('edge_mask')
             )
 
+            # DEBUG: Print when build actions are available (every 50 episodes)
+            if episode % 50 == 0 and not env.game_env.game.is_initial_placement_phase():
+                action_names = ['roll', 'place_sett', 'place_road', 'build_sett', 'build_city', 'build_road', 'buy_dev', 'end', 'wait']
+                valid = [action_names[i] for i, mask in enumerate(obs['action_mask']) if mask == 1]
+                player = env.game_env.game.players[0]
+                resources = player.resources
+                from game_system import ResourceType
+                print(f"  [Ep{episode}] Valid actions: {valid} | Resources: W{resources[ResourceType.WOOD]} B{resources[ResourceType.BRICK]} Wh{resources[ResourceType.WHEAT]} S{resources[ResourceType.SHEEP]} O{resources[ResourceType.ORE]}")
+
             # Take step in environment - pass vertex and edge indices
             next_obs, reward, terminated, truncated, info = env.step(action, vertex, edge)
             done = terminated or truncated
