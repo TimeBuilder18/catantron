@@ -125,8 +125,8 @@ def train(total_episodes=10, update_frequency=5, save_frequency=5, model_name="c
 
         # Print progress
         #print(f"Episode {episode + 1}/{total_episodes} | "
-              f"Reward: {episode_reward:.2f} | VP: {info.get('victory_points', 0)} | "
-              f"Length: {episode_length}")
+        #      f"Reward: {episode_reward:.2f} | VP: {info.get('victory_points', 0)} | "
+        #      f"Length: {episode_length}")
 
         # Update policy
         if (episode + 1) % update_frequency == 0 and len(buffer) > 0:
