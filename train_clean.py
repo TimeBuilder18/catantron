@@ -120,6 +120,10 @@ natural_end_count = 0
 
 # Start episode loop:
 for episode in range(args.episodes):
+    # Collect debug info for periodic printing
+    debug_actions = []
+    debug_resources = []
+
     # Suppress game output during episode
     with SuppressOutput():
         obs, info = env.reset()
@@ -148,8 +152,24 @@ for episode in range(args.episodes):
                 obs['edge_mask']
             )
 
-            # Take step in environment
-            next_obs, reward, terminated, truncated, info = env.step(action)
+            # Collect debug info for episodes 0, 50, 100, etc.
+            if episode % 50 == 0 and not env.game_env.game.is_initial_placement_phase() and step_count <= 5:
+                action_names = ['roll', 'place_sett', 'place_road', 'build_sett', 'build_city', 'build_road', 'buy_dev', 'end', 'wait']
+                valid = [action_names[i] for i, mask in enumerate(obs['action_mask']) if mask == 1]
+                player = env.game_env.game.players[0]
+                resources = player.resources
+                from game_system import ResourceType
+                debug_actions.append(valid)
+                debug_resources.append({
+                    'W': resources[ResourceType.WOOD],
+                    'B': resources[ResourceType.BRICK],
+                    'Wh': resources[ResourceType.WHEAT],
+                    'S': resources[ResourceType.SHEEP],
+                    'O': resources[ResourceType.ORE]
+                })
+
+            # Take step in environment - FIXED: Pass vertex and edge!
+            next_obs, reward, terminated, truncated, info = env.step(action, vertex, edge)
             done = terminated or truncated
 
             # Store ALL hierarchical data in buffer
@@ -188,6 +208,12 @@ for episode in range(args.episodes):
     # Store episode reward
     episode_rewards.append(episode_reward)
     episode_vps.append(info.get('victory_points', 0))
+
+    # Print debug info for episodes 0, 50, 100, etc.
+    if episode % 50 == 0 and debug_actions:
+        print(f"\n  [DEBUG Ep{episode}] First 5 turns of normal play:")
+        for i, (actions, res) in enumerate(zip(debug_actions, debug_resources)):
+            print(f"    Turn {i+1}: Valid={actions} | Res: W{res['W']} B{res['B']} Wh{res['Wh']} S{res['S']} O{res['O']}")
 
     # Print progress every 10 episodes
     if (episode + 1) % 10 == 0:
