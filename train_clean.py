@@ -84,26 +84,40 @@ elif torch.backends.mps.is_available():
 else:
     device = torch.device('cpu')
 
-print(f" Device: {device}")
+print(f"🎮 Device: {device}")
+if device.type == 'cuda':
+    print(f"   GPU: {torch.cuda.get_device_name(0)}")
+    print(f"   Batch size: 1024 (RTX 2080 Super optimized)")
+    print(f"   Training epochs: 20")
 print(f"Episodes: {args.episodes}")
 print(f"Update frequency: {args.update_freq}")
 print(f"Save frequency: {args.save_freq}")
 print(f"Model name: {args.model_name}")
+print()
 sys.stdout.flush()
 
 env = CatanEnv(player_id=0)
 agent = CatanAgent(device=device)
+
+# RTX 2080 Super optimization: 8GB VRAM allows for large batches
+if device.type == 'cuda':
+    batch_size = 1024
+    n_epochs = 20
+else:
+    batch_size = 512
+    n_epochs = 5
+
 trainer = PPOTrainer(
     policy=agent.policy,
-    learning_rate=1e-4,      # Stable learning
+    learning_rate=3e-4,      # Standard PPO learning rate
     gamma=0.99,
     gae_lambda=0.95,
     clip_epsilon=0.2,
     value_coef=0.5,
-    entropy_coef=0.02,       # Exploration
+    entropy_coef=0.05,       # Increased exploration
     max_grad_norm=0.5,
-    n_epochs=5,              # Less aggressive
-    batch_size=512           # Larger batches
+    n_epochs=n_epochs,
+    batch_size=batch_size
 )
 buffer = ExperienceBuffer()
 
