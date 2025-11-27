@@ -68,6 +68,7 @@ NOW GO BUILD YOUR AI! This is just the game environment.
 
 import random
 from game_system import GameSystem, GameBoard, Player, Robber
+from rule_based_ai import RuleBasedAI
 from tile import Tile
 
 # Same board setup as huPlay.py
@@ -140,6 +141,9 @@ class AIGameEnvironment:
         ]
 
         self.game = GameSystem(game_board, players)
+
+        # Create rule-based AIs for players 1-3
+        self.ai_players = [None, RuleBasedAI(), RuleBasedAI(), RuleBasedAI()]
         self.game.robber = robber
 
         pass  # print("✅ AI Training Environment Ready!")
@@ -252,6 +256,29 @@ class AIGameEnvironment:
 
         return actions
 
+    def _auto_play_other_players(self, target_player_index):
+        """Auto-play other players' turns using rule-based AI"""
+        max_iterations = 100  # Safety limit
+        iterations = 0
+
+        print(f"[AUTO-PLAY] Starting: current={self.game.current_player_index}, target={target_player_index}, phase={self.game.game_phase}")
+
+        while self.game.current_player_index != target_player_index and iterations < max_iterations:
+            iterations += 1
+            current_idx = self.game.current_player_index
+
+            # Use rule-based AI for players 1-3
+            if current_idx != 0 and self.ai_players[current_idx]:
+                if hasattr(self, '_debug_autoplay'):
+                    print(f"[AUTO-PLAY] Calling AI for player {current_idx}")
+                success = self.ai_players[current_idx].play_turn(self.game, current_idx)
+                if not success:
+                    if hasattr(self, '_debug_autoplay'):
+                        print(f"[AUTO-PLAY] AI returned False, stopping")
+                    break  # AI couldn't make a move, exit
+            else:
+                break  # Player 0 or no AI available
+
     def step(self, player_index, action, action_params=None):
         """
         Execute an action for a player
@@ -314,6 +341,11 @@ class AIGameEnvironment:
             if winner:
                 info['winner'] = self.game.players.index(winner)
                 info['result'] = 'game_over'
+
+        # IMPORTANT: Auto-play other players' turns after agent's action
+        # This ensures initial placement and normal play progresses
+        if not done:
+            self._auto_play_other_players(player_index)
 
         obs = self.get_observation(player_index)
         return obs, done, info
