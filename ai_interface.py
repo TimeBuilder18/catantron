@@ -327,6 +327,41 @@ class AIGameEnvironment:
                 info['success'] = False
                 info['message'] = 'No edge provided'
 
+        elif action == 'build_settlement':
+            vertex = action_params.get('vertex') if action_params else None
+            if vertex:
+                success, message = self.game.try_build_settlement(vertex, player)
+                info['success'] = success
+                info['message'] = message
+            else:
+                info['success'] = False
+                info['message'] = 'No vertex provided'
+
+        elif action == 'build_city':
+            vertex = action_params.get('vertex') if action_params else None
+            if vertex:
+                success, message = self.game.try_build_city(vertex, player)
+                info['success'] = success
+                info['message'] = message
+            else:
+                info['success'] = False
+                info['message'] = 'No vertex provided'
+
+        elif action == 'build_road':
+            edge = action_params.get('edge') if action_params else None
+            if edge:
+                success, message = self.game.try_build_road(edge, player)
+                info['success'] = success
+                info['message'] = message
+            else:
+                info['success'] = False
+                info['message'] = 'No edge provided'
+
+        elif action == 'buy_dev_card':
+            success, message = self.game.try_buy_development_card(player)
+            info['success'] = success
+            info['message'] = message
+
         # Check for victory
         winner = self.game.check_victory_conditions()
         done = (winner is not None)
