@@ -153,20 +153,22 @@ for episode in range(args.episodes):
             )
 
             # Collect debug info for episodes 0, 50, 100, etc.
-            if episode % 50 == 0 and not env.game_env.game.is_initial_placement_phase() and step_count <= 5:
-                action_names = ['roll', 'place_sett', 'place_road', 'build_sett', 'build_city', 'build_road', 'buy_dev', 'end', 'wait']
-                valid = [action_names[i] for i, mask in enumerate(obs['action_mask']) if mask == 1]
-                player = env.game_env.game.players[0]
-                resources = player.resources
-                from game_system import ResourceType
-                debug_actions.append(valid)
-                debug_resources.append({
-                    'W': resources[ResourceType.WOOD],
-                    'B': resources[ResourceType.BRICK],
-                    'Wh': resources[ResourceType.WHEAT],
-                    'S': resources[ResourceType.SHEEP],
-                    'O': resources[ResourceType.ORE]
-                })
+            # Capture turns 10-20 of normal play (after initial placement)
+            if episode % 50 == 0 and not env.game_env.game.is_initial_placement_phase():
+                if 10 <= step_count <= 20:
+                    action_names = ['roll', 'place_sett', 'place_road', 'build_sett', 'build_city', 'build_road', 'buy_dev', 'end', 'wait']
+                    valid = [action_names[i] for i, mask in enumerate(obs['action_mask']) if mask == 1]
+                    player = env.game_env.game.players[0]
+                    resources = player.resources
+                    from game_system import ResourceType
+                    debug_actions.append((step_count, valid, action))
+                    debug_resources.append({
+                        'W': resources[ResourceType.WOOD],
+                        'B': resources[ResourceType.BRICK],
+                        'Wh': resources[ResourceType.WHEAT],
+                        'S': resources[ResourceType.SHEEP],
+                        'O': resources[ResourceType.ORE]
+                    })
 
             # Take step in environment - FIXED: Pass vertex and edge!
             next_obs, reward, terminated, truncated, info = env.step(action, vertex, edge)
@@ -211,9 +213,11 @@ for episode in range(args.episodes):
 
     # Print debug info for episodes 0, 50, 100, etc.
     if episode % 50 == 0 and debug_actions:
-        print(f"\n  [DEBUG Ep{episode}] First 5 turns of normal play:")
-        for i, (actions, res) in enumerate(zip(debug_actions, debug_resources)):
-            print(f"    Turn {i+1}: Valid={actions} | Res: W{res['W']} B{res['B']} Wh{res['Wh']} S{res['S']} O{res['O']}")
+        print(f"\n  [DEBUG Ep{episode}] Steps 10-20 of normal play:")
+        action_names_map = ['roll', 'place_sett', 'place_road', 'build_sett', 'build_city', 'build_road', 'buy_dev', 'end', 'wait']
+        for (step, valid, chosen_action), res in zip(debug_actions, debug_resources):
+            chosen = action_names_map[chosen_action] if chosen_action < len(action_names_map) else f"#{chosen_action}"
+            print(f"    Step {step}: Valid={valid} | Chose={chosen} | Res: W{res['W']} B{res['B']} Wh{res['Wh']} S{res['S']} O{res['O']}")
 
     # Print progress every 10 episodes
     if (episode + 1) % 10 == 0:
