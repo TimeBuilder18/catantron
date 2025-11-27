@@ -261,20 +261,14 @@ class AIGameEnvironment:
         max_iterations = 100  # Safety limit
         iterations = 0
 
-        print(f"[AUTO-PLAY] Starting: current={self.game.current_player_index}, target={target_player_index}, phase={self.game.game_phase}")
-
         while self.game.current_player_index != target_player_index and iterations < max_iterations:
             iterations += 1
             current_idx = self.game.current_player_index
 
             # Use rule-based AI for players 1-3
             if current_idx != 0 and self.ai_players[current_idx]:
-                if hasattr(self, '_debug_autoplay'):
-                    print(f"[AUTO-PLAY] Calling AI for player {current_idx}")
                 success = self.ai_players[current_idx].play_turn(self.game, current_idx)
                 if not success:
-                    if hasattr(self, '_debug_autoplay'):
-                        print(f"[AUTO-PLAY] AI returned False, stopping")
                     break  # AI couldn't make a move, exit
             else:
                 break  # Player 0 or no AI available
