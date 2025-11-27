@@ -36,6 +36,7 @@ class CatanEnv(gym.Env):
 
         self.player_id = player_id
         self.game_env = AIGameEnvironment()
+        self._episode_count = 0  # Track episodes for debug output
 
         # Action space: 9 discrete actions
         # 0: roll_dice
@@ -110,6 +111,7 @@ class CatanEnv(gym.Env):
 
         # Reset game
         self.game_env = AIGameEnvironment()
+        self._episode_count += 1  # Increment episode counter
 
         # Get initial observation
         obs = self._get_obs()
@@ -475,7 +477,16 @@ class CatanEnv(gym.Env):
             print(f"\n🏆 GAME END: Player {winner_id} won with {winner_vp} VP!\n")
 
         # Calculate reward (AFTER checking victory so win bonus applies)
-        reward = self._calculate_reward(raw_obs, new_obs, step_info)
+        # Enable debug every 50 episodes
+        debug_reward = (hasattr(self, '_episode_count') and self._episode_count % 50 == 0)
+        reward = self._calculate_reward(raw_obs, new_obs, step_info, debug=debug_reward)
+
+        # Print reward breakdown for debug episodes
+        if debug_reward and hasattr(self, '_last_reward_breakdown'):
+            print(f"  [REWARD BREAKDOWN] Total: {reward:.1f}")
+            for key, value in self._last_reward_breakdown.items():
+                if value != 0:
+                    print(f"    {key}: {value:.1f}")
 
         # Get formatted observation
         obs = self._get_obs()
@@ -575,7 +586,7 @@ class CatanEnv(gym.Env):
 
         return None
 
-    def _calculate_reward(self, old_obs, new_obs, step_info):
+    def _calculate_reward(self, old_obs, new_obs, step_info, debug=False):
         """
         Reward function with differential scaling for initial vs normal play
 
@@ -583,6 +594,7 @@ class CatanEnv(gym.Env):
                      Building DURING game should give BIG reward (shows learning)
         """
         reward = 0.0
+        reward_breakdown = {}  # Track where rewards come from
 
         # Check game phase
         is_initial = self.game_env.game.is_initial_placement_phase()
@@ -590,9 +602,11 @@ class CatanEnv(gym.Env):
         # ===== VICTORY POINTS =====
         vp_diff = new_obs['my_victory_points'] - old_obs['my_victory_points']
         if is_initial:
-            reward += vp_diff * 1.0  # Small during setup (everyone does this)
+            vp_reward = vp_diff * 1.0  # Small during setup (everyone does this)
         else:
-            reward += vp_diff * 300.0  # HUGE during normal play! (shows skill)
+            vp_reward = vp_diff * 300.0  # HUGE during normal play! (shows skill)
+        reward += vp_reward
+        reward_breakdown['vp'] = vp_reward
 
         # ===== BUILDINGS =====
         settlement_diff = new_obs['my_settlements'] - old_obs['my_settlements']
@@ -601,11 +615,13 @@ class CatanEnv(gym.Env):
 
         if is_initial:
             # Initial placement - small rewards (automatic)
-            reward += settlement_diff * 0.5
-            reward += road_diff * 0.2
+            building_reward = settlement_diff * 0.5 + road_diff * 0.2
+            reward += building_reward
+            reward_breakdown['building'] = building_reward
 
             # CRITICAL: Reward good initial placements!
             # Check if new settlements were placed
+            tile_quality_bonus = 0
             if settlement_diff > 0:
                 player = self.game_env.game.players[self.player_id]
                 # Get the most recently placed settlement
@@ -614,7 +630,6 @@ class CatanEnv(gym.Env):
                     settlement_pos = last_settlement.position
 
                     # Check adjacent tiles for their numbers
-                    tile_quality_bonus = 0
                     for tile in self.game_env.game.game_board.tiles:
                         # Get the 6 corners (vertices) of this tile
                         corners = tile.get_corners()
@@ -634,35 +649,62 @@ class CatanEnv(gym.Env):
                                 # 2, 12, desert get 0
                                 break  # Found match, no need to check other corners
 
-                    reward += tile_quality_bonus
+            reward += tile_quality_bonus
+            reward_breakdown['tile_quality'] = tile_quality_bonus
         else:
             # Normal play - HUGE rewards! (shows learning)
-            reward += settlement_diff * 100.0  # DOUBLED from 50
-            reward += city_diff * 200.0  # DOUBLED from 100
-            reward += road_diff * 20.0  # DOUBLED from 10
+            building_reward = settlement_diff * 100.0 + city_diff * 200.0 + road_diff * 20.0
+            reward += building_reward
+            reward_breakdown['building'] = building_reward
 
         # ===== RESOURCES =====
         old_resources = sum(old_obs['my_resources'].values())
         new_resources = sum(new_obs['my_resources'].values())
         resource_diff = new_resources - old_resources
-        reward += resource_diff * 3.0  # BIG reward for collecting resources!
+        resource_collection_reward = resource_diff * 3.0  # BIG reward for collecting resources!
+        reward += resource_collection_reward
+        reward_breakdown['resource_collection'] = resource_collection_reward
+
+        # Bonus for resource diversity (encourages placing on different tile types)
+        diversity_reward = 0
+        if not is_initial:
+            from game_system import ResourceType
+            res = new_obs['my_resources']
+            # Count how many different resource types player has
+            resource_types_owned = sum([
+                1 if res[ResourceType.WOOD] > 0 else 0,
+                1 if res[ResourceType.BRICK] > 0 else 0,
+                1 if res[ResourceType.WHEAT] > 0 else 0,
+                1 if res[ResourceType.SHEEP] > 0 else 0,
+                1 if res[ResourceType.ORE] > 0 else 0
+            ])
+            # Reward for having diverse resources (helps with building)
+            if resource_types_owned >= 4:
+                diversity_reward = 15.0  # Great diversity!
+            elif resource_types_owned >= 3:
+                diversity_reward = 8.0  # Good diversity
+        reward += diversity_reward
+        reward_breakdown['diversity'] = diversity_reward
 
         # Bonus for having enough resources to build (encourages saving)
+        buildable_reward = 0
         if not is_initial:
             from game_system import ResourceType
             res = new_obs['my_resources']
             # Can build settlement? (wood, brick, wheat, sheep)
             if (res[ResourceType.WOOD] >= 1 and res[ResourceType.BRICK] >= 1 and
                 res[ResourceType.WHEAT] >= 1 and res[ResourceType.SHEEP] >= 1):
-                reward += 10.0  # Reward for having settlement resources!
+                buildable_reward += 10.0  # Reward for having settlement resources!
 
             # Can build city? (3 ore, 2 wheat)
             if res[ResourceType.ORE] >= 3 and res[ResourceType.WHEAT] >= 2:
-                reward += 15.0  # Reward for having city resources!
+                buildable_reward += 15.0  # Reward for having city resources!
 
             # Can build road? (wood, brick)
             if res[ResourceType.WOOD] >= 1 and res[ResourceType.BRICK] >= 1:
-                reward += 3.0  # Small reward for road resources
+                buildable_reward += 3.0  # Small reward for road resources
+        reward += buildable_reward
+        reward_breakdown['buildable'] = buildable_reward
 
         # ===== ROBBER RISK =====
         if sum(new_obs['my_resources'].values()) > 7:
@@ -688,11 +730,18 @@ class CatanEnv(gym.Env):
             reward -= 5.0  # Reduced from 10
 
         # ===== EXPLORATION BONUS =====
+        exploration_reward = 0
         current_vp = new_obs['my_victory_points']
         if not is_initial and current_vp > 2:  # Any VP above initial placement
-            reward += 50.0  # BIG bonus for breaking past 2 VPs!
+            exploration_reward += 50.0  # BIG bonus for breaking past 2 VPs!
         if not is_initial and current_vp >= 4:
-            reward += 100.0  # Even bigger for reaching 4+ VPs!
+            exploration_reward += 100.0  # Even bigger for reaching 4+ VPs!
+        reward += exploration_reward
+        reward_breakdown['exploration'] = exploration_reward
+
+        # Store breakdown for debugging
+        if debug:
+            self._last_reward_breakdown = reward_breakdown
 
         return reward
 
