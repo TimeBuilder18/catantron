@@ -96,8 +96,8 @@ agent = CatanAgent(device=device)
 trainer = PPOTrainer(
     policy=agent.policy,
     learning_rate=3e-4,
-    batch_size=512,      # ← Sweet spot for M2
-    n_epochs=10,         # ← Faster iterations
+    batch_size=256,      # Reduced from 512 for faster updates
+    n_epochs=5,          # Reduced from 10 for speed
     clip_epsilon=0.2,
     value_coef=0.5,
     entropy_coef=0.01
@@ -120,7 +120,7 @@ for episode in range(args.episodes):
         done = False
         episode_reward = 0
         step_count = 0
-        max_steps = 1000
+        max_steps = 200  # Reduced from 1000 - games should end faster!
         while not done and step_count < max_steps:
             step_count += 1
             if not info.get('is_my_turn', True):
@@ -160,7 +160,10 @@ for episode in range(args.episodes):
             )
             obs = next_obs
             episode_reward += reward
+
+        # Penalty for games that go too long
         if step_count >= max_steps:
+            episode_reward -= 50.0  # Penalty for timeout
             done = True
 
     episode_rewards.append(episode_reward)
