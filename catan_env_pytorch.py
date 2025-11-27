@@ -587,9 +587,9 @@ class CatanEnv(gym.Env):
         # ===== VICTORY POINTS =====
         vp_diff = new_obs['my_victory_points'] - old_obs['my_victory_points']
         if is_initial:
-            reward += vp_diff * 2.0  # Small during setup (everyone does this)
+            reward += vp_diff * 1.0  # Small during setup (everyone does this)
         else:
-            reward += vp_diff * 150.0  # MASSIVE during normal play! (shows skill)
+            reward += vp_diff * 300.0  # HUGE during normal play! (shows skill)
 
         # ===== BUILDINGS =====
         settlement_diff = new_obs['my_settlements'] - old_obs['my_settlements']
@@ -602,25 +602,27 @@ class CatanEnv(gym.Env):
             reward += road_diff * 0.2
         else:
             # Normal play - HUGE rewards! (shows learning)
-            reward += settlement_diff * 50.0  # Increased from 30
-            reward += city_diff * 100.0  # Increased from 60
-            reward += road_diff * 10.0  # Increased from 5
+            reward += settlement_diff * 100.0  # DOUBLED from 50
+            reward += city_diff * 200.0  # DOUBLED from 100
+            reward += road_diff * 20.0  # DOUBLED from 10
 
         # ===== RESOURCES =====
         old_resources = sum(old_obs['my_resources'].values())
         new_resources = sum(new_obs['my_resources'].values())
         resource_diff = new_resources - old_resources
-        reward += resource_diff * 0.5  # Slightly increased
+        reward += resource_diff * 1.0  # Reward resource collection more
 
         # ===== ROBBER RISK =====
         if sum(new_obs['my_resources'].values()) > 7:
             reward -= 1.0  # Reduced penalty
 
         # ===== TIME PENALTY =====
+        # REMOVED: Time penalties were preventing learning by overwhelming reward signals
+        # The agent was learning "don't do anything" instead of "build settlements"
         if is_initial:
-            reward -= 0.01  # Almost no penalty during setup
+            reward -= 0.0  # No penalty during setup
         else:
-            reward -= 0.05  # Reduced from 0.1 - less harsh
+            reward -= 0.0  # No time penalty - let VP progress drive learning
 
         # ===== WIN/LOSS =====
         if step_info.get('result') == 'game_over':
@@ -636,7 +638,9 @@ class CatanEnv(gym.Env):
         # ===== EXPLORATION BONUS =====
         current_vp = new_obs['my_victory_points']
         if not is_initial and current_vp > 2:  # Any VP above initial placement
-            reward += 30.0  # Bigger bonus for breaking past 2 VPs!
+            reward += 50.0  # BIG bonus for breaking past 2 VPs!
+        if not is_initial and current_vp >= 4:
+            reward += 100.0  # Even bigger for reaching 4+ VPs!
 
         return reward
 
