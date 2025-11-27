@@ -93,6 +93,7 @@ def train(total_episodes=10, update_frequency=5, save_frequency=5, model_name="c
         gamma=0.99,
         gae_lambda=0.95,
         clip_epsilon=0.2,
+        entropy_coef=0.05,  # Increased from 0.01 for more exploration
         n_epochs=15,
         batch_size=batch_size
     )
@@ -154,22 +155,30 @@ def train(total_episodes=10, update_frequency=5, save_frequency=5, model_name="c
                 if not info.get('is_my_turn', True) or done:
                     break
             
-            # Our agent's turn
-            action, log_prob, value = agent.choose_action(obs, obs['action_mask'])
-            
-            # Take step in environment
-            next_obs, reward, terminated, truncated, info = env.step(action)
+            # Our agent's turn - get ALL 7 return values (hierarchical action)
+            action, vertex, edge, action_log_prob, vertex_log_prob, edge_log_prob, value = agent.choose_action(
+                obs, obs['action_mask'], obs.get('vertex_mask'), obs.get('edge_mask')
+            )
+
+            # Take step in environment - pass vertex and edge indices
+            next_obs, reward, terminated, truncated, info = env.step(action, vertex, edge)
             done = terminated or truncated
-            
-            # Store experience
+
+            # Store experience with ALL hierarchical data
             buffer.store(
                 obs['observation'],
                 action,
+                vertex,
+                edge,
                 reward,
-                log_prob,
+                action_log_prob,
+                vertex_log_prob,
+                edge_log_prob,
                 value,
                 done,
-                obs['action_mask']
+                obs['action_mask'],
+                obs.get('vertex_mask', np.ones(54)),
+                obs.get('edge_mask', np.ones(72))
             )
             
             # Update for next step

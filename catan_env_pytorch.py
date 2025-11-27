@@ -587,9 +587,9 @@ class CatanEnv(gym.Env):
         # ===== VICTORY POINTS =====
         vp_diff = new_obs['my_victory_points'] - old_obs['my_victory_points']
         if is_initial:
-            reward += vp_diff * 5.0  # Low during setup (everyone does this)
+            reward += vp_diff * 2.0  # Small during setup (everyone does this)
         else:
-            reward += vp_diff * 100.0  # HUGE during normal play! (shows skill)
+            reward += vp_diff * 150.0  # MASSIVE during normal play! (shows skill)
 
         # ===== BUILDINGS =====
         settlement_diff = new_obs['my_settlements'] - old_obs['my_settlements']
@@ -598,41 +598,45 @@ class CatanEnv(gym.Env):
 
         if is_initial:
             # Initial placement - small rewards (automatic)
-            reward += settlement_diff * 1.0
-            reward += road_diff * 0.5
+            reward += settlement_diff * 0.5
+            reward += road_diff * 0.2
         else:
-            # Normal play - BIG rewards! (shows learning)
-            reward += settlement_diff * 30.0
-            reward += city_diff * 60.0
-            reward += road_diff * 5.0
+            # Normal play - HUGE rewards! (shows learning)
+            reward += settlement_diff * 50.0  # Increased from 30
+            reward += city_diff * 100.0  # Increased from 60
+            reward += road_diff * 10.0  # Increased from 5
 
         # ===== RESOURCES =====
         old_resources = sum(old_obs['my_resources'].values())
         new_resources = sum(new_obs['my_resources'].values())
         resource_diff = new_resources - old_resources
-        reward += resource_diff * 0.3
+        reward += resource_diff * 0.5  # Slightly increased
 
         # ===== ROBBER RISK =====
         if sum(new_obs['my_resources'].values()) > 7:
-            reward -= 2.0
+            reward -= 1.0  # Reduced penalty
 
         # ===== TIME PENALTY =====
-        reward -= 0.1  # Moderate penalty
+        if is_initial:
+            reward -= 0.01  # Almost no penalty during setup
+        else:
+            reward -= 0.05  # Reduced from 0.1 - less harsh
 
         # ===== WIN/LOSS =====
         if step_info.get('result') == 'game_over':
             if step_info.get('winner') == self.player_id:
-                reward += 300.0  # MASSIVE win bonus!
+                reward += 500.0  # MASSIVE win bonus! (increased)
             else:
-                reward -= 50.0  # Strong loss penalty
+                reward -= 30.0  # Reduced loss penalty
 
         # ===== ILLEGAL ACTIONS =====
         if not step_info.get('success', True):
-            reward -= 10.0
+            reward -= 5.0  # Reduced from 10
 
+        # ===== EXPLORATION BONUS =====
         current_vp = new_obs['my_victory_points']
-        if current_vp > 2:  # Any VP above initial placement
-            reward += 20.0  # Bonus for exploration!
+        if not is_initial and current_vp > 2:  # Any VP above initial placement
+            reward += 30.0  # Bigger bonus for breaking past 2 VPs!
 
         return reward
 

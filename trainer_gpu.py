@@ -201,7 +201,8 @@ class PPOTrainer:
                 surr1 = ratio * batch_advantages
                 surr2 = torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon) * batch_advantages
                 policy_loss = -torch.min(surr1, surr2).mean()
-                policy_loss = torch.clamp(policy_loss, min=0.0)
+                # REMOVED: policy_loss = torch.clamp(policy_loss, min=0.0) - was preventing learning!
+
                 # Value loss
                 value_loss = nn.MSELoss()(state_values.squeeze(), batch_returns)
 
