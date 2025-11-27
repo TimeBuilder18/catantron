@@ -86,7 +86,12 @@ def train(total_episodes=10, update_frequency=5, save_frequency=5, model_name="c
     #print("✅ Agent created\n")
     
     # Create trainer with larger batch size for GPU
-    batch_size = 512 if device.type == 'cuda' else 64
+    # RTX 2080 Super optimization: 8GB VRAM allows for large batches
+    if device.type == 'cuda':
+        batch_size = 1024  # Doubled from 512 for RTX 2080 Super
+    else:
+        batch_size = 64
+
     trainer = PPOTrainer(
         policy=agent.policy,
         learning_rate=3e-4,
@@ -94,7 +99,7 @@ def train(total_episodes=10, update_frequency=5, save_frequency=5, model_name="c
         gae_lambda=0.95,
         clip_epsilon=0.2,
         entropy_coef=0.05,  # Increased from 0.01 for more exploration
-        n_epochs=15,
+        n_epochs=20,  # Increased from 15 for better learning
         batch_size=batch_size
     )
     #print("✅ Trainer created\n")
