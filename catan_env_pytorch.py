@@ -647,6 +647,24 @@ class CatanEnv(gym.Env):
         resource_diff = new_resources - old_resources
         reward += resource_diff * 3.0  # BIG reward for collecting resources!
 
+        # Bonus for resource diversity (encourages placing on different tile types)
+        if not is_initial:
+            from game_system import ResourceType
+            res = new_obs['my_resources']
+            # Count how many different resource types player has
+            resource_types_owned = sum([
+                1 if res[ResourceType.WOOD] > 0 else 0,
+                1 if res[ResourceType.BRICK] > 0 else 0,
+                1 if res[ResourceType.WHEAT] > 0 else 0,
+                1 if res[ResourceType.SHEEP] > 0 else 0,
+                1 if res[ResourceType.ORE] > 0 else 0
+            ])
+            # Reward for having diverse resources (helps with building)
+            if resource_types_owned >= 4:
+                reward += 15.0  # Great diversity!
+            elif resource_types_owned >= 3:
+                reward += 8.0  # Good diversity
+
         # Bonus for having enough resources to build (encourages saving)
         if not is_initial:
             from game_system import ResourceType
