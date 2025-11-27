@@ -273,6 +273,48 @@ class AIGameEnvironment:
             else:
                 break  # Player 0 or no AI available
 
+    def _handle_automatic_discards(self):
+        """
+        Automatically discard cards for all players with >7 cards when 7 is rolled
+        This simplifies the AI training by not requiring agents to learn discard strategy
+        """
+        if not self.game.waiting_for_discards:
+            return
+
+        from game_system import ResourceType
+        import random
+
+        for player in self.game.players_must_discard:
+            if player in self.game.players_discarded:
+                continue  # Already discarded
+
+            total_resources = player.get_total_resources()
+            num_to_discard = total_resources // 2
+
+            # Build list of all cards
+            all_cards = []
+            for res_type in ResourceType:
+                count = player.resources[res_type]
+                all_cards.extend([res_type] * count)
+
+            # Randomly select cards to discard
+            if all_cards and num_to_discard > 0:
+                cards_to_discard_list = random.sample(all_cards, min(num_to_discard, len(all_cards)))
+
+                # Count discards by type
+                discard_dict = {}
+                for res_type in ResourceType:
+                    discard_dict[res_type] = cards_to_discard_list.count(res_type)
+
+                # Perform discard
+                self.game.discard_cards(player, discard_dict)
+
+        # Clear waiting flag after all discards
+        if len(self.game.players_discarded) >= len(self.game.players_must_discard):
+            self.game.waiting_for_discards = False
+            self.game.players_must_discard = []
+            self.game.players_discarded = []
+
     def step(self, player_index, action, action_params=None):
         """
         Execute an action for a player
@@ -295,6 +337,10 @@ class AIGameEnvironment:
             message = f"Rolled {dice_result[2]}" if success else "Cannot roll dice"
             info['success'] = success
             info['message'] = message
+
+            # Handle automatic discards when 7 is rolled
+            if success and dice_result[2] == 7:
+                self._handle_automatic_discards()
 
         elif action == 'end_turn':
             success, message = self.game.end_turn()
