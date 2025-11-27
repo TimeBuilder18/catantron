@@ -438,6 +438,9 @@ class CatanEnv(gym.Env):
         ]
         action_name = action_names[action]
 
+        # Track old state for reward calculation
+        old_dice_rolled = raw_obs.get('dice_rolled', False)
+
         if action_name in ['build_settlement', 'build_city', 'build_road']:
             current_player = self.game_env.game.players[self.player_id]
             resources = current_player.resources
@@ -473,6 +476,12 @@ class CatanEnv(gym.Env):
 
         # Calculate reward (AFTER checking victory so win bonus applies)
         reward = self._calculate_reward(raw_obs, new_obs, step_info)
+
+        # CRITICAL: Add reward for rolling dice during normal play!
+        # This encourages the agent to start turns properly
+        if not self.game_env.game.is_initial_placement_phase():
+            if action_name == 'roll_dice' and step_info.get('success', False):
+                reward += 2.0  # Small reward for rolling dice
 
         # Get formatted observation
         obs = self._get_obs()
@@ -610,7 +619,24 @@ class CatanEnv(gym.Env):
         old_resources = sum(old_obs['my_resources'].values())
         new_resources = sum(new_obs['my_resources'].values())
         resource_diff = new_resources - old_resources
-        reward += resource_diff * 1.0  # Reward resource collection more
+        reward += resource_diff * 3.0  # BIG reward for collecting resources!
+
+        # Bonus for having enough resources to build (encourages saving)
+        if not is_initial:
+            from game_system import ResourceType
+            res = new_obs['my_resources']
+            # Can build settlement? (wood, brick, wheat, sheep)
+            if (res[ResourceType.WOOD] >= 1 and res[ResourceType.BRICK] >= 1 and
+                res[ResourceType.WHEAT] >= 1 and res[ResourceType.SHEEP] >= 1):
+                reward += 10.0  # Reward for having settlement resources!
+
+            # Can build city? (3 ore, 2 wheat)
+            if res[ResourceType.ORE] >= 3 and res[ResourceType.WHEAT] >= 2:
+                reward += 15.0  # Reward for having city resources!
+
+            # Can build road? (wood, brick)
+            if res[ResourceType.WOOD] >= 1 and res[ResourceType.BRICK] >= 1:
+                reward += 3.0  # Small reward for road resources
 
         # ===== ROBBER RISK =====
         if sum(new_obs['my_resources'].values()) > 7:
