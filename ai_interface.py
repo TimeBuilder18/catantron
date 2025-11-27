@@ -221,12 +221,31 @@ class AIGameEnvironment:
                 actions.append('roll_dice')
 
             if self.game.can_trade_or_build():
-                actions.append('build_settlement')
-                actions.append('build_city')
-                actions.append('build_road')
-                actions.append('buy_dev_card')
-                actions.append('trade_with_bank')
-                # TODO: Add player-to-player trading
+                # Only add build actions if player has the resources!
+                from game_system import ResourceType
+                res = player.resources
+
+                # Settlement: Wood=1, Brick=1, Wheat=1, Sheep=1
+                if (res[ResourceType.WOOD] >= 1 and res[ResourceType.BRICK] >= 1 and
+                    res[ResourceType.WHEAT] >= 1 and res[ResourceType.SHEEP] >= 1):
+                    actions.append('build_settlement')
+
+                # City: Ore=3, Wheat=2
+                if res[ResourceType.ORE] >= 3 and res[ResourceType.WHEAT] >= 2:
+                    actions.append('build_city')
+
+                # Road: Wood=1, Brick=1
+                if res[ResourceType.WOOD] >= 1 and res[ResourceType.BRICK] >= 1:
+                    actions.append('build_road')
+
+                # Dev card: Ore=1, Wheat=1, Sheep=1
+                if (res[ResourceType.ORE] >= 1 and res[ResourceType.WHEAT] >= 1 and
+                    res[ResourceType.SHEEP] >= 1):
+                    actions.append('buy_dev_card')
+
+                # Can always trade with bank (4:1 or with ports)
+                if sum(res.values()) >= 4:  # Need at least 4 resources to trade
+                    actions.append('trade_with_bank')
 
             if self.game.can_end_turn():
                 actions.append('end_turn')
