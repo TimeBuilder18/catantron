@@ -611,12 +611,17 @@ class CatanEnv(gym.Env):
                 # Get the most recently placed settlement
                 if player.settlements:
                     last_settlement = player.settlements[-1]
+                    settlement_pos = last_settlement.position
+
                     # Check adjacent tiles for their numbers
                     tile_quality_bonus = 0
                     for tile in self.game_env.game.game_board.tiles:
-                        # Check if settlement is adjacent to this tile
-                        for vertex in tile.vertices:
-                            if abs(vertex.x - last_settlement.position.x) < 0.1 and abs(vertex.y - last_settlement.position.y) < 0.1:
+                        # Get the 6 corners (vertices) of this tile
+                        corners = tile.get_corners()
+
+                        # Check if settlement is on any corner of this tile
+                        for corner_x, corner_y in corners:
+                            if abs(corner_x - settlement_pos.x) < 0.1 and abs(corner_y - settlement_pos.y) < 0.1:
                                 # This tile is adjacent to the settlement!
                                 if tile.number in [6, 8]:
                                     tile_quality_bonus += 30  # BEST tiles (most frequent)
@@ -627,6 +632,8 @@ class CatanEnv(gym.Env):
                                 elif tile.number in [3, 11]:
                                     tile_quality_bonus += 5   # POOR tiles
                                 # 2, 12, desert get 0
+                                break  # Found match, no need to check other corners
+
                     reward += tile_quality_bonus
         else:
             # Normal play - HUGE rewards! (shows learning)
