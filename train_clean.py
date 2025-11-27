@@ -95,12 +95,15 @@ env = CatanEnv(player_id=0)
 agent = CatanAgent(device=device)
 trainer = PPOTrainer(
     policy=agent.policy,
-    learning_rate=3e-4,
-    batch_size=256,      # Reduced from 512 for faster updates
-    n_epochs=5,          # Reduced from 10 for speed
+    learning_rate=1e-4,      # Stable learning
+    gamma=0.99,
+    gae_lambda=0.95,
     clip_epsilon=0.2,
     value_coef=0.5,
-    entropy_coef=0.01
+    entropy_coef=0.02,       # Exploration
+    max_grad_norm=0.5,
+    n_epochs=5,              # Less aggressive
+    batch_size=512           # Larger batches
 )
 buffer = ExperienceBuffer()
 
@@ -111,18 +114,25 @@ print(f"\nStarting training...\n")
 sys.stdout.flush()
 start_time = time.time()
 
+# At the TOP, BEFORE the episode loop (around line 85):
+timeout_count = 0
+natural_end_count = 0
+
+# Start episode loop:
 for episode in range(args.episodes):
-    print(f"Starting episode {episode + 1}...", end='\r')  # ← Add this
-    sys.stdout.flush()
     # Suppress game output during episode
     with SuppressOutput():
         obs, info = env.reset()
         done = False
         episode_reward = 0
         step_count = 0
-        max_steps = 200  # Reduced from 1000 - games should end faster!
+        max_steps = 250  # Reduced for faster games
+
+        # Episode game loop
         while not done and step_count < max_steps:
             step_count += 1
+
+            # Rule-based AI turn if not our turn
             if not info.get('is_my_turn', True):
                 current_player = env.game_env.game.current_player_index
                 play_rule_based_turn(env, current_player)
@@ -130,7 +140,7 @@ for episode in range(args.episodes):
                 info = env._get_info()
                 continue
 
-            # Get hierarchical action from agent (7 values now!)
+            # Get hierarchical action from agent
             action, vertex, edge, action_log_prob, vertex_log_prob, edge_log_prob, value = agent.choose_action(
                 obs,
                 obs['action_mask'],
@@ -142,7 +152,7 @@ for episode in range(args.episodes):
             next_obs, reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated
 
-            # Store ALL hierarchical data in buffer (10 values!)
+            # Store ALL hierarchical data in buffer
             buffer.store(
                 state=obs['observation'],
                 action=action,
@@ -158,26 +168,28 @@ for episode in range(args.episodes):
                 vertex_mask=obs['vertex_mask'],
                 edge_mask=obs['edge_mask']
             )
+
             obs = next_obs
             episode_reward += reward
 
-        # Penalty for games that go too long
+        # After while loop ends, check WHY it ended:
         if step_count >= max_steps:
-            episode_reward -= 50.0  # Penalty for timeout
-            done = True
+            timeout_count += 1
 
+            # Apply stuck penalty if needed
+            if info.get('victory_points', 0) <= 2:
+                episode_reward -= 5
+                print(f"  ⏱️  [TIMEOUT + STUCK] Episode {episode + 1}: {info.get('victory_points', 0)} VP")
+            else:
+                print(f"  ⏱️  [TIMEOUT] Episode {episode + 1}: {info.get('victory_points', 0)} VP (made progress)")
+        else:
+            natural_end_count += 1
+
+    # Store episode reward
     episode_rewards.append(episode_reward)
     episode_vps.append(info.get('victory_points', 0))
-    if (episode + 1) % 10 == 0:
-        avg_reward = np.mean(episode_rewards[-10:])
-        avg_vp = np.mean(episode_vps[-10:])
-        progress = (episode + 1) / args.episodes * 100
-        elapsed = time.time() - start_time
-        speed = (episode + 1) / (elapsed / 60)
-        print(f"[{progress:5.1f}%] Ep {episode + 1:5d}/{args.episodes} | VP: {avg_vp:.1f} | Reward: {avg_reward:6.2f} | {speed:4.0f} eps/min")
-        print(f"[DEBUG] Steps: {step_count}, Reward: {episode_reward:.1f}")
 
-    # Print ONLY every 10 episodes
+    # Print progress every 10 episodes
     if (episode + 1) % 10 == 0:
         avg_reward = np.mean(episode_rewards[-10:])
         avg_vp = np.mean(episode_vps[-10:])
@@ -185,7 +197,17 @@ for episode in range(args.episodes):
         elapsed = time.time() - start_time
         speed = (episode + 1) / (elapsed / 60)
 
-        print( f"[{progress:5.1f}%] Ep {episode + 1:5d}/{args.episodes} | VP: {avg_vp:.1f} | Reward: {avg_reward:6.2f} | {speed:4.0f} eps/min")
+        print(
+            f"[{progress:5.1f}%] Ep {episode + 1:5d}/{args.episodes} | "
+            f"VP: {avg_vp:.1f} | Reward: {avg_reward:6.2f} | {speed:4.0f} eps/min"
+        )
+
+        # Print timeout stats every 50 episodes
+        if (episode + 1) % 50 == 0:
+            timeout_pct = timeout_count / (episode + 1) * 100
+            natural_pct = natural_end_count / (episode + 1) * 100
+            print(f"         📊 Timeouts: {timeout_pct:.1f}% | Natural endings: {natural_pct:.1f}%")
+
         sys.stdout.flush()
 
     # Update policy
@@ -202,6 +224,17 @@ for episode in range(args.episodes):
         agent.policy.save(save_path)
         print(f"         Checkpoint saved -> {save_path}")
         sys.stdout.flush()
+
+# AFTER all episodes complete:
+print("\n" + "=" * 70)
+print("TRAINING COMPLETE!")
+print(f"Final timeout rate: {timeout_count}/{args.episodes} = {timeout_count / args.episodes * 100:.1f}%")
+print(f"Natural endings: {natural_end_count}/{args.episodes} = {natural_end_count / args.episodes * 100:.1f}%")
+elapsed_time = time.time() - start_time
+print(f"Total time: {elapsed_time/60:.1f} minutes ({elapsed_time/3600:.2f} hours)")
+print(f"Average speed: {args.episodes / (elapsed_time / 60):.0f} episodes/min")
+print("=" * 70)
+sys.stdout.flush()
 
 print("\n" + "=" * 70)
 print("TRAINING COMPLETE!")

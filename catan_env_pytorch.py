@@ -404,12 +404,17 @@ class CatanEnv(gym.Env):
         }
 
     def step(self, action, vertex_idx=None, edge_idx=None):
+        """
+        Execute action and return observation
+
+        FIXED: Now properly detects game ending!
+        """
         raw_obs = self.game_env.get_observation(self.player_id)
 
+        # If not our turn, return wait action
         if not raw_obs['is_my_turn']:
-            # Return observation with ALL actions masked (can't do anything)
             obs = self._get_obs()
-            obs['action_mask'] = np.zeros(9, dtype=np.int8)  # ← Mask ALL actions
+            obs['action_mask'] = np.zeros(9, dtype=np.int8)
             obs['action_mask'][8] = 1  # Only 'wait' is valid
             info = self._get_info()
             return obs, 0.0, False, False, info
@@ -425,8 +430,6 @@ class CatanEnv(gym.Env):
             info['illegal_action'] = True
             return obs, -10.0, False, False, info
 
-        # ... rest of your step() method stays the same
-
         # Map action index to action name
         action_names = [
             'roll_dice', 'place_settlement', 'place_road',
@@ -435,6 +438,15 @@ class CatanEnv(gym.Env):
         ]
         action_name = action_names[action]
 
+        if action_name in ['build_settlement', 'build_city', 'build_road']:
+            current_player = self.game_env.game.players[self.player_id]
+            resources = current_player.resources
+            print(f"[DEBUG] Player {self.player_id} attempting {action_name}")
+            print(f"        Resources: Wood={resources[ResourceType.WOOD]}, "
+                  f"Brick={resources[ResourceType.BRICK]}, "
+                  f"Wheat={resources[ResourceType.WHEAT]}, "
+                  f"Sheep={resources[ResourceType.SHEEP]}, "
+                  f"Ore={resources[ResourceType.ORE]}")
         # Get action parameters (if needed)
         action_params = self._get_action_params(action_name, vertex_idx, edge_idx)
 
@@ -445,7 +457,21 @@ class CatanEnv(gym.Env):
             action_params
         )
 
-        # Calculate reward
+        # ✅ CRITICAL FIX: Check for victory AFTER every action!
+        winner = self.game_env.game.check_victory_conditions()
+
+        if winner is not None:
+            # Game ended naturally - someone won!
+            done = True
+            winner_id = self.game_env.game.players.index(winner)
+            step_info['winner'] = winner_id
+            step_info['result'] = 'game_over'
+
+            # Debug print (remove later if you want)
+            winner_vp = winner.calculate_victory_points()
+            print(f"\n🏆 GAME END: Player {winner_id} won with {winner_vp} VP!\n")
+
+        # Calculate reward (AFTER checking victory so win bonus applies)
         reward = self._calculate_reward(raw_obs, new_obs, step_info)
 
         # Get formatted observation
@@ -547,46 +573,66 @@ class CatanEnv(gym.Env):
         return None
 
     def _calculate_reward(self, old_obs, new_obs, step_info):
+        """
+        Reward function with differential scaling for initial vs normal play
+
+        KEY INSIGHT: Initial placement should give small reward (it's automatic)
+                     Building DURING game should give BIG reward (shows learning)
+        """
         reward = 0.0
 
-        # VP gain - INCREASE THIS!
-        vp_diff = new_obs['my_victory_points'] - old_obs['my_victory_points']
-        reward += vp_diff * 50.0  # Changed from 20.0 to 50.0!
+        # Check game phase
+        is_initial = self.game_env.game.is_initial_placement_phase()
 
-        # Building rewards - INCREASE THESE!
+        # ===== VICTORY POINTS =====
+        vp_diff = new_obs['my_victory_points'] - old_obs['my_victory_points']
+        if is_initial:
+            reward += vp_diff * 5.0  # Low during setup (everyone does this)
+        else:
+            reward += vp_diff * 100.0  # HUGE during normal play! (shows skill)
+
+        # ===== BUILDINGS =====
         settlement_diff = new_obs['my_settlements'] - old_obs['my_settlements']
         city_diff = new_obs['my_cities'] - old_obs['my_cities']
         road_diff = new_obs['my_roads'] - old_obs['my_roads']
 
-        reward += settlement_diff * 30.0  # Changed from 10.0 to 30.0!
-        reward += city_diff * 60.0  # Changed from 20.0 to 60.0!
-        reward += road_diff * 5.0  # Changed from 2.0 to 5.0!
+        if is_initial:
+            # Initial placement - small rewards (automatic)
+            reward += settlement_diff * 1.0
+            reward += road_diff * 0.5
+        else:
+            # Normal play - BIG rewards! (shows learning)
+            reward += settlement_diff * 30.0
+            reward += city_diff * 60.0
+            reward += road_diff * 5.0
 
-        # Resource collection - REDUCE THIS!
+        # ===== RESOURCES =====
         old_resources = sum(old_obs['my_resources'].values())
         new_resources = sum(new_obs['my_resources'].values())
         resource_diff = new_resources - old_resources
-        reward += resource_diff * 0.01  # Changed from 0.1 to 0.01!
+        reward += resource_diff * 0.3
 
-        # Robber risk - keep your smart 7-card rule
-        total_resources = sum(new_obs['my_resources'].values())
-        if total_resources > 7:
-            reward -= 0.1
+        # ===== ROBBER RISK =====
+        if sum(new_obs['my_resources'].values()) > 7:
+            reward -= 2.0
 
-        # Step penalty
-        reward -= 0.01
+        # ===== TIME PENALTY =====
+        reward -= 0.1  # Moderate penalty
 
-        # Win/loss
+        # ===== WIN/LOSS =====
         if step_info.get('result') == 'game_over':
-            winner_id = step_info.get('winner')
-            if winner_id == self.player_id:
-                reward += 200.0
+            if step_info.get('winner') == self.player_id:
+                reward += 300.0  # MASSIVE win bonus!
             else:
-                reward -= 10.0
+                reward -= 50.0  # Strong loss penalty
 
-        # Illegal actions
+        # ===== ILLEGAL ACTIONS =====
         if not step_info.get('success', True):
             reward -= 10.0
+
+        current_vp = new_obs['my_victory_points']
+        if current_vp > 2:  # Any VP above initial placement
+            reward += 20.0  # Bonus for exploration!
 
         return reward
 
