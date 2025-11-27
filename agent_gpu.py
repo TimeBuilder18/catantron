@@ -14,6 +14,8 @@ class CatanAgent:
                 device = 'cpu'
 
         self.device = torch.device(device)
+        self.policy = CatanPolicy(device=device)
+        self.policy.eval()
 
     def choose_action(self, obs, action_mask, vertex_mask=None, edge_mask=None):
         """
