@@ -9,10 +9,15 @@ class CatanPolicy(nn.Module):
         super(CatanPolicy, self).__init__()
         
         # Auto-detect GPU or use specified device
-        if device is None:
-            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        # Auto-detect best device: CUDA (PC) > MPS (Mac M1/M2) > CPU
+        if torch.cuda.is_available():
+            self.device = torch.device('cuda')
+        elif torch.backends.mps.is_available():
+            self.device = torch.device('mps')  # Apple Silicon GPU!
         else:
-            self.device = device
+            self.device = torch.device('cpu')
+
+        print(f" Using device: {self.device}")
         
         #print(f"🎮 CatanPolicy using device: {self.device}")
         if self.device.type == 'cuda':

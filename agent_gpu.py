@@ -5,8 +5,15 @@ from network_gpu import CatanPolicy
 
 class CatanAgent:
     def __init__(self, device=None):
-        self.policy = CatanPolicy(device=device)
-        self.policy.eval()
+        if device is None:
+            if torch.cuda.is_available():
+                device = 'cuda'
+            elif torch.backends.mps.is_available():
+                device = 'mps'
+            else:
+                device = 'cpu'
+
+        self.device = torch.device(device)
 
     def choose_action(self, obs, action_mask, vertex_mask=None, edge_mask=None):
         """
