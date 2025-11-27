@@ -588,10 +588,10 @@ class CatanEnv(gym.Env):
 
     def _calculate_reward(self, old_obs, new_obs, step_info, debug=False):
         """
-        Reward function with differential scaling for initial vs normal play
+        Reward function with scaled values for stable PPO training
 
-        KEY INSIGHT: Initial placement should give small reward (it's automatic)
-                     Building DURING game should give BIG reward (shows learning)
+        REWARD SCALING: All rewards scaled down ~100x from previous version
+        for better training stability and value function estimation.
         """
         reward = 0.0
         reward_breakdown = {}  # Track where rewards come from
@@ -602,9 +602,9 @@ class CatanEnv(gym.Env):
         # ===== VICTORY POINTS =====
         vp_diff = new_obs['my_victory_points'] - old_obs['my_victory_points']
         if is_initial:
-            vp_reward = vp_diff * 1.0  # Small during setup (everyone does this)
+            vp_reward = vp_diff * 0.01  # Minimal during setup
         else:
-            vp_reward = vp_diff * 300.0  # HUGE during normal play! (shows skill)
+            vp_reward = vp_diff * 3.0  # Scaled from 300 → 3
         reward += vp_reward
         reward_breakdown['vp'] = vp_reward
 
@@ -614,46 +614,39 @@ class CatanEnv(gym.Env):
         road_diff = new_obs['my_roads'] - old_obs['my_roads']
 
         if is_initial:
-            # Initial placement - small rewards (automatic)
-            building_reward = settlement_diff * 0.5 + road_diff * 0.2
+            # Initial placement - small rewards
+            building_reward = settlement_diff * 0.005 + road_diff * 0.002
             reward += building_reward
             reward_breakdown['building'] = building_reward
 
-            # CRITICAL: Reward good initial placements!
-            # Check if new settlements were placed
+            # Reward good initial placements
             tile_quality_bonus = 0
             if settlement_diff > 0:
                 player = self.game_env.game.players[self.player_id]
-                # Get the most recently placed settlement
                 if player.settlements:
                     last_settlement = player.settlements[-1]
                     settlement_pos = last_settlement.position
 
                     # Check adjacent tiles for their numbers
                     for tile in self.game_env.game.game_board.tiles:
-                        # Get the 6 corners (vertices) of this tile
                         corners = tile.get_corners()
-
-                        # Check if settlement is on any corner of this tile
                         for corner_x, corner_y in corners:
                             if abs(corner_x - settlement_pos.x) < 0.1 and abs(corner_y - settlement_pos.y) < 0.1:
-                                # This tile is adjacent to the settlement!
                                 if tile.number in [6, 8]:
-                                    tile_quality_bonus += 30  # BEST tiles (most frequent)
+                                    tile_quality_bonus += 0.3  # Scaled from 30 → 0.3
                                 elif tile.number in [5, 9]:
-                                    tile_quality_bonus += 20  # GOOD tiles
+                                    tile_quality_bonus += 0.2  # Scaled from 20 → 0.2
                                 elif tile.number in [4, 10]:
-                                    tile_quality_bonus += 10  # OK tiles
+                                    tile_quality_bonus += 0.1  # Scaled from 10 → 0.1
                                 elif tile.number in [3, 11]:
-                                    tile_quality_bonus += 5   # POOR tiles
-                                # 2, 12, desert get 0
-                                break  # Found match, no need to check other corners
+                                    tile_quality_bonus += 0.05  # Scaled from 5 → 0.05
+                                break
 
             reward += tile_quality_bonus
             reward_breakdown['tile_quality'] = tile_quality_bonus
         else:
-            # Normal play - HUGE rewards! (shows learning)
-            building_reward = settlement_diff * 100.0 + city_diff * 200.0 + road_diff * 20.0
+            # Normal play - scaled rewards
+            building_reward = settlement_diff * 1.0 + city_diff * 2.0 + road_diff * 0.2
             reward += building_reward
             reward_breakdown['building'] = building_reward
 
@@ -661,16 +654,15 @@ class CatanEnv(gym.Env):
         old_resources = sum(old_obs['my_resources'].values())
         new_resources = sum(new_obs['my_resources'].values())
         resource_diff = new_resources - old_resources
-        resource_collection_reward = resource_diff * 3.0  # BIG reward for collecting resources!
+        resource_collection_reward = resource_diff * 0.03  # Scaled from 3.0 → 0.03
         reward += resource_collection_reward
         reward_breakdown['resource_collection'] = resource_collection_reward
 
-        # Bonus for resource diversity (encourages placing on different tile types)
+        # Bonus for resource diversity
         diversity_reward = 0
         if not is_initial:
             from game_system import ResourceType
             res = new_obs['my_resources']
-            # Count how many different resource types player has
             resource_types_owned = sum([
                 1 if res[ResourceType.WOOD] > 0 else 0,
                 1 if res[ResourceType.BRICK] > 0 else 0,
@@ -678,64 +670,52 @@ class CatanEnv(gym.Env):
                 1 if res[ResourceType.SHEEP] > 0 else 0,
                 1 if res[ResourceType.ORE] > 0 else 0
             ])
-            # Reward for having diverse resources (helps with building)
             if resource_types_owned >= 4:
-                diversity_reward = 15.0  # Great diversity!
+                diversity_reward = 0.15  # Scaled from 15 → 0.15
             elif resource_types_owned >= 3:
-                diversity_reward = 8.0  # Good diversity
+                diversity_reward = 0.08  # Scaled from 8 → 0.08
         reward += diversity_reward
         reward_breakdown['diversity'] = diversity_reward
 
-        # Bonus for having enough resources to build (encourages saving)
+        # Bonus for having enough resources to build
         buildable_reward = 0
         if not is_initial:
             from game_system import ResourceType
             res = new_obs['my_resources']
-            # Can build settlement? (wood, brick, wheat, sheep)
             if (res[ResourceType.WOOD] >= 1 and res[ResourceType.BRICK] >= 1 and
                 res[ResourceType.WHEAT] >= 1 and res[ResourceType.SHEEP] >= 1):
-                buildable_reward += 10.0  # Reward for having settlement resources!
+                buildable_reward += 0.1  # Scaled from 10 → 0.1
 
-            # Can build city? (3 ore, 2 wheat)
             if res[ResourceType.ORE] >= 3 and res[ResourceType.WHEAT] >= 2:
-                buildable_reward += 15.0  # Reward for having city resources!
+                buildable_reward += 0.15  # Scaled from 15 → 0.15
 
-            # Can build road? (wood, brick)
             if res[ResourceType.WOOD] >= 1 and res[ResourceType.BRICK] >= 1:
-                buildable_reward += 3.0  # Small reward for road resources
+                buildable_reward += 0.03  # Scaled from 3 → 0.03
         reward += buildable_reward
         reward_breakdown['buildable'] = buildable_reward
 
         # ===== ROBBER RISK =====
         if sum(new_obs['my_resources'].values()) > 7:
-            reward -= 1.0  # Reduced penalty
-
-        # ===== TIME PENALTY =====
-        # REMOVED: Time penalties were preventing learning by overwhelming reward signals
-        # The agent was learning "don't do anything" instead of "build settlements"
-        if is_initial:
-            reward -= 0.0  # No penalty during setup
-        else:
-            reward -= 0.0  # No time penalty - let VP progress drive learning
+            reward -= 0.5  # Scaled from -1.0 → -0.5 (still meaningful penalty)
 
         # ===== WIN/LOSS =====
         if step_info.get('result') == 'game_over':
             if step_info.get('winner') == self.player_id:
-                reward += 500.0  # MASSIVE win bonus! (increased)
+                reward += 10.0  # Scaled from 500 → 10 (strong win signal)
             else:
-                reward -= 30.0  # Reduced loss penalty
+                reward -= 0.5  # Scaled from -30 → -0.5
 
         # ===== ILLEGAL ACTIONS =====
         if not step_info.get('success', True):
-            reward -= 5.0  # Reduced from 10
+            reward -= 0.1  # Scaled from -5 → -0.1
 
         # ===== EXPLORATION BONUS =====
         exploration_reward = 0
         current_vp = new_obs['my_victory_points']
-        if not is_initial and current_vp > 2:  # Any VP above initial placement
-            exploration_reward += 50.0  # BIG bonus for breaking past 2 VPs!
+        if not is_initial and current_vp > 2:
+            exploration_reward += 0.5  # Scaled from 50 → 0.5
         if not is_initial and current_vp >= 4:
-            exploration_reward += 100.0  # Even bigger for reaching 4+ VPs!
+            exploration_reward += 1.0  # Scaled from 100 → 1.0
         reward += exploration_reward
         reward_breakdown['exploration'] = exploration_reward
 
