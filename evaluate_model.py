@@ -84,8 +84,16 @@ env = CatanEnv(player_id=0)
 agent = CatanAgent(device=device)
 
 print(f"\nLoading model: {args.model}")
-checkpoint = torch.load(args.model, map_location=device)
-agent.policy.load_state_dict(checkpoint)
+checkpoint = torch.load(args.model, map_location=device, weights_only=False)
+
+# Handle different checkpoint formats
+if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+    agent.policy.load_state_dict(checkpoint['model_state_dict'])
+    print(f"Loaded checkpoint format (device: {checkpoint.get('device', 'unknown')})")
+else:
+    agent.policy.load_state_dict(checkpoint)
+    print("Loaded direct state_dict format")
+
 agent.policy.eval()  # Set to evaluation mode
 print("Model loaded successfully\n")
 sys.stdout.flush()
