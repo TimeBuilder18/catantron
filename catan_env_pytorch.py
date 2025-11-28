@@ -704,7 +704,7 @@ class CatanEnv(gym.Env):
             resource_types_owned = sum([
                 1 if res[ResourceType.WOOD] > 0 else 0,
                 1 if res[ResourceType.BRICK] > 0 else 0,
-.                1 if res[ResourceType.WHEAT] > 0 else 0,
+                1 if res[ResourceType.WHEAT] > 0 else 0,
                 1 if res[ResourceType.SHEEP] > 0 else 0,
                 1 if res[ResourceType.ORE] > 0 else 0
             ])
