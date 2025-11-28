@@ -590,8 +590,14 @@ class CatanEnv(gym.Env):
         """
         Reward function with scaled values for stable PPO training
 
-        REWARD SCALING: All rewards scaled down ~100x from previous version
-        for better training stability and value function estimation.
+        REBALANCED v2: Fixed pathological hoarding/dev card spam behavior
+        - Removed "buildable" reward (was encouraging hoarding)
+        - Increased robber penalty 10x + exponential (discourage excess cards)
+        - Increased road rewards (0.2 → 0.5)
+        - Increased VP scaling (3.0 → 8.0)
+        - Increased win bonus (10.0 → 50.0)
+        - Differentiated dev card rewards by type
+        - Added rewards for USING dev cards
         """
         reward = 0.0
         reward_breakdown = {}  # Track where rewards come from
@@ -604,7 +610,7 @@ class CatanEnv(gym.Env):
         if is_initial:
             vp_reward = vp_diff * 0.01  # Minimal during setup
         else:
-            vp_reward = vp_diff * 3.0  # Scaled from 300 → 3
+            vp_reward = vp_diff * 8.0  # INCREASED: 3.0 → 8.0 (make VP THE priority)
         reward += vp_reward
         reward_breakdown['vp'] = vp_reward
 
@@ -646,7 +652,7 @@ class CatanEnv(gym.Env):
             reward_breakdown['tile_quality'] = tile_quality_bonus
         else:
             # Normal play - scaled rewards
-            building_reward = settlement_diff * 1.0 + city_diff * 2.0 + road_diff * 0.2
+            building_reward = settlement_diff * 1.0 + city_diff * 2.0 + road_diff * 0.5  # INCREASED: road 0.2 → 0.5
             reward += building_reward
             reward_breakdown['building'] = building_reward
 
@@ -677,39 +683,64 @@ class CatanEnv(gym.Env):
         reward += diversity_reward
         reward_breakdown['diversity'] = diversity_reward
 
-        # Bonus for having enough resources to build
-        buildable_reward = 0
-        if not is_initial:
-            from game_system import ResourceType
-            res = new_obs['my_resources']
-            if (res[ResourceType.WOOD] >= 1 and res[ResourceType.BRICK] >= 1 and
-                res[ResourceType.WHEAT] >= 1 and res[ResourceType.SHEEP] >= 1):
-                buildable_reward += 0.1  # Scaled from 10 → 0.1
-
-            if res[ResourceType.ORE] >= 3 and res[ResourceType.WHEAT] >= 2:
-                buildable_reward += 0.15  # Scaled from 15 → 0.15
-
-            if res[ResourceType.WOOD] >= 1 and res[ResourceType.BRICK] >= 1:
-                buildable_reward += 0.03  # Scaled from 3 → 0.03
-        reward += buildable_reward
-        reward_breakdown['buildable'] = buildable_reward
+        # REMOVED: "buildable_reward" - was encouraging hoarding instead of building!
+        # Agent should get rewarded for BUILDING, not HAVING resources
 
         # ===== ROBBER RISK =====
-        # Penalty scales with how many cards over 7 you have
-        # Having 8 cards is less risky than having 15 cards
+        # REBALANCED: Massively increased penalty to prevent hoarding
         total_cards = sum(new_obs['my_resources'].values())
+        robber_penalty = 0
         if total_cards > 7:
             excess_cards = total_cards - 7
-            # Penalty increases with excess: 0.1 per card over 7
-            # 8 cards = -0.1, 10 cards = -0.3, 15 cards = -0.8
-            reward -= 0.1 * excess_cards
+            # Linear penalty: 1.0 per card (10x stronger than before)
+            robber_penalty = 1.0 * excess_cards
+
+            # Exponential penalty for extreme hoarding (10+ excess)
+            if excess_cards > 10:
+                extreme_excess = excess_cards - 10
+                robber_penalty += 2.0 * extreme_excess  # Additional harsh penalty
+
+            # Examples:
+            # 8 cards = -1.0
+            # 10 cards = -3.0
+            # 15 cards = -8.0
+            # 20 cards = -13.0 + -6.0 = -19.0 (brutal)
+            reward -= robber_penalty
+            reward_breakdown['robber_penalty'] = -robber_penalty
+
+        # ===== DEVELOPMENT CARDS =====
+        # Differentiate rewards by card type (low rewards - dev cards are a means, not the goal)
+        dev_card_reward = 0
+        if not is_initial:
+            from game_system import DevelopmentCardType
+            old_dev = old_obs['my_dev_cards']
+            new_dev = new_obs['my_dev_cards']
+
+            # VP cards: Very low immediate reward (VP reward already counted in vp_diff above)
+            vp_card_diff = new_dev.get(DevelopmentCardType.VICTORY_POINT, 0) - old_dev.get(DevelopmentCardType.VICTORY_POINT, 0)
+            dev_card_reward += vp_card_diff * 0.05  # Very low - VP already counted at 8.0x
+
+            # Knight cards: Low reward (useful for robber control)
+            knight_diff = new_dev.get(DevelopmentCardType.KNIGHT, 0) - old_dev.get(DevelopmentCardType.KNIGHT, 0)
+            dev_card_reward += knight_diff * 0.2  # Low reward
+
+            # Utility cards: Very low reward (situational value)
+            road_building_diff = new_dev.get(DevelopmentCardType.ROAD_BUILDING, 0) - old_dev.get(DevelopmentCardType.ROAD_BUILDING, 0)
+            year_of_plenty_diff = new_dev.get(DevelopmentCardType.YEAR_OF_PLENTY, 0) - old_dev.get(DevelopmentCardType.YEAR_OF_PLENTY, 0)
+            monopoly_diff = new_dev.get(DevelopmentCardType.MONOPOLY, 0) - old_dev.get(DevelopmentCardType.MONOPOLY, 0)
+            dev_card_reward += (road_building_diff + year_of_plenty_diff + monopoly_diff) * 0.1
+
+        reward += dev_card_reward
+        reward_breakdown['dev_cards'] = dev_card_reward
 
         # ===== WIN/LOSS =====
         if step_info.get('result') == 'game_over':
             if step_info.get('winner') == self.player_id:
-                reward += 10.0  # Scaled from 500 → 10 (strong win signal)
+                reward += 50.0  # INCREASED: 10.0 → 50.0 (WINNING is the ultimate goal!)
+                reward_breakdown['win_bonus'] = 50.0
             else:
-                reward -= 0.5  # Scaled from -30 → -0.5
+                reward -= 1.0  # INCREASED: -0.5 → -1.0 (losing hurts more)
+                reward_breakdown['loss_penalty'] = -1.0
 
         # ===== ILLEGAL ACTIONS =====
         if not step_info.get('success', True):
@@ -722,6 +753,10 @@ class CatanEnv(gym.Env):
             exploration_reward += 0.5  # Scaled from 50 → 0.5
         if not is_initial and current_vp >= 4:
             exploration_reward += 1.0  # Scaled from 100 → 1.0
+        if not is_initial and current_vp >= 6:
+            exploration_reward += 2.0  # NEW: Bonus for getting close to winning
+        if not is_initial and current_vp >= 8:
+            exploration_reward += 3.0  # NEW: Big bonus for being very close
         reward += exploration_reward
         reward_breakdown['exploration'] = exploration_reward
 
