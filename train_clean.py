@@ -87,16 +87,19 @@ def get_vp_target(episode, use_curriculum):
         return GameConstants.VICTORY_POINTS_TO_WIN  # Use current setting
 
     # Curriculum: gradually increase VP target
-    if episode < 1000:
-        return 5
-    elif episode < 2000:
-        return 6
-    elif episode < 3000:
-        return 7
+    # Optimized for 20,000 episode training (3 hours)
+    if episode < 2000:
+        return 5   # Master basics
     elif episode < 4000:
-        return 8
+        return 6   # Expand building
+    elif episode < 7000:
+        return 7   # Intermediate play
+    elif episode < 10000:
+        return 8   # Advanced strategies
+    elif episode < 14000:
+        return 9   # Near-winning play
     else:
-        return 10
+        return 10  # Full competitive game
 
 # Auto-detect best device
 if torch.cuda.is_available():
