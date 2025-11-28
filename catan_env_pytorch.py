@@ -455,12 +455,16 @@ class CatanEnv(gym.Env):
         # Get action parameters (if needed)
         action_params = self._get_action_params(action_name, vertex_idx, edge_idx)
 
+        # Pass the chosen action name to the reward function
+        step_info = {'action_name': action_name}
+
         # Execute action in game
-        new_obs, done, step_info = self.game_env.step(
+        new_obs, done, step_info_from_env = self.game_env.step(
             self.player_id,
             action_name,
             action_params
         )
+        step_info.update(step_info_from_env)
 
         # ✅ CRITICAL FIX: Check for victory AFTER every action!
         winner = self.game_env.game.check_victory_conditions()
@@ -590,7 +594,7 @@ class CatanEnv(gym.Env):
         """
         Reward function with scaled values for stable PPO training.
 
-        REBALANCED v5: Increased dev card incentives.
+        REBALANCED v6: Added penalty for inaction.
         - Removed "buildable" reward (was encouraging hoarding).
         - Increased robber penalty 10x + exponential (discourage excess cards).
         - Increased road rewards (0.5 -> 1.5) and longest road bonus (2.0 -> 5.0).
@@ -599,12 +603,24 @@ class CatanEnv(gym.Env):
         - Differentiated dev card rewards by type, and increased knight card reward (0.2 -> 1.0).
         - Added bonus for largest army (5.0).
         - Added direct penalty for being forced to discard cards.
+        - Added penalty for ending turn when a build action is possible.
         """
         reward = 0.0
         reward_breakdown = {}  # Track where rewards come from
 
         # Check game phase
         is_initial = self.game_env.game.is_initial_placement_phase()
+
+        # ===== INACTION PENALTY (NEW) =====
+        action_name = step_info.get('action_name')
+        if action_name == 'end_turn':
+            # Check if any build actions were legal
+            legal_actions = old_obs.get('legal_actions', [])
+            build_actions = {'build_settlement', 'build_city', 'build_road', 'buy_dev_card'}
+            if any(action in legal_actions for action in build_actions):
+                inaction_penalty = -2.0  # Penalize for not taking a build action
+                reward += inaction_penalty
+                reward_breakdown['inaction_penalty'] = inaction_penalty
 
         # ===== DISCARD EVENT PENALTY (NEW) =====
         # This penalizes the agent if a 7 is rolled and they are forced to discard.
