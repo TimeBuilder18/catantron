@@ -327,7 +327,7 @@ class AIGameEnvironment:
         if len(self.game.players_discarded) >= len(self.game.players_must_discard):
             self.game.waiting_for_discards = False
             self.game.players_must_discard = []
-            self.game.players_discarded = []
+            self.game.players_discarded = set()
 
             # Automatically move robber to a random tile (not current position)
             # This simplifies AI training by not requiring robber movement strategy
