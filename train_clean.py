@@ -56,6 +56,7 @@ with SuppressOutput():
     from agent_gpu import CatanAgent,ExperienceBuffer
     from trainer_gpu import PPOTrainer
     from rule_based_ai import play_rule_based_turn
+    from game_system import GameConstants
     import torch
     import numpy as np
     import matplotlib.pyplot as plt
@@ -69,12 +70,33 @@ parser.add_argument('--episodes', type=int, default=30000)
 parser.add_argument('--update-freq', type=int, default=50)
 parser.add_argument('--save-freq', type=int, default=3000)
 parser.add_argument('--model-name', type=str, default='catan_clean')
+parser.add_argument('--curriculum', action='store_true', help='Use curriculum learning (VP 5→10)')
+parser.add_argument('--batch-size', type=int, default=1024, help='Batch size for training')
+parser.add_argument('--epochs', type=int, default=20, help='Training epochs per update')
 args = parser.parse_args()
 
 print("=" * 70)
 print("CATAN TRAINING - CLEAN OUTPUT MODE")
 print("=" * 70)
 sys.stdout.flush()
+
+# Curriculum learning function
+def get_vp_target(episode, use_curriculum):
+    """Return VP target based on curriculum stage"""
+    if not use_curriculum:
+        return GameConstants.VICTORY_POINTS_TO_WIN  # Use current setting
+
+    # Curriculum: gradually increase VP target
+    if episode < 1000:
+        return 5
+    elif episode < 2000:
+        return 6
+    elif episode < 3000:
+        return 7
+    elif episode < 4000:
+        return 8
+    else:
+        return 10
 
 # Auto-detect best device
 if torch.cuda.is_available():
@@ -87,25 +109,27 @@ else:
 print(f"🎮 Device: {device}")
 if device.type == 'cuda':
     print(f"   GPU: {torch.cuda.get_device_name(0)}")
-    print(f"   Batch size: 1024 (RTX 2080 Super optimized)")
-    print(f"   Training epochs: 20")
-print(f"Episodes: {args.episodes}")
-print(f"Update frequency: {args.update_freq}")
-print(f"Save frequency: {args.save_freq}")
-print(f"Model name: {args.model_name}")
+    print(f"   Batch size: {args.batch_size} (RTX 2080 Super optimized)")
+    print(f"   Training epochs: {args.epochs}")
+
+if args.curriculum:
+    print(f"\n📚 Curriculum Learning:")
+    print(f"   Episodes 0-1000:   VP = 5  (Learn basics)")
+    print(f"   Episodes 1001-2000: VP = 6  (Build more)")
+    print(f"   Episodes 2001-3000: VP = 7  (Intermediate)")
+    print(f"   Episodes 3001-4000: VP = 8  (Advanced)")
+    print(f"   Episodes 4001+:     VP = 10 (Full game)")
+
+print(f"\n🎯 Training:")
+print(f"   Episodes: {args.episodes}")
+print(f"   Update frequency: {args.update_freq}")
+print(f"   Save frequency: {args.save_freq}")
+print(f"   Model name: {args.model_name}")
 print()
 sys.stdout.flush()
 
 env = CatanEnv(player_id=0)
 agent = CatanAgent(device=device)
-
-# RTX 2080 Super optimization: 8GB VRAM allows for large batches
-if device.type == 'cuda':
-    batch_size = 1024
-    n_epochs = 20
-else:
-    batch_size = 512
-    n_epochs = 5
 
 trainer = PPOTrainer(
     policy=agent.policy,
@@ -116,8 +140,8 @@ trainer = PPOTrainer(
     value_coef=0.5,
     entropy_coef=0.05,       # Increased exploration
     max_grad_norm=0.5,
-    n_epochs=n_epochs,
-    batch_size=batch_size
+    n_epochs=args.epochs,
+    batch_size=args.batch_size
 )
 buffer = ExperienceBuffer()
 
@@ -134,6 +158,11 @@ natural_end_count = 0
 
 # Start episode loop:
 for episode in range(args.episodes):
+    # Update VP target based on curriculum
+    if args.curriculum:
+        current_vp_target = get_vp_target(episode, args.curriculum)
+        GameConstants.VICTORY_POINTS_TO_WIN = current_vp_target
+
     # Collect debug info for periodic printing
     debug_actions = []
     debug_resources = []
@@ -144,7 +173,11 @@ for episode in range(args.episodes):
         done = False
         episode_reward = 0
         step_count = 0
-        max_steps = 250  # Reduced for faster games
+        # Adjust max_steps based on VP target (higher VP needs more steps)
+        if args.curriculum and current_vp_target >= 8:
+            max_steps = 300
+        else:
+            max_steps = 250
 
         # Episode game loop
         while not done and step_count < max_steps:
@@ -241,10 +274,16 @@ for episode in range(args.episodes):
         elapsed = time.time() - start_time
         speed = (episode + 1) / (elapsed / 60)
 
-        print(
+        progress_str = (
             f"[{progress:5.1f}%] Ep {episode + 1:5d}/{args.episodes} | "
             f"VP: {avg_vp:.1f} | Reward: {avg_reward:6.2f} | {speed:4.0f} eps/min"
         )
+
+        # Add curriculum target if enabled
+        if args.curriculum:
+            progress_str += f" | Target VP: {current_vp_target}"
+
+        print(progress_str)
 
         # Print timeout stats every 50 episodes
         if (episode + 1) % 50 == 0:
