@@ -618,7 +618,7 @@ class CatanEnv(gym.Env):
             legal_actions = old_obs.get('legal_actions', [])
             build_actions = {'build_settlement', 'build_city', 'build_road', 'buy_dev_card'}
             if any(action in legal_actions for action in build_actions):
-                inaction_penalty = -2.0  # Penalize for not taking a build action
+                inaction_penalty = -10.0  # Penalize for not taking a build action
                 reward += inaction_penalty
                 reward_breakdown['inaction_penalty'] = inaction_penalty
 
