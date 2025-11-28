@@ -588,22 +588,39 @@ class CatanEnv(gym.Env):
 
     def _calculate_reward(self, old_obs, new_obs, step_info, debug=False):
         """
-        Reward function with scaled values for stable PPO training
+        Reward function with scaled values for stable PPO training.
 
-        REBALANCED v2: Fixed pathological hoarding/dev card spam behavior
-        - Removed "buildable" reward (was encouraging hoarding)
-        - Increased robber penalty 10x + exponential (discourage excess cards)
-        - Increased road rewards (0.2 → 0.5)
-        - Increased VP scaling (3.0 → 8.0)
-        - Increased win bonus (10.0 → 50.0)
-        - Differentiated dev card rewards by type
-        - Added rewards for USING dev cards
+        REBALANCED v5: Increased dev card incentives.
+        - Removed "buildable" reward (was encouraging hoarding).
+        - Increased robber penalty 10x + exponential (discourage excess cards).
+        - Increased road rewards (0.5 -> 1.5) and longest road bonus (2.0 -> 5.0).
+        - Increased VP scaling (3.0 -> 8.0).
+        - Increased win bonus (10.0 -> 50.0).
+        - Differentiated dev card rewards by type, and increased knight card reward (0.2 -> 1.0).
+        - Added bonus for largest army (5.0).
+        - Added direct penalty for being forced to discard cards.
         """
         reward = 0.0
         reward_breakdown = {}  # Track where rewards come from
 
         # Check game phase
         is_initial = self.game_env.game.is_initial_placement_phase()
+
+        # ===== DISCARD EVENT PENALTY (NEW) =====
+        # This penalizes the agent if a 7 is rolled and they are forced to discard.
+        discard_event_penalty = 0.0
+        # A discard event happens for this player if a 7 was rolled and they lost cards.
+        was_seven_rolled = new_obs.get('last_roll') and new_obs['last_roll'][2] == 7
+        if was_seven_rolled:
+            old_card_count = sum(old_obs['my_resources'].values())
+            if old_card_count > 7:
+                new_card_count = sum(new_obs['my_resources'].values())
+                cards_discarded = old_card_count - new_card_count
+                if cards_discarded > 0:
+                    # Apply a penalty for each card discarded. e.g., -2 per card.
+                    discard_event_penalty = -2.0 * cards_discarded
+                    reward += discard_event_penalty
+                    reward_breakdown['discard_event_penalty'] = discard_event_penalty
 
         # ===== VICTORY POINTS =====
         vp_diff = new_obs['my_victory_points'] - old_obs['my_victory_points']
@@ -652,9 +669,24 @@ class CatanEnv(gym.Env):
             reward_breakdown['tile_quality'] = tile_quality_bonus
         else:
             # Normal play - scaled rewards
-            building_reward = settlement_diff * 1.0 + city_diff * 2.0 + road_diff * 0.5  # INCREASED: road 0.2 → 0.5
+            building_reward = settlement_diff * 1.0 + city_diff * 2.0 + road_diff * 1.5  # INCREASED: road 0.5 → 1.5
             reward += building_reward
             reward_breakdown['building'] = building_reward
+
+        # ===== LONGEST ROAD =====
+        longest_road_bonus = 0.0
+        player = self.game_env.game.players[self.player_id]
+        if player.has_longest_road and not old_obs.get('has_longest_road'):
+            longest_road_bonus = 5.0  # INCREASED: 2.0 -> 5.0
+        reward += longest_road_bonus
+        reward_breakdown['longest_road_bonus'] = longest_road_bonus
+
+        # ===== LARGEST ARMY =====
+        largest_army_bonus = 0.0
+        if player.has_largest_army and not old_obs.get('has_largest_army'):
+            largest_army_bonus = 5.0 # NEW
+        reward += largest_army_bonus
+        reward_breakdown['largest_army_bonus'] = largest_army_bonus
 
         # ===== RESOURCES =====
         old_resources = sum(old_obs['my_resources'].values())
@@ -672,7 +704,7 @@ class CatanEnv(gym.Env):
             resource_types_owned = sum([
                 1 if res[ResourceType.WOOD] > 0 else 0,
                 1 if res[ResourceType.BRICK] > 0 else 0,
-                1 if res[ResourceType.WHEAT] > 0 else 0,
+.                1 if res[ResourceType.WHEAT] > 0 else 0,
                 1 if res[ResourceType.SHEEP] > 0 else 0,
                 1 if res[ResourceType.ORE] > 0 else 0
             ])
@@ -686,27 +718,27 @@ class CatanEnv(gym.Env):
         # REMOVED: "buildable_reward" - was encouraging hoarding instead of building!
         # Agent should get rewarded for BUILDING, not HAVING resources
 
-        # ===== ROBBER RISK =====
+        # ===== CARD HOARDING PENALTY =====
         # REBALANCED: Massively increased penalty to prevent hoarding
         total_cards = sum(new_obs['my_resources'].values())
-        robber_penalty = 0
+        hoarding_penalty = 0
         if total_cards > 7:
             excess_cards = total_cards - 7
             # Linear penalty: 1.0 per card (10x stronger than before)
-            robber_penalty = 1.0 * excess_cards
+            hoarding_penalty = 1.0 * excess_cards
 
             # Exponential penalty for extreme hoarding (10+ excess)
             if excess_cards > 10:
                 extreme_excess = excess_cards - 10
-                robber_penalty += 2.0 * extreme_excess  # Additional harsh penalty
+                hoarding_penalty += 2.0 * extreme_excess  # Additional harsh penalty
 
             # Examples:
             # 8 cards = -1.0
             # 10 cards = -3.0
             # 15 cards = -8.0
             # 20 cards = -13.0 + -6.0 = -19.0 (brutal)
-            reward -= robber_penalty
-            reward_breakdown['robber_penalty'] = -robber_penalty
+            reward -= hoarding_penalty
+            reward_breakdown['hoarding_penalty'] = -hoarding_penalty
 
         # ===== DEVELOPMENT CARDS =====
         # Differentiate rewards by card type (low rewards - dev cards are a means, not the goal)
@@ -722,7 +754,7 @@ class CatanEnv(gym.Env):
 
             # Knight cards: Low reward (useful for robber control)
             knight_diff = new_dev.get(DevelopmentCardType.KNIGHT, 0) - old_dev.get(DevelopmentCardType.KNIGHT, 0)
-            dev_card_reward += knight_diff * 0.2  # Low reward
+            dev_card_reward += knight_diff * 1.0  # INCREASED: 0.2 -> 1.0
 
             # Utility cards: Very low reward (situational value)
             road_building_diff = new_dev.get(DevelopmentCardType.ROAD_BUILDING, 0) - old_dev.get(DevelopmentCardType.ROAD_BUILDING, 0)
