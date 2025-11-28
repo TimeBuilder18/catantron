@@ -695,8 +695,14 @@ class CatanEnv(gym.Env):
         reward_breakdown['buildable'] = buildable_reward
 
         # ===== ROBBER RISK =====
-        if sum(new_obs['my_resources'].values()) > 7:
-            reward -= 0.5  # Scaled from -1.0 → -0.5 (still meaningful penalty)
+        # Penalty scales with how many cards over 7 you have
+        # Having 8 cards is less risky than having 15 cards
+        total_cards = sum(new_obs['my_resources'].values())
+        if total_cards > 7:
+            excess_cards = total_cards - 7
+            # Penalty increases with excess: 0.1 per card over 7
+            # 8 cards = -0.1, 10 cards = -0.3, 15 cards = -0.8
+            reward -= 0.1 * excess_cards
 
         # ===== WIN/LOSS =====
         if step_info.get('result') == 'game_over':
