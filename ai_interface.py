@@ -160,6 +160,14 @@ class AIGameEnvironment:
         player = self.game.players[player_index]
         current_player_idx = self.game.players.index(self.game.get_current_player())
 
+        # Calculate discard information
+        must_discard = player in self.game.players_must_discard
+        if must_discard:
+            total_cards = sum(player.resources.values())
+            cards_to_discard = total_cards // 2
+        else:
+            cards_to_discard = 0
+
         obs = {
             # Game state
             'current_player': current_player_idx,
@@ -168,6 +176,12 @@ class AIGameEnvironment:
             'turn_phase': self.game.turn_phase,
             'dice_rolled': self.game.dice_rolled,
             'last_roll': self.game.last_dice_roll,
+
+            # Discard state (new - for 7 rolled discard feature)
+            'waiting_for_discards': self.game.waiting_for_discards,
+            'must_discard': must_discard,
+            'must_discard_count': cards_to_discard,
+            'players_discarding': len(self.game.players_must_discard),
 
             # My private info
             'my_resources': dict(player.resources),
@@ -309,11 +323,19 @@ class AIGameEnvironment:
                 # Perform discard
                 self.game.discard_cards(player, discard_dict)
 
-        # Clear waiting flag after all discards
+        # Clear waiting flag after all discards and move robber automatically
         if len(self.game.players_discarded) >= len(self.game.players_must_discard):
             self.game.waiting_for_discards = False
             self.game.players_must_discard = []
             self.game.players_discarded = []
+
+            # Automatically move robber to a random tile (not current position)
+            # This simplifies AI training by not requiring robber movement strategy
+            import random
+            available_tiles = [t for t in self.game.game_board.tiles if t != self.game.robber.position]
+            if available_tiles:
+                new_tile = random.choice(available_tiles)
+                self.game.move_robber_to_tile(new_tile)
 
     def step(self, player_index, action, action_params=None):
         """
