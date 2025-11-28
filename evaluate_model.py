@@ -158,17 +158,21 @@ for episode in range(args.episodes):
         # Track interesting events
         action_name = action_names[action] if action < len(action_names) else 'invalid'
 
+        # Get raw observation to check resources
+        with SuppressOutput():
+            raw_obs = env.game_env.get_observation(env.player_id)
+
         # Track resource accumulation
-        total_cards = sum(obs['my_resources'].values())
+        total_cards = sum(raw_obs['my_resources'].values())
         max_cards = max(max_cards, total_cards)
 
         # Track discard events
-        if obs.get('must_discard', False):
+        if raw_obs.get('must_discard', False):
             discard_count += 1
 
         # Log interesting actions
         if action_name in ['build_city', 'build_settlement', 'build_road', 'buy_dev']:
-            my_vp = obs.get('my_victory_points', 0)
+            my_vp = raw_obs.get('my_victory_points', 0)
             game_log.append({
                 'step': step_count,
                 'action': action_name,
@@ -194,8 +198,11 @@ for episode in range(args.episodes):
         episode_reward += reward
         obs = next_obs
 
-    # Game finished
-    final_vp = obs.get('my_victory_points', 0)
+    # Game finished - get final raw observation
+    with SuppressOutput():
+        final_raw_obs = env.game_env.get_observation(env.player_id)
+
+    final_vp = final_raw_obs.get('my_victory_points', 0)
     is_timeout = step_count >= max_steps
 
     # Update stats
