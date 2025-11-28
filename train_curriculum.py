@@ -183,8 +183,13 @@ for episode in range(start_episode, args.episodes):
         while not done and step_count < max_steps:
             step_count += 1
 
-            # Get action from agent
-            action, vertex, edge, log_prob, value = agent.select_action(obs)
+            # Get hierarchical action from agent
+            action, vertex, edge, action_log_prob, vertex_log_prob, edge_log_prob, value = agent.choose_action(
+                obs,
+                obs['action_mask'],
+                obs['vertex_mask'],
+                obs['edge_mask']
+            )
 
             # Store debug info (only for steps 10-20 during normal play)
             if (episode % args.update_freq == 0 and
@@ -212,8 +217,22 @@ for episode in range(start_episode, args.episodes):
             next_obs, reward, terminated, truncated, step_info = env.step(action, vertex, edge)
             done = terminated or truncated
 
-            # Store experience
-            buffer.add(obs, action, reward, done, log_prob, value, vertex, edge)
+            # Store ALL hierarchical data in buffer
+            buffer.store(
+                state=obs['observation'],
+                action=action,
+                vertex=vertex,
+                edge=edge,
+                reward=reward,
+                action_log_prob=action_log_prob,
+                vertex_log_prob=vertex_log_prob,
+                edge_log_prob=edge_log_prob,
+                value=value,
+                done=done,
+                action_mask=obs['action_mask'],
+                vertex_mask=obs['vertex_mask'],
+                edge_mask=obs['edge_mask']
+            )
 
             episode_reward += reward
             obs = next_obs
