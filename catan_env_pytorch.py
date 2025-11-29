@@ -13,7 +13,8 @@ sys.path.append('/mnt/project')
 
 from ai_interface import AIGameEnvironment
 from game_system import ResourceType
-from game_system import DevelopmentCardType
+from game_system import DevelopmentCardType, Player
+
 class CatanEnv(gym.Env):
     """
     Gymnasium environment for Catan - optimized for PyTorch PPO
@@ -37,6 +38,7 @@ class CatanEnv(gym.Env):
         self.player_id = player_id
         self.game_env = AIGameEnvironment()
         self._episode_count = 0  # Track episodes for debug output
+        self.gamma = 0.99 # Discount factor for PBRS
 
         # Action space: 11 discrete actions
         self.action_space = spaces.Discrete(11)
@@ -288,6 +290,9 @@ class CatanEnv(gym.Env):
             info = self._get_info()
             info['illegal_action'] = True
             return obs, -10.0, False, False, info
+        
+        old_potential = self._calculate_potential(self.game_env.game.players[self.player_id])
+
         action_names = [
             'roll_dice', 'place_settlement', 'place_road',
             'build_settlement', 'build_city', 'build_road',
@@ -322,14 +327,17 @@ class CatanEnv(gym.Env):
             )
             step_info.update(step_info_from_env)
 
+        new_potential = self._calculate_potential(self.game_env.game.players[self.player_id])
         winner = self.game_env.game.check_victory_conditions()
         if winner is not None:
             done = True
             winner_id = self.game_env.game.players.index(winner)
             step_info['winner'] = winner_id
             step_info['result'] = 'game_over'
+        
+        new_obs = self.game_env.get_observation(self.player_id) # Get final observation after all changes
         debug_reward = (hasattr(self, '_episode_count') and self._episode_count % 50 == 0)
-        reward = self._calculate_reward(raw_obs, new_obs, step_info, debug=debug_reward)
+        reward = self._calculate_reward(raw_obs, new_obs, step_info, old_potential, new_potential, debug=debug_reward)
         obs = self._get_obs()
         info = self._get_info()
         info.update(step_info)
@@ -348,11 +356,52 @@ class CatanEnv(gym.Env):
                 return {'edge': all_edges[edge_idx]}
         return None
 
-    def _calculate_reward(self, old_obs, new_obs, step_info, debug=False):
+    def _calculate_potential(self, player: Player):
+        potential = 0.0
+        
+        # Production Potential
+        pip_map = {2:1, 3:2, 4:3, 5:4, 6:5, 8:5, 9:4, 10:3, 11:2, 12:1}
+        production_potential = 0
+        for settlement in player.settlements:
+            for tile in settlement.position.adjacent_tiles:
+                if tile.number:
+                    production_potential += pip_map.get(tile.number, 0)
+        for city in player.cities:
+            for tile in city.position.adjacent_tiles:
+                 if tile.number:
+                    production_potential += 2 * pip_map.get(tile.number, 0)
+        potential += production_potential * 0.1
+
+        # Strategic Asset Potential
+        if player.has_longest_road: potential += 2.0
+        if player.has_largest_army: potential += 2.0
+        potential += player.development_cards.get(DevelopmentCardType.VICTORY_POINT, 0)
+
+        # Opponent Threat Potential
+        for i, opp in enumerate(self.game_env.game.players):
+            if opp != player:
+                opp_vp = opp.calculate_victory_points()
+                if opp_vp >= 8:
+                    potential -= (opp_vp - 7) * 5.0 # Heavy penalty for opponents close to winning
+        
+        return potential
+
+    def _calculate_reward(self, old_obs, new_obs, step_info, old_potential, new_potential, debug=False):
         reward = 0.0
         reward_breakdown = {}
         is_initial = self.game_env.game.is_initial_placement_phase()
         action_name = step_info.get('action_name')
+
+        # PBRS Reward
+        pbrs_reward = self.gamma * new_potential - old_potential
+        reward += pbrs_reward
+        reward_breakdown['pbrs'] = pbrs_reward
+
+        # VP State Bonus
+        vp_state_bonus = new_obs['my_victory_points'] * 0.1
+        reward += vp_state_bonus
+        reward_breakdown['vp_state_bonus'] = vp_state_bonus
+
         if action_name == 'end_turn':
             legal_actions = old_obs.get('legal_actions', [])
             build_actions = {'build_settlement', 'build_city', 'build_road', 'buy_dev_card'}
@@ -391,13 +440,7 @@ class CatanEnv(gym.Env):
             building_reward = settlement_diff * 1.0 + city_diff * 2.0 + road_diff * 1.5
             reward += building_reward
             reward_breakdown['building'] = building_reward
-        player = self.game_env.game.players[self.player_id]
-        if player.has_longest_road and not old_obs.get('has_longest_road'):
-            reward += 5.0
-            reward_breakdown['longest_road_bonus'] = 5.0
-        if player.has_largest_army and not old_obs.get('has_largest_army'):
-            reward += 5.0
-            reward_breakdown['largest_army_bonus'] = 5.0
+        
         if new_obs['my_victory_points'] > 3:
             total_cards = sum(new_obs['my_resources'].values())
             if total_cards > 7:
