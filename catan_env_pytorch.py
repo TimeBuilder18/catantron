@@ -291,8 +291,6 @@ class CatanEnv(gym.Env):
             info['illegal_action'] = True
             return obs, -10.0, False, False, info
         
-        old_potential = self._calculate_potential(self.game_env.game.players[self.player_id])
-
         action_names = [
             'roll_dice', 'place_settlement', 'place_road',
             'build_settlement', 'build_city', 'build_road',
@@ -305,20 +303,12 @@ class CatanEnv(gym.Env):
             new_obs, done, _ = self.game_env.step(self.player_id, 'wait', {})
         elif action_name == 'trade_with_bank':
             player = self.game_env.game.players[self.player_id]
-            pre_trade_actions = self.game_env.get_legal_actions(self.player_id)
             resource_map = [ResourceType.WOOD, ResourceType.BRICK, ResourceType.WHEAT, ResourceType.SHEEP, ResourceType.ORE]
             give_res = resource_map[trade_give_idx]
             get_res = resource_map[trade_get_idx]
             success, message = self.game_env.game.execute_bank_trade(player, give_res, get_res)
             step_info['success'] = success
             step_info['message'] = message
-            if success:
-                post_trade_actions = self.game_env.get_legal_actions(self.player_id)
-                build_actions = {'build_settlement', 'build_city', 'build_road', 'buy_dev_card'}
-                pre_buildable = any(a in pre_trade_actions for a in build_actions)
-                post_buildable = any(a in post_trade_actions for a in build_actions)
-                if post_buildable and not pre_buildable:
-                    step_info['trade_led_to_build_opportunity'] = True
             new_obs, done, _ = self.game_env.step(self.player_id, 'wait', {})
         else:
             action_params = self._get_action_params(action_name, vertex_idx, edge_idx)
@@ -327,7 +317,6 @@ class CatanEnv(gym.Env):
             )
             step_info.update(step_info_from_env)
 
-        new_potential = self._calculate_potential(self.game_env.game.players[self.player_id])
         winner = self.game_env.game.check_victory_conditions()
         if winner is not None:
             done = True
@@ -336,8 +325,7 @@ class CatanEnv(gym.Env):
             step_info['result'] = 'game_over'
         
         new_obs = self.game_env.get_observation(self.player_id) # Get final observation after all changes
-        debug_reward = (hasattr(self, '_episode_count') and self._episode_count % 50 == 0)
-        reward = self._calculate_reward(raw_obs, new_obs, step_info, old_potential, new_potential, debug=debug_reward)
+        reward = self._calculate_reward(raw_obs, new_obs, step_info)
         obs = self._get_obs()
         info = self._get_info()
         info.update(step_info)
@@ -356,62 +344,32 @@ class CatanEnv(gym.Env):
                 return {'edge': all_edges[edge_idx]}
         return None
 
-    def _calculate_potential(self, player: Player):
-        potential = 0.0
-        
-        # Production Potential
-        pip_map = {2:1, 3:2, 4:3, 5:4, 6:5, 8:5, 9:4, 10:3, 11:2, 12:1}
-        production_potential = 0
-        for settlement in player.settlements:
-            for tile in settlement.position.adjacent_tiles:
-                if tile.number:
-                    production_potential += pip_map.get(tile.number, 0)
-        for city in player.cities:
-            for tile in city.position.adjacent_tiles:
-                 if tile.number:
-                    production_potential += 2 * pip_map.get(tile.number, 0)
-        potential += production_potential * 0.05 # Reduced multiplier
-
-        # Strategic Asset Potential
-        if player.has_longest_road: potential += 2.0
-        if player.has_largest_army: potential += 2.0
-        potential += player.development_cards.get(DevelopmentCardType.VICTORY_POINT, 0)
-
-        # Opponent Threat Potential
-        for i, opp in enumerate(self.game_env.game.players):
-            if opp != player:
-                opp_vp = opp.calculate_victory_points()
-                if opp_vp >= 8:
-                    potential -= (opp_vp - 7) * 5.0 # Heavy penalty for opponents close to winning
-        
-        return potential
-
-    def _calculate_reward(self, old_obs, new_obs, step_info, old_potential, new_potential, debug=False):
+    def _calculate_reward(self, old_obs, new_obs, step_info):
         reward = 0.0
-        reward_breakdown = {}
-        is_initial = self.game_env.game.is_initial_placement_phase()
         action_name = step_info.get('action_name')
 
-        # PBRS Reward
-        pbrs_reward = self.gamma * new_potential - old_potential
-        reward += pbrs_reward
-        reward_breakdown['pbrs'] = pbrs_reward
+        # --- Core Rewards ---
+        # 1. Win/Loss Reward
+        if step_info.get('result') == 'game_over':
+            if step_info.get('winner') == self.player_id:
+                return 50.0  # Win bonus
+            else:
+                return -1.0 # Loss penalty
 
-        # VP State Bonus
-        vp_state_bonus = new_obs['my_victory_points'] * 0.05 # Reduced multiplier
-        reward += vp_state_bonus
-        reward_breakdown['vp_state_bonus'] = vp_state_bonus
+        # 2. Victory Point Event Reward
+        vp_diff = new_obs['my_victory_points'] - old_obs['my_victory_points']
+        if vp_diff > 0:
+            reward += vp_diff * 25.0
 
+        # --- Penalties ---
+        # 1. Inaction Penalty
         if action_name == 'end_turn':
             legal_actions = old_obs.get('legal_actions', [])
             build_actions = {'build_settlement', 'build_city', 'build_road', 'buy_dev_card'}
             if any(action in legal_actions for action in build_actions):
-                inaction_penalty = -10.0
-                reward += inaction_penalty
-                reward_breakdown['inaction_penalty'] = inaction_penalty
-        if step_info.get('trade_led_to_build_opportunity'):
-            reward += 5.0
-            reward_breakdown['strategic_trade'] = 5.0
+                reward -= 10.0
+        
+        # 2. Discard Penalty
         was_seven_rolled = new_obs.get('last_roll') and new_obs['last_roll'][2] == 7
         if was_seven_rolled:
             old_card_count = sum(old_obs['my_resources'].values())
@@ -419,46 +377,8 @@ class CatanEnv(gym.Env):
                 new_card_count = sum(new_obs['my_resources'].values())
                 cards_discarded = old_card_count - new_card_count
                 if cards_discarded > 0:
-                    discard_event_penalty = -2.0 * cards_discarded
-                    reward += discard_event_penalty
-                    reward_breakdown['discard_event_penalty'] = discard_event_penalty
-        vp_diff = new_obs['my_victory_points'] - old_obs['my_victory_points']
-        if is_initial:
-            vp_reward = vp_diff * 0.01
-        else:
-            vp_reward = vp_diff * 25.0 # Drastically increased
-        reward += vp_reward
-        reward_breakdown['vp'] = vp_reward
-        settlement_diff = new_obs['my_settlements'] - old_obs['my_settlements']
-        city_diff = new_obs['my_cities'] - old_obs['my_cities']
-        road_diff = new_obs['my_roads'] - old_obs['my_roads']
-        if is_initial:
-            building_reward = settlement_diff * 0.005 + road_diff * 0.002
-            reward += building_reward
-            reward_breakdown['building'] = building_reward
-        else:
-            building_reward = settlement_diff * 1.0 + city_diff * 2.0 + road_diff * 1.5
-            reward += building_reward
-            reward_breakdown['building'] = building_reward
-        
-        if new_obs['my_victory_points'] > 3:
-            total_cards = sum(new_obs['my_resources'].values())
-            if total_cards > 7:
-                excess_cards = total_cards - 7
-                hoarding_penalty = 1.0 * excess_cards
-                if excess_cards > 10:
-                    hoarding_penalty += 2.0 * (excess_cards - 10)
-                reward -= hoarding_penalty
-                reward_breakdown['hoarding_penalty'] = -hoarding_penalty
-        if step_info.get('result') == 'game_over':
-            if step_info.get('winner') == self.player_id:
-                reward += 50.0
-                reward_breakdown['win_bonus'] = 50.0
-            else:
-                reward -= 1.0
-                reward_breakdown['loss_penalty'] = -1.0
-        if debug:
-            self._last_reward_breakdown = reward_breakdown
+                    reward -= cards_discarded * 2.0
+
         return reward
 
     def render(self):
