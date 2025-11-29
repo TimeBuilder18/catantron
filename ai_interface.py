@@ -5,65 +5,6 @@ ENVIRONMENT ONLY - You implement the AI agents yourself!
 
 This provides a clean interface to the Catan game for training 4 AI agents.
 No GUI, no networking, no sockets - just pure game logic.
-
-USAGE EXAMPLE:
---------------
-from ai_interface import AIGameEnvironment
-
-# 1. Create the environment
-env = AIGameEnvironment()
-
-# 2. Get initial observations (one per agent)
-observations = env.reset()  # Returns list of 4 observations
-
-# 3. Game loop
-done = False
-while not done:
-    current_player = env.game.current_player_index
-
-    # 4. Your AI decides action based on observation
-    obs = observations[current_player]
-    action = your_ai_agent.choose_action(obs)
-    action_params = your_ai_agent.choose_params(obs)
-
-    # 5. Execute action (NO REWARD - you calculate that yourself!)
-    obs, done, info = env.step(current_player, action, action_params)
-    observations[current_player] = obs
-
-    # 6. Calculate your own reward based on obs
-    reward = your_reward_function(obs, info)
-
-    # 7. Your AI learns
-    your_ai_agent.learn(obs, action, reward, done)
-
-# 7. Reset for next game
-observations = env.reset()
-
-OBSERVATION FORMAT:
--------------------
-obs = {
-    'is_my_turn': bool,
-    'game_phase': str,
-    'my_resources': dict,        # YOUR private hand
-    'my_victory_points': int,
-    'opponents': list,            # Public info only (can't see their cards)
-    'legal_actions': list,        # What you can do right now
-    'tiles': list,                # Board state
-    ...
-}
-
-ACTIONS:
---------
-- 'roll_dice' (no params needed)
-- 'place_settlement' (params: {'vertex': Vertex object})
-- 'place_road' (params: {'edge': Edge object})
-- 'build_settlement' (params: {'vertex': Vertex object})
-- 'build_city' (params: {'vertex': Vertex object})
-- 'build_road' (params: {'edge': Edge object})
-- 'buy_dev_card' (no params)
-- 'end_turn' (no params)
-
-NOW GO BUILD YOUR AI! This is just the game environment.
 """
 
 import random
@@ -146,12 +87,6 @@ class AIGameEnvironment:
         self.ai_players = [None, RuleBasedAI(), RuleBasedAI(), RuleBasedAI()]
         self.game.robber = robber
 
-        pass  # print("✅ AI Training Environment Ready!")
-        pass  # print(f"   • 4 AI agents initialized")
-        pass  # print(f"   • {len(tiles)} tiles")
-        pass  # print(f"   • {len(game_board.ports)} ports")
-        pass  # print(f"   • Game phase: {self.game.game_phase}")
-
     def get_observation(self, player_index):
         """
         Get observation for a specific AI agent
@@ -227,10 +162,8 @@ class AIGameEnvironment:
         # Initial placement phase
         if self.game.is_initial_placement_phase():
             if self.game.waiting_for_road:
-                # Can place road connected to last settlement
                 actions.append('place_road')
             else:
-                # Can place settlement
                 actions.append('place_settlement')
 
         # Normal play
@@ -239,34 +172,36 @@ class AIGameEnvironment:
                 actions.append('roll_dice')
 
             if self.game.can_trade_or_build():
-                # Only add build actions if player has the resources!
                 from game_system import ResourceType
                 res = player.resources
 
-                # Settlement: Wood=1, Brick=1, Wheat=1, Sheep=1
+                # Check for buildable locations AND resources
                 if (res[ResourceType.WOOD] >= 1 and res[ResourceType.BRICK] >= 1 and
-                    res[ResourceType.WHEAT] >= 1 and res[ResourceType.SHEEP] >= 1):
+                    res[ResourceType.WHEAT] >= 1 and res[ResourceType.SHEEP] >= 1 and
+                    self.game.get_buildable_vertices_for_settlements()):
                     actions.append('build_settlement')
 
-                # City: Ore=3, Wheat=2
-                if res[ResourceType.ORE] >= 3 and res[ResourceType.WHEAT] >= 2:
+                if (res[ResourceType.ORE] >= 3 and res[ResourceType.WHEAT] >= 2 and
+                    self.game.get_buildable_vertices_for_cities()):
                     actions.append('build_city')
 
-                # Road: Wood=1, Brick=1
-                if res[ResourceType.WOOD] >= 1 and res[ResourceType.BRICK] >= 1:
+                if (res[ResourceType.WOOD] >= 1 and res[ResourceType.BRICK] >= 1 and
+                    self.game.get_buildable_edges()):
                     actions.append('build_road')
 
-                # Dev card: Ore=1, Wheat=1, Sheep=1
                 if (res[ResourceType.ORE] >= 1 and res[ResourceType.WHEAT] >= 1 and
                     res[ResourceType.SHEEP] >= 1):
                     actions.append('buy_dev_card')
 
-                # Can always trade with bank (4:1 or with ports)
-                if sum(res.values()) >= 4:  # Need at least 4 resources to trade
+                if sum(res.values()) >= 4:
                     actions.append('trade_with_bank')
 
             if self.game.can_end_turn():
                 actions.append('end_turn')
+        
+        # Fallback action if no other actions are available
+        if not actions:
+            actions.append('end_turn')
 
         return actions
 
@@ -440,7 +375,6 @@ class AIGameEnvironment:
                 info['result'] = 'game_over'
 
         # IMPORTANT: Auto-play other players' turns after agent's action
-        # This ensures initial placement and normal play progresses
         # if not done:
         #     self._auto_play_other_players(player_index)
 
@@ -465,36 +399,3 @@ class AIGameEnvironment:
             'game_phase': self.game.game_phase,
             'turn_phase': self.game.turn_phase
         }
-
-
-# ==================== EXAMPLE USAGE ====================
-
-if __name__ == "__main__":
-    pass  # print("="*60)
-    pass  # print("CATAN AI TRAINING ENVIRONMENT - READY")
-    pass  # print("="*60)
-
-    # Create environment
-    env = AIGameEnvironment()
-
-    # Get initial observations for all 4 players
-    observations = env.reset()
-
-    pass  # print("\n📊 Initial State:")
-    for i, obs in enumerate(observations):
-        pass  # print(f"   Player {i+1}:")
-        pass  # print(f"      • Victory Points: {obs['my_victory_points']}")
-        pass  # print(f"      • My Turn: {obs['is_my_turn']}")
-        pass  # print(f"      • Legal Actions: {obs['legal_actions']}")
-        pass  # print(f"      • Resources: {sum(obs['my_resources'].values())}")
-
-    pass  # print("\n" + "="*60)
-    pass  # print("✅ ENVIRONMENT READY FOR YOUR AI IMPLEMENTATION")
-    pass  # print("="*60)
-    pass  # print("\nHow to use:")
-    pass  # print("1. Create your AI agents (4 agents)")
-    pass  # print("2. Each agent calls: obs = env.get_observation(player_index)")
-    pass  # print("3. Agent decides action from obs['legal_actions']")
-    pass  # print("4. Execute: obs, reward, done, info = env.step(player_index, action, params)")
-    pass  # print("5. Repeat until done == True")
-    pass  # print("\n" + "="*60)
