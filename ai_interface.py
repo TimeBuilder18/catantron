@@ -441,8 +441,8 @@ class AIGameEnvironment:
 
         # IMPORTANT: Auto-play other players' turns after agent's action
         # This ensures initial placement and normal play progresses
-        if not done:
-            self._auto_play_other_players(player_index)
+        # if not done:
+        #     self._auto_play_other_players(player_index)
 
         obs = self.get_observation(player_index)
         return obs, done, info
