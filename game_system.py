@@ -897,18 +897,16 @@ class GameSystem:
         """Legacy method - use end_turn() instead"""
         return self.end_turn()
 
-    def give_starting_resources_step2(self):
-        """Step 2: Absolute minimum - just iterate players"""
-        for player in self.players:
-            if len(player.settlements) >= 2:
-                second_settlement = player.settlements[1]
-                vertex = second_settlement.position
-
-                for tile in vertex.adjacent_tiles:
-                    if tile.resource != "desert":
-                        resource_type = tile.get_resource_type()
-                        if resource_type:
-                            player.add_resource(resource_type, 1)
+    def give_starting_resources_for_player(self, player):
+        """Gives a player their starting resources based on their second settlement."""
+        if len(player.settlements) >= 2:
+            second_settlement = player.settlements[1]
+            vertex = second_settlement.position
+            for tile in vertex.adjacent_tiles:
+                if tile.resource != "desert":
+                    resource_type = tile.get_resource_type()
+                    if resource_type:
+                        player.add_resource(resource_type, 1)
 
     def roll_dice(self):
         """Roll dice and distribute resources"""
@@ -982,22 +980,17 @@ class GameSystem:
                     # In second round, go in reverse order (last player goes first)
                     self.current_player_index = len(self.players) - 1
                     self.waiting_for_road = False  # Reset waiting_for_road for new round
-                    ###print("\n" + "="*60)
-                    ###print("=== INITIAL PLACEMENT ROUND 2 ===")
-                    ###print("Players place in REVERSE order: 4 → 3 → 2 → 1")
-                    ##print(f"Starting with Player {self.current_player_index + 1}")
-                    ###print("="*60 + "\n")
+                    self.give_starting_resources_for_player(self.get_current_player())
+
 
             elif self.game_phase == "INITIAL_PLACEMENT_2":
                 # In second round, go in reverse order
                 self.current_player_index -= 1
-                ##print(f"  [Round 2] Moving to previous player: Player {self.current_player_index + 1}")
+                if self.current_player_index >= 0:
+                    self.give_starting_resources_for_player(self.get_current_player())
+
 
                 if self.current_player_index < 0:
-                    ###print("\n" + "="*60)
-                    ###print("=== INITIAL PLACEMENT COMPLETE ===")
-                    ###print("Starting normal gameplay...")
-                    ###print("="*60 + "\n")
 
                     self.game_phase = "NORMAL_PLAY"
                     self.turn_phase = "ROLL_DICE"
@@ -1006,30 +999,6 @@ class GameSystem:
                     self.dice_rolled = False
                     self.last_dice_roll = None
                     self.last_resource_gains = None
-
-                    # Give starting resources from second settlements
-                    for player in self.players:
-                        if len(player.settlements) >= 2:
-                            second_settlement = player.settlements[1]
-                            vertex = second_settlement.position
-
-                            # Check each adjacent tile for resources
-                            for tile in vertex.adjacent_tiles:
-                                tile_resource = tile.resource
-
-                                if tile_resource == "forest":
-                                    player.resources[ResourceType.WOOD] += 1
-                                elif tile_resource == "hill":
-                                    player.resources[ResourceType.BRICK] += 1
-                                elif tile_resource == "field":
-                                    player.resources[ResourceType.WHEAT] += 1
-                                elif tile_resource == "mountain":
-                                    player.resources[ResourceType.ORE] += 1
-                                elif tile_resource == "pasture":
-                                    player.resources[ResourceType.SHEEP] += 1
-
-                    ##print(f"\n=== NORMAL PLAY BEGINS ===")
-                    ##print(f"{self.get_current_player().name}'s turn")
 
             return True, f"{self.get_current_player().name}'s turn"
 
