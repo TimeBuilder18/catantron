@@ -199,7 +199,9 @@ for episode in range(args.episodes):
                 continue
 
             # Get hierarchical action from agent
-            action, vertex, edge, action_log_prob, vertex_log_prob, edge_log_prob, value = agent.choose_action(
+            (action, vertex, edge, trade_give, trade_get,
+             action_log_prob, vertex_log_prob, edge_log_prob,
+             trade_give_log_prob, trade_get_log_prob, value) = agent.choose_action(
                 obs,
                 obs['action_mask'],
                 obs['vertex_mask'],
@@ -210,7 +212,7 @@ for episode in range(args.episodes):
             # Capture turns 10-20 of normal play (after initial placement)
             if episode % 50 == 0 and not env.game_env.game.is_initial_placement_phase():
                 if 10 <= step_count <= 20:
-                    action_names = ['roll', 'place_sett', 'place_road', 'build_sett', 'build_city', 'build_road', 'buy_dev', 'end', 'wait']
+                    action_names = ['roll', 'place_sett', 'place_road', 'build_sett', 'build_city', 'build_road', 'buy_dev', 'end', 'wait', 'trade_with_bank', 'do_nothing']
                     valid = [action_names[i] for i, mask in enumerate(obs['action_mask']) if mask == 1]
                     player = env.game_env.game.players[0]
                     resources = player.resources
@@ -224,8 +226,8 @@ for episode in range(args.episodes):
                         'O': resources[ResourceType.ORE]
                     })
 
-            # Take step in environment - FIXED: Pass vertex and edge!
-            next_obs, reward, terminated, truncated, info = env.step(action, vertex, edge)
+            # Take step in environment
+            next_obs, reward, terminated, truncated, info = env.step(action, vertex, edge, trade_give, trade_get)
             done = terminated or truncated
 
             # Store ALL hierarchical data in buffer
@@ -234,10 +236,14 @@ for episode in range(args.episodes):
                 action=action,
                 vertex=vertex,
                 edge=edge,
+                trade_give=trade_give,
+                trade_get=trade_get,
                 reward=reward,
                 action_log_prob=action_log_prob,
                 vertex_log_prob=vertex_log_prob,
                 edge_log_prob=edge_log_prob,
+                trade_give_log_prob=trade_give_log_prob,
+                trade_get_log_prob=trade_get_log_prob,
                 value=value,
                 done=done,
                 action_mask=obs['action_mask'],
@@ -261,7 +267,7 @@ for episode in range(args.episodes):
     # Print debug info for episodes 0, 50, 100, etc.
     if episode > 0 and episode % 500 == 0 and debug_actions:
         print(f"\n  [DEBUG Ep{episode}] Steps 10-20 of normal play:")
-        action_names_map = ['roll', 'place_sett', 'place_road', 'build_sett', 'build_city', 'build_road', 'buy_dev', 'end', 'wait']
+        action_names_map = ['roll', 'place_sett', 'place_road', 'build_sett', 'build_city', 'build_road', 'buy_dev', 'end', 'wait', 'trade_with_bank', 'do_nothing']
         for (step, valid, chosen_action), res in zip(debug_actions, debug_resources):
             chosen = action_names_map[chosen_action] if chosen_action < len(action_names_map) else f"#{chosen_action}"
             print(f"    Step {step}: Valid={valid} | Chose={chosen} | Res: W{res['W']} B{res['B']} Wh{res['Wh']} S{res['S']} O{res['O']}")
