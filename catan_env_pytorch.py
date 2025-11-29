@@ -594,16 +594,8 @@ class CatanEnv(gym.Env):
         """
         Reward function with scaled values for stable PPO training.
 
-        REBALANCED v6: Added penalty for inaction.
-        - Removed "buildable" reward (was encouraging hoarding).
-        - Increased robber penalty 10x + exponential (discourage excess cards).
-        - Increased road rewards (0.5 -> 1.5) and longest road bonus (2.0 -> 5.0).
-        - Increased VP scaling (3.0 -> 8.0).
-        - Increased win bonus (10.0 -> 50.0).
-        - Differentiated dev card rewards by type, and increased knight card reward (0.2 -> 1.0).
-        - Added bonus for largest army (5.0).
-        - Added direct penalty for being forced to discard cards.
-        - Added penalty for ending turn when a build action is possible.
+        REBALANCED v7: Added a "safe zone" for hoarding in the early game.
+        - Hoarding penalty is now only active after the agent has > 3 VP.
         """
         reward = 0.0
         reward_breakdown = {}  # Track where rewards come from
@@ -734,27 +726,23 @@ class CatanEnv(gym.Env):
         # REMOVED: "buildable_reward" - was encouraging hoarding instead of building!
         # Agent should get rewarded for BUILDING, not HAVING resources
 
-        # ===== CARD HOARDING PENALTY =====
-        # REBALANCED: Massively increased penalty to prevent hoarding
-        total_cards = sum(new_obs['my_resources'].values())
-        hoarding_penalty = 0
-        if total_cards > 7:
-            excess_cards = total_cards - 7
-            # Linear penalty: 1.0 per card (10x stronger than before)
-            hoarding_penalty = 1.0 * excess_cards
+        # ===== CARD HOARDING PENALTY (with "safe zone") =====
+        # Only apply the penalty if the agent has more than 3 VP.
+        if new_obs['my_victory_points'] > 3:
+            total_cards = sum(new_obs['my_resources'].values())
+            hoarding_penalty = 0
+            if total_cards > 7:
+                excess_cards = total_cards - 7
+                # Linear penalty: 1.0 per card (10x stronger than before)
+                hoarding_penalty = 1.0 * excess_cards
 
-            # Exponential penalty for extreme hoarding (10+ excess)
-            if excess_cards > 10:
-                extreme_excess = excess_cards - 10
-                hoarding_penalty += 2.0 * extreme_excess  # Additional harsh penalty
+                # Exponential penalty for extreme hoarding (10+ excess)
+                if excess_cards > 10:
+                    extreme_excess = excess_cards - 10
+                    hoarding_penalty += 2.0 * extreme_excess  # Additional harsh penalty
 
-            # Examples:
-            # 8 cards = -1.0
-            # 10 cards = -3.0
-            # 15 cards = -8.0
-            # 20 cards = -13.0 + -6.0 = -19.0 (brutal)
-            reward -= hoarding_penalty
-            reward_breakdown['hoarding_penalty'] = -hoarding_penalty
+                reward -= hoarding_penalty
+                reward_breakdown['hoarding_penalty'] = -hoarding_penalty
 
         # ===== DEVELOPMENT CARDS =====
         # Differentiate rewards by card type (low rewards - dev cards are a means, not the goal)
