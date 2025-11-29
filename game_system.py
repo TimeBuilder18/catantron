@@ -1323,7 +1323,7 @@ class GameSystem:
             if not (v2.structure and v2.structure.player != player):
                 road_graph[v2].append(v1)
 
-        if not road_graph:
+        if not road_.graph:
             return 0
 
         # DFS from each vertex to find longest path
