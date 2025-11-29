@@ -4,6 +4,7 @@ import sys
 import io
 import os
 import torch
+from collections import deque
 
 # M2 optimization - better memory management
 if torch.backends.mps.is_available():
@@ -76,29 +77,14 @@ parser.add_argument('--epochs', type=int, default=20, help='Training epochs per 
 args = parser.parse_args()
 
 print("=" * 70)
-print("CATAN TRAINING - OVERNIGHT OPTIMIZED")
+print("CATAN TRAINING - ADAPTIVE CURRICULUM")
 print("=" * 70)
 sys.stdout.flush()
 
-# Curriculum learning function for overnight run
-def get_vp_target(episode, use_curriculum):
-    """Return VP target based on a slow, gradual curriculum for 100k episodes"""
-    if not use_curriculum:
-        return 10  # Default to full game if curriculum is off
-
-    # New, slower curriculum for overnight training
-    if episode < 10000:
-        return 4   # Master absolute basics
-    elif episode < 25000:
-        return 5   # Solidify early game
-    elif episode < 45000:
-        return 6   # Learn to expand
-    elif episode < 65000:
-        return 7   # Intermediate strategy
-    elif episode < 85000:
-        return 8   # Advanced strategy
-    else:
-        return 10  # Full competitive game
+# Adaptive Curriculum Settings
+CURRICULUM_STAGES = [4, 5, 6, 7, 8, 10]
+MASTERY_WINDOW = 100  # Check average VP over this many episodes
+MASTERY_THRESHOLD = 0.9  # Must achieve 90% of target VP to advance
 
 # Auto-detect best device
 if torch.cuda.is_available():
@@ -115,13 +101,9 @@ if device.type == 'cuda':
     print(f"   Training epochs: {args.epochs}")
 
 if args.curriculum:
-    print(f"\n📚 Curriculum Learning: ENABLED (Overnight Schedule)")
-    print(f"   Episodes 0-10000:     VP = 4")
-    print(f"   Episodes 10001-25000: VP = 5")
-    print(f"   Episodes 25001-45000: VP = 6")
-    print(f"   Episodes 45001-65000: VP = 7")
-    print(f"   Episodes 65001-85000: VP = 8")
-    print(f"   Episodes 85001+:      VP = 10")
+    print(f"\n📚 Adaptive Curriculum: ENABLED")
+    print(f"   Stages: {CURRICULUM_STAGES}")
+    print(f"   Mastery Threshold: {MASTERY_THRESHOLD*100:.0f}% of target VP over {MASTERY_WINDOW} episodes")
 else:
     print(f"\n📚 Curriculum Learning: DISABLED")
     GameConstants.VICTORY_POINTS_TO_WIN = 10 # Set to default
@@ -139,12 +121,12 @@ agent = CatanAgent(device=device)
 
 trainer = PPOTrainer(
     policy=agent.policy,
-    learning_rate=3e-4,      # Standard PPO learning rate
+    learning_rate=3e-4,
     gamma=0.99,
     gae_lambda=0.95,
     clip_epsilon=0.2,
     value_coef=0.5,
-    entropy_coef=0.05,       # Increased exploration
+    entropy_coef=0.05,
     max_grad_norm=0.5,
     n_epochs=args.epochs,
     batch_size=args.batch_size
@@ -152,45 +134,49 @@ trainer = PPOTrainer(
 buffer = ExperienceBuffer()
 
 episode_rewards = []
-episode_vps = []
+episode_vps = deque(maxlen=MASTERY_WINDOW)
 
-print(f"\nStarting training...\n")
+current_stage_index = 0
+current_vp_target = CURRICULUM_STAGES[current_stage_index]
+GameConstants.VICTORY_POINTS_TO_WIN = current_vp_target
+
+print(f"\nStarting training... Initial Target VP: {current_vp_target}\n")
 sys.stdout.flush()
 start_time = time.time()
 
-# At the TOP, BEFORE the episode loop (around line 85):
 timeout_count = 0
 natural_end_count = 0
 
-# Start episode loop:
 for episode in range(args.episodes):
-    # Update VP target based on curriculum
-    current_vp_target = get_vp_target(episode, args.curriculum)
-    GameConstants.VICTORY_POINTS_TO_WIN = current_vp_target
+    if args.curriculum:
+        # Check for mastery and advance curriculum
+        if len(episode_vps) == MASTERY_WINDOW:
+            avg_recent_vp = np.mean(episode_vps)
+            if avg_recent_vp >= MASTERY_THRESHOLD * current_vp_target:
+                if current_stage_index < len(CURRICULUM_STAGES) - 1:
+                    current_stage_index += 1
+                    current_vp_target = CURRICULUM_STAGES[current_stage_index]
+                    GameConstants.VICTORY_POINTS_TO_WIN = current_vp_target
+                    print(f"\n🎉 MASTERY ACHIEVED! Advancing to VP Target: {current_vp_target}\n")
+                    episode_vps.clear() # Reset VP window for new stage
 
-    # Collect debug info for periodic printing
     debug_actions = []
     debug_resources = []
 
-    # Suppress game output during episode
     with SuppressOutput():
         obs, info = env.reset()
         done = False
         episode_reward = 0
         step_count = 0
-        # Adjust max_steps based on VP target
         if current_vp_target >= 8:
-            max_steps = 350 # Allow more steps for higher VP games
+            max_steps = 350
         elif current_vp_target >= 6:
             max_steps = 300
         else:
             max_steps = 250
 
-        # Episode game loop
         while not done and step_count < max_steps:
             step_count += 1
-
-            # Rule-based AI turn if not our turn
             if not info.get('is_my_turn', True):
                 current_player = env.game_env.game.current_player_index
                 play_rule_based_turn(env, current_player)
@@ -198,7 +184,6 @@ for episode in range(args.episodes):
                 info = env._get_info()
                 continue
 
-            # Get hierarchical action from agent
             (action, vertex, edge, trade_give, trade_get,
              action_log_prob, vertex_log_prob, edge_log_prob,
              trade_give_log_prob, trade_get_log_prob, value) = agent.choose_action(
@@ -208,112 +193,62 @@ for episode in range(args.episodes):
                 obs['edge_mask']
             )
 
-            # Collect debug info for episodes 0, 50, 100, etc.
-            # Capture turns 10-20 of normal play (after initial placement)
-            if episode % 50 == 0 and not env.game_env.game.is_initial_placement_phase():
-                if 10 <= step_count <= 20:
-                    action_names = ['roll', 'place_sett', 'place_road', 'build_sett', 'build_city', 'build_road', 'buy_dev', 'end', 'wait', 'trade_with_bank', 'do_nothing']
-                    valid = [action_names[i] for i, mask in enumerate(obs['action_mask']) if mask == 1]
-                    player = env.game_env.game.players[0]
-                    resources = player.resources
-                    from game_system import ResourceType
-                    debug_actions.append((step_count, valid, action))
-                    debug_resources.append({
-                        'W': resources[ResourceType.WOOD],
-                        'B': resources[ResourceType.BRICK],
-                        'Wh': resources[ResourceType.WHEAT],
-                        'S': resources[ResourceType.SHEEP],
-                        'O': resources[ResourceType.ORE]
-                    })
-
-            # Take step in environment
             next_obs, reward, terminated, truncated, info = env.step(action, vertex, edge, trade_give, trade_get)
             done = terminated or truncated
 
-            # Store ALL hierarchical data in buffer
             buffer.store(
-                state=obs['observation'],
-                action=action,
-                vertex=vertex,
-                edge=edge,
-                trade_give=trade_give,
-                trade_get=trade_get,
-                reward=reward,
-                action_log_prob=action_log_prob,
-                vertex_log_prob=vertex_log_prob,
-                edge_log_prob=edge_log_prob,
-                trade_give_log_prob=trade_give_log_prob,
-                trade_get_log_prob=trade_get_log_prob,
-                value=value,
-                done=done,
-                action_mask=obs['action_mask'],
-                vertex_mask=obs['vertex_mask'],
-                edge_mask=obs['edge_mask']
+                state=obs['observation'], action=action, vertex=vertex, edge=edge,
+                trade_give=trade_give, trade_get=trade_get, reward=reward,
+                action_log_prob=action_log_prob, vertex_log_prob=vertex_log_prob,
+                edge_log_prob=edge_log_prob, trade_give_log_prob=trade_give_log_prob,
+                trade_get_log_prob=trade_get_log_prob, value=value, done=done,
+                action_mask=obs['action_mask'], vertex_mask=obs['vertex_mask'], edge_mask=obs['edge_mask']
             )
-
             obs = next_obs
             episode_reward += reward
 
-        # After while loop ends, check WHY it ended:
         if step_count >= max_steps:
             timeout_count += 1
         else:
             natural_end_count += 1
 
-    # Store episode reward
     episode_rewards.append(episode_reward)
     episode_vps.append(info.get('victory_points', 0))
 
-    # Print debug info for episodes 0, 50, 100, etc.
-    if episode > 0 and episode % 500 == 0 and debug_actions:
-        print(f"\n  [DEBUG Ep{episode}] Steps 10-20 of normal play:")
-        action_names_map = ['roll', 'place_sett', 'place_road', 'build_sett', 'build_city', 'build_road', 'buy_dev', 'end', 'wait', 'trade_with_bank', 'do_nothing']
-        for (step, valid, chosen_action), res in zip(debug_actions, debug_resources):
-            chosen = action_names_map[chosen_action] if chosen_action < len(action_names_map) else f"#{chosen_action}"
-            print(f"    Step {step}: Valid={valid} | Chose={chosen} | Res: W{res['W']} B{res['B']} Wh{res['Wh']} S{res['S']} O{res['O']}")
-
-    # Print progress every 100 episodes for a cleaner log
     if (episode + 1) % 100 == 0:
         avg_reward = np.mean(episode_rewards[-100:])
-        avg_vp = np.mean(episode_vps[-100:])
+        avg_vp = np.mean(episode_vps)
         progress = (episode + 1) / args.episodes * 100
         elapsed = time.time() - start_time
         speed = (episode + 1) / (elapsed / 60)
 
         progress_str = (
             f"[{progress:5.1f}%] Ep {episode + 1:6d}/{args.episodes} | "
-            f"VP: {avg_vp:.1f} | Reward: {avg_reward:7.2f} | {speed:4.0f} eps/min"
+            f"VP: {avg_vp:.2f} | Reward: {avg_reward:7.2f} | {speed:4.0f} eps/min"
         )
-
         progress_str += f" | Target VP: {current_vp_target}"
-
         print(progress_str)
 
-        # Print timeout stats every 500 episodes
         if (episode + 1) % 500 == 0:
             timeout_pct = timeout_count / (episode + 1) * 100
             natural_pct = natural_end_count / (episode + 1) * 100
             print(f"         📊 Timeouts: {timeout_pct:.1f}% | Natural endings: {natural_pct:.1f}%")
-
         sys.stdout.flush()
 
-    # Update policy
     if (episode + 1) % args.update_freq == 0 and len(buffer) > 0:
         with SuppressOutput():
             metrics = trainer.update_policy(buffer)
         buffer.clear()
-        if (episode + 1) % 500 == 0: # Only print loss periodically
+        if (episode + 1) % 500 == 0:
             print(f"         Policy updated | Loss: {metrics['policy_loss']:.4f}")
             sys.stdout.flush()
 
-    # Save model
     if (episode + 1) % args.save_freq == 0:
         save_path = f"models/{args.model_name}_episode_{episode + 1}.pt"
         agent.policy.save(save_path)
         print(f"         Checkpoint saved -> {save_path}")
         sys.stdout.flush()
 
-# AFTER all episodes complete:
 print("\n" + "=" * 70)
 print("TRAINING COMPLETE!")
 print(f"Final timeout rate: {timeout_count}/{args.episodes} = {timeout_count / args.episodes * 100:.1f}%")
