@@ -114,7 +114,7 @@ game_stats = {
 }
 
 action_names = ['roll', 'build_settlement', 'build_city', 'build_road',
-                'buy_dev', 'play_knight', 'end_turn']
+                'buy_dev', 'play_knight', 'end_turn', 'trade_with_bank', 'do_nothing']
 
 print("Starting evaluation...\n")
 print("=" * 70)
@@ -148,7 +148,9 @@ for episode in range(args.episodes):
 
         # Get action from agent
         with SuppressOutput():
-            action, vertex, edge, _, _, _, value = agent.choose_action(
+            (action, vertex, edge, trade_give, trade_get,
+             action_log_prob, vertex_log_prob, edge_log_prob,
+             trade_give_log_prob, trade_get_log_prob, value) = agent.choose_action(
                 obs,
                 obs['action_mask'],
                 obs['vertex_mask'],
@@ -192,7 +194,7 @@ for episode in range(args.episodes):
 
         # Step environment
         with SuppressOutput():
-            next_obs, reward, terminated, truncated, step_info = env.step(action, vertex, edge)
+            next_obs, reward, terminated, truncated, step_info = env.step(action, vertex, edge, trade_give, trade_get)
 
         done = terminated or truncated
         episode_reward += reward
