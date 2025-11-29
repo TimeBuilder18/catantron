@@ -370,7 +370,7 @@ class CatanEnv(gym.Env):
             for tile in city.position.adjacent_tiles:
                  if tile.number:
                     production_potential += 2 * pip_map.get(tile.number, 0)
-        potential += production_potential * 0.1
+        potential += production_potential * 0.05 # Reduced multiplier
 
         # Strategic Asset Potential
         if player.has_longest_road: potential += 2.0
@@ -398,7 +398,7 @@ class CatanEnv(gym.Env):
         reward_breakdown['pbrs'] = pbrs_reward
 
         # VP State Bonus
-        vp_state_bonus = new_obs['my_victory_points'] * 0.1
+        vp_state_bonus = new_obs['my_victory_points'] * 0.05 # Reduced multiplier
         reward += vp_state_bonus
         reward_breakdown['vp_state_bonus'] = vp_state_bonus
 
@@ -426,7 +426,7 @@ class CatanEnv(gym.Env):
         if is_initial:
             vp_reward = vp_diff * 0.01
         else:
-            vp_reward = vp_diff * 8.0
+            vp_reward = vp_diff * 25.0 # Drastically increased
         reward += vp_reward
         reward_breakdown['vp'] = vp_reward
         settlement_diff = new_obs['my_settlements'] - old_obs['my_settlements']
