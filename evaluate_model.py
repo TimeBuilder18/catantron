@@ -113,8 +113,8 @@ game_stats = {
     'discard_events': [],
 }
 
-action_names = ['roll', 'build_settlement', 'build_city', 'build_road',
-                'buy_dev', 'play_knight', 'end_turn', 'trade_with_bank', 'do_nothing']
+action_names = ['roll', 'place_settlement', 'place_road', 'build_settlement', 'build_city', 'build_road',
+                'buy_dev', 'end_turn', 'wait', 'trade_with_bank', 'do_nothing']
 
 print("Starting evaluation...\n")
 print("=" * 70)
@@ -132,14 +132,6 @@ for episode in range(args.episodes):
     step_count = 0
     max_steps = 500
 
-    # Track per-game stats
-    cities_count = 0
-    settlements_count = 0
-    roads_count = 0
-    dev_cards_count = 0
-    max_cards = 0
-    discard_count = 0
-
     # Gameplay tracking
     game_log = []
 
@@ -154,43 +146,9 @@ for episode in range(args.episodes):
                 obs,
                 obs['action_mask'],
                 obs['vertex_mask'],
-                obs['edge_mask']
+                obs['edge_mask'],
+                is_training=False
             )
-
-        # Track interesting events
-        action_name = action_names[action] if action < len(action_names) else 'invalid'
-
-        # Get raw observation to check resources
-        with SuppressOutput():
-            raw_obs = env.game_env.get_observation(env.player_id)
-
-        # Track resource accumulation
-        total_cards = sum(raw_obs['my_resources'].values())
-        max_cards = max(max_cards, total_cards)
-
-        # Track discard events
-        if raw_obs.get('must_discard', False):
-            discard_count += 1
-
-        # Log interesting actions
-        if action_name in ['build_city', 'build_settlement', 'build_road', 'buy_dev']:
-            my_vp = raw_obs.get('my_victory_points', 0)
-            game_log.append({
-                'step': step_count,
-                'action': action_name,
-                'vp': my_vp,
-                'cards': total_cards,
-                'value': value
-            })
-
-            if action_name == 'build_city':
-                cities_count += 1
-            elif action_name == 'build_settlement':
-                settlements_count += 1
-            elif action_name == 'build_road':
-                roads_count += 1
-            elif action_name == 'buy_dev':
-                dev_cards_count += 1
 
         # Step environment
         with SuppressOutput():
@@ -207,6 +165,12 @@ for episode in range(args.episodes):
     final_vp = final_raw_obs.get('my_victory_points', 0)
     is_timeout = step_count >= max_steps
 
+    # Get final, definitive stats directly from the final observation
+    settlements_count = final_raw_obs.get('my_settlements', 0)
+    cities_count = final_raw_obs.get('my_cities', 0)
+    roads_count = final_raw_obs.get('my_roads', 0)
+    dev_cards_count = sum(final_raw_obs.get('my_dev_cards', {}).values())
+    
     # Update stats
     game_stats['total_vps'].append(final_vp)
     game_stats['total_rewards'].append(episode_reward)
@@ -215,9 +179,7 @@ for episode in range(args.episodes):
     game_stats['settlements_built'].append(settlements_count)
     game_stats['roads_built'].append(roads_count)
     game_stats['dev_cards_bought'].append(dev_cards_count)
-    game_stats['max_cards_held'].append(max_cards)
-    game_stats['discard_events'].append(discard_count)
-
+    
     if is_timeout:
         game_stats['timeouts'] += 1
     else:
@@ -230,12 +192,6 @@ for episode in range(args.episodes):
     print(f"Ending: {'⏱️ Timeout' if is_timeout else '✅ Natural'}")
     print(f"\nBuildings: {settlements_count} settlements, {cities_count} cities, {roads_count} roads")
     print(f"Dev Cards: {dev_cards_count} bought")
-    print(f"Max Cards Held: {max_cards} (Discard Events: {discard_count})")
-
-    if game_log and args.verbose:
-        print(f"\nKey Actions:")
-        for entry in game_log[:15]:  # Show first 15 key actions
-            print(f"  Step {entry['step']:3d}: {entry['action']:16s} | VP: {entry['vp']} | Cards: {entry['cards']} | Value: {entry['value']:.2f}")
 
     sys.stdout.flush()
 
@@ -262,10 +218,5 @@ print(f"   Settlements: {np.mean(game_stats['settlements_built']):.1f} per game 
 print(f"   Cities: {np.mean(game_stats['cities_built']):.1f} per game (total: {sum(game_stats['cities_built'])})")
 print(f"   Roads: {np.mean(game_stats['roads_built']):.1f} per game (total: {sum(game_stats['roads_built'])})")
 print(f"   Dev Cards: {np.mean(game_stats['dev_cards_bought']):.1f} per game (total: {sum(game_stats['dev_cards_bought'])})")
-
-print(f"\n🃏 Resource Management:")
-print(f"   Max Cards Held: {np.mean(game_stats['max_cards_held']):.1f} average")
-print(f"   Discard Events: {np.mean(game_stats['discard_events']):.1f} per game (total: {sum(game_stats['discard_events'])})")
-print(f"   Games with Discards: {sum(1 for d in game_stats['discard_events'] if d > 0)}/{args.episodes}")
 
 print("\n" + "=" * 70)
