@@ -299,13 +299,21 @@ class CatanEnv(gym.Env):
         if action_name == 'do_nothing':
             new_obs, done, _ = self.game_env.step(self.player_id, 'wait', {})
         elif action_name == 'trade_with_bank':
+            player = self.game_env.game.players[self.player_id]
+            pre_trade_actions = self.game_env.get_legal_actions(self.player_id)
             resource_map = [ResourceType.WOOD, ResourceType.BRICK, ResourceType.WHEAT, ResourceType.SHEEP, ResourceType.ORE]
             give_res = resource_map[trade_give_idx]
             get_res = resource_map[trade_get_idx]
-            player = self.game_env.game.players[self.player_id]
             success, message = self.game_env.game.execute_bank_trade(player, give_res, get_res)
             step_info['success'] = success
             step_info['message'] = message
+            if success:
+                post_trade_actions = self.game_env.get_legal_actions(self.player_id)
+                build_actions = {'build_settlement', 'build_city', 'build_road', 'buy_dev_card'}
+                pre_buildable = any(a in pre_trade_actions for a in build_actions)
+                post_buildable = any(a in post_trade_actions for a in build_actions)
+                if post_buildable and not pre_buildable:
+                    step_info['trade_led_to_build_opportunity'] = True
             new_obs, done, _ = self.game_env.step(self.player_id, 'wait', {})
         else:
             action_params = self._get_action_params(action_name, vertex_idx, edge_idx)
@@ -352,9 +360,9 @@ class CatanEnv(gym.Env):
                 inaction_penalty = -10.0
                 reward += inaction_penalty
                 reward_breakdown['inaction_penalty'] = inaction_penalty
-        if action_name == 'trade_with_bank' and step_info.get('success'):
-            reward += 2.0
-            reward_breakdown['trade_success'] = 2.0
+        if step_info.get('trade_led_to_build_opportunity'):
+            reward += 5.0
+            reward_breakdown['strategic_trade'] = 5.0
         was_seven_rolled = new_obs.get('last_roll') and new_obs['last_roll'][2] == 7
         if was_seven_rolled:
             old_card_count = sum(old_obs['my_resources'].values())
