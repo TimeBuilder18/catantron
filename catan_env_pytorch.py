@@ -124,7 +124,7 @@ class CatanEnv(gym.Env):
         mask = np.zeros(72, dtype=np.float32)
         all_edges = self.game_env.game.game_board.edges
         if self.game_env.game.is_initial_placement_phase():
-            if self.game_env.game.waiting_for_road:
+            if not self.game_env.game.waiting_for_road:
                 last_settlement = self.game_env.game.last_settlement_vertex
                 if last_settlement:
                     valid_edges = [e for e in all_edges
