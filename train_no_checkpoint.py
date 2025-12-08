@@ -73,8 +73,9 @@ env = CatanEnv(player_id=0)
 agent = CatanAgent(device=device)
 print("✅ Created FRESH untrained agent\n")
 
+# Use exact same trainer initialization as train_clean.py
 trainer = PPOTrainer(
-    agent.policy,  # positional argument
+    policy=agent.policy,
     learning_rate=3e-4,
     gamma=0.99,
     gae_lambda=0.95,
