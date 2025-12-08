@@ -74,7 +74,7 @@ agent = CatanAgent(device=device)
 print("✅ Created FRESH untrained agent\n")
 
 trainer = PPOTrainer(
-    policy=agent.policy,
+    agent.policy,  # positional argument
     learning_rate=3e-4,
     gamma=0.99,
     gae_lambda=0.95,
