@@ -20,49 +20,32 @@ class CatanAgent:
     def choose_action(self, obs, action_mask, vertex_mask=None, edge_mask=None, is_training=False):
         """
         Choose action and all hierarchical parameters using the policy.
-        This is the single, unified method for both training and evaluation.
+        Handles both training and evaluation.
         """
-        observation = torch.FloatTensor(obs['observation'])
-        mask_tensor = torch.FloatTensor(action_mask)
+        observation = torch.tensor(obs['observation'], dtype=torch.float32, device=self.device)
+        mask_tensor = torch.tensor(action_mask, dtype=torch.float32, device=self.device)
 
         if vertex_mask is None:
             vertex_mask = np.ones(54, dtype=np.float32)
         if edge_mask is None:
             edge_mask = np.ones(72, dtype=np.float32)
 
-        vertex_mask_tensor = torch.FloatTensor(vertex_mask)
-        edge_mask_tensor = torch.FloatTensor(edge_mask)
+        vertex_mask_tensor = torch.tensor(vertex_mask, dtype=torch.float32, device=self.device)
+        edge_mask_tensor = torch.tensor(edge_mask, dtype=torch.float32, device=self.device)
 
         if is_training:
             # Keep gradients for training
-            (action, vertex, edge, trade_give, trade_get,
-             action_log_prob, vertex_log_prob, edge_log_prob,
-             trade_give_log_prob, trade_get_log_prob, value, entropy) = \
-                self.policy.get_action_and_value(
-                    observation,
-                    mask_tensor,
-                    vertex_mask_tensor,
-                    edge_mask_tensor
-                )
-            return (action, vertex, edge, trade_give, trade_get,
-                    action_log_prob, vertex_log_prob, edge_log_prob,
-                    trade_give_log_prob, trade_get_log_prob, value, entropy)
+            return self.policy.get_action_and_value(
+                observation, mask_tensor, vertex_mask_tensor, edge_mask_tensor
+            )
         else:
-            # No gradients needed for evaluation
+            # No gradients for evaluation
             with torch.no_grad():
-                (action, vertex, edge, trade_give, trade_get,
-                 action_log_prob, vertex_log_prob, edge_log_prob,
-                 trade_give_log_prob, trade_get_log_prob, value, entropy) = \
-                    self.policy.get_action_and_value(
-                        observation,
-                        mask_tensor,
-                        vertex_mask_tensor,
-                        edge_mask_tensor
-                    )
-            return (action.item(), vertex.item(), edge.item(), trade_give.item(), trade_get.item(),
-                    action_log_prob.item(), vertex_log_prob.item(), edge_log_prob.item(),
-                    trade_give_log_prob.item(), trade_get_log_prob.item(),
-                    value.item())
+                actions = self.policy.get_action_and_value(
+                    observation, mask_tensor, vertex_mask_tensor, edge_mask_tensor
+                )
+            # Convert single-element tensors to Python scalars
+            return tuple(a.item() if isinstance(a, torch.Tensor) and a.numel() == 1 else a for a in actions)
 
 
 class ExperienceBuffer:
@@ -107,45 +90,30 @@ class ExperienceBuffer:
         self.vertex_masks.append(vertex_mask)
         self.edge_masks.append(edge_mask)
 
-    def get(self):
+    def get(self, device=None):
+        device = device or torch.device('cpu')
         return {
-            'states': torch.FloatTensor(np.array(self.states)),
-            'actions': torch.LongTensor(self.actions),
-            'vertices': torch.LongTensor(self.vertices),
-            'edges': torch.LongTensor(self.edges),
-            'trade_gives': torch.LongTensor(self.trade_gives),
-            'trade_gets': torch.LongTensor(self.trade_gets),
-            'rewards': torch.FloatTensor(self.rewards),
-            'action_log_probs': torch.FloatTensor(self.action_log_probs),
-            'vertex_log_probs': torch.FloatTensor(self.vertex_log_probs),
-            'edge_log_probs': torch.FloatTensor(self.edge_log_probs),
-            'trade_give_log_probs': torch.FloatTensor(self.trade_give_log_probs),
-            'trade_get_log_probs': torch.FloatTensor(self.trade_get_log_probs),
-            'values': torch.FloatTensor(self.values),
-            'dones': torch.FloatTensor(self.dones),
-            'action_masks': torch.FloatTensor(np.array(self.action_masks)),
-            'vertex_masks': torch.FloatTensor(np.array(self.vertex_masks)),
-            'edge_masks': torch.FloatTensor(np.array(self.edge_masks))
+            'states': torch.tensor(np.array(self.states), dtype=torch.float32, device=device),
+            'actions': torch.tensor(self.actions, dtype=torch.long, device=device),
+            'vertices': torch.tensor(self.vertices, dtype=torch.long, device=device),
+            'edges': torch.tensor(self.edges, dtype=torch.long, device=device),
+            'trade_gives': torch.tensor(self.trade_gives, dtype=torch.long, device=device),
+            'trade_gets': torch.tensor(self.trade_gets, dtype=torch.long, device=device),
+            'rewards': torch.tensor(self.rewards, dtype=torch.float32, device=device),
+            'action_log_probs': torch.tensor(self.action_log_probs, dtype=torch.float32, device=device),
+            'vertex_log_probs': torch.tensor(self.vertex_log_probs, dtype=torch.float32, device=device),
+            'edge_log_probs': torch.tensor(self.edge_log_probs, dtype=torch.float32, device=device),
+            'trade_give_log_probs': torch.tensor(self.trade_give_log_probs, dtype=torch.float32, device=device),
+            'trade_get_log_probs': torch.tensor(self.trade_get_log_probs, dtype=torch.float32, device=device),
+            'values': torch.tensor(self.values, dtype=torch.float32, device=device),
+            'dones': torch.tensor(self.dones, dtype=torch.float32, device=device),
+            'action_masks': torch.tensor(np.array(self.action_masks), dtype=torch.float32, device=device),
+            'vertex_masks': torch.tensor(np.array(self.vertex_masks), dtype=torch.float32, device=device),
+            'edge_masks': torch.tensor(np.array(self.edge_masks), dtype=torch.float32, device=device)
         }
 
     def clear(self):
-        self.states.clear()
-        self.actions.clear()
-        self.vertices.clear()
-        self.edges.clear()
-        self.trade_gives.clear()
-        self.trade_gets.clear()
-        self.rewards.clear()
-        self.action_log_probs.clear()
-        self.vertex_log_probs.clear()
-        self.edge_log_probs.clear()
-        self.trade_give_log_probs.clear()
-        self.trade_get_log_probs.clear()
-        self.values.clear()
-        self.dones.clear()
-        self.action_masks.clear()
-        self.vertex_masks.clear()
-        self.edge_masks.clear()
+        self.__init__()
 
     def __len__(self):
         return len(self.states)

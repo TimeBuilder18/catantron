@@ -348,38 +348,52 @@ class CatanEnv(gym.Env):
         reward = 0.0
         action_name = step_info.get('action_name')
 
-        # --- Core Rewards ---
-        # 1. Win/Loss Reward
+        # --- 1. Win/Loss ---
         if step_info.get('result') == 'game_over':
-            if step_info.get('winner') == self.player_id:
-                return 50.0  # Win bonus
-            else:
-                return -1.0 # Loss penalty
+            return 50.0 if step_info.get('winner') == self.player_id else -5.0
 
-        # 2. Victory Point Event Reward
+        # --- 2. VP Reward (reduced) ---
         vp_diff = new_obs['my_victory_points'] - old_obs['my_victory_points']
-        if vp_diff > 0:
-            reward += vp_diff * 25.0
+        reward += vp_diff * 10.0
 
-        # --- Penalties ---
-        # 1. Inaction Penalty
+        # --- 3. Building Rewards ---
+        build_rewards = {
+            'build_settlement': 3.0,
+            'build_city': 7.0,
+            'build_road': 0.7,
+            'buy_dev_card': 1.0
+        }
+        if action_name in build_rewards:
+            reward += build_rewards[action_name]
+
+        # --- 4. Penalty for wasting turn ---
         if action_name == 'end_turn':
             legal_actions = old_obs.get('legal_actions', [])
             build_actions = {'build_settlement', 'build_city', 'build_road', 'buy_dev_card'}
-            if any(action in legal_actions for action in build_actions):
-                reward -= 10.0
-        
-        # 2. Discard Penalty
-        was_seven_rolled = new_obs.get('last_roll') and new_obs['last_roll'][2] == 7
-        if was_seven_rolled:
-            old_card_count = sum(old_obs['my_resources'].values())
-            if old_card_count > 7:
-                new_card_count = sum(new_obs['my_resources'].values())
-                cards_discarded = old_card_count - new_card_count
-                if cards_discarded > 0:
-                    reward -= cards_discarded * 2.0
+            if any(a in legal_actions for a in build_actions):
+                reward -= 2.0  # MUCH smaller
+
+        # --- 5. Discard only if actually discarded ---
+        old_res = sum(old_obs['my_resources'].values())
+        new_res = sum(new_obs['my_resources'].values())
+        if old_res > 7 and new_res < old_res:
+            reward -= (old_res - new_res) * 1.0
+
+        # --- 6. PBRS: Board potential ---
+        potential_old = self._board_potential(old_obs)
+        potential_new = self._board_potential(new_obs)
+        reward += 0.95 * (potential_new - potential_old)
 
         return reward
+
+    def _board_potential(self, obs):
+        """PBRS potential: encourages board progress safely"""
+        p = 0
+        p += obs['my_settlements'] * 2.5
+        p += obs['my_cities'] * 5.0
+        p += obs['my_roads'] * 0.2
+        p += obs['my_victory_points'] * 4.0
+        return p
 
     def render(self):
         pass
