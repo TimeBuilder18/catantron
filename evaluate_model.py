@@ -14,39 +14,12 @@ except AttributeError:
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace', line_buffering=True)
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace', line_buffering=True)
 
-
-class NullWriter:
-    """A file-like object that discards all output"""
-    def write(self, text):
-        pass
-    def flush(self):
-        pass
-    def isatty(self):
-        return False
-
-
-class SuppressOutput:
-    """Context manager to suppress all stdout/stderr output"""
-    def __enter__(self):
-        self._original_stdout = sys.stdout
-        self._original_stderr = sys.stderr
-        sys.stdout = NullWriter()
-        sys.stderr = NullWriter()
-        return self
-
-    def __exit__(self, *args):
-        sys.stdout = self._original_stdout
-        sys.stderr = self._original_stderr
-
-
-# Import everything WHILE suppressing output
-with SuppressOutput():
-    from catan_env_pytorch import CatanEnv
-    from network_gpu import CatanPolicy
-    from agent_gpu import CatanAgent
-    import torch
-    import numpy as np
-    from game_system import GameConstants
+from catan_env_pytorch import CatanEnv
+from network_gpu import CatanPolicy
+from agent_gpu import CatanAgent
+import torch
+import numpy as np
+from game_system import GameConstants
 
 import argparse
 
@@ -58,7 +31,7 @@ parser.add_argument('--verbose', action='store_true', help='Show detailed step-b
 args = parser.parse_args()
 
 print("=" * 70)
-print("CATAN MODEL EVALUATION")
+print("CATAN MODEL EVALUATION - DEBUG MODE")
 print("=" * 70)
 print(f"Model: {args.model}")
 print(f"Episodes: {args.episodes}")
@@ -109,12 +82,10 @@ game_stats = {
     'settlements_built': [],
     'roads_built': [],
     'dev_cards_bought': [],
-    'max_cards_held': [],
-    'discard_events': [],
 }
 
-action_names = ['roll', 'place_settlement', 'place_road', 'build_settlement', 'build_city', 'build_road',
-                'buy_dev', 'end_turn', 'wait', 'trade_with_bank', 'do_nothing']
+action_names = ['roll_dice', 'place_settlement', 'place_road', 'build_settlement', 'build_city', 'build_road',
+                'buy_dev_card', 'end_turn', 'wait', 'trade_with_bank', 'do_nothing']
 
 print("Starting evaluation...\n")
 print("=" * 70)
@@ -124,43 +95,110 @@ for episode in range(args.episodes):
     print(f"\n🎮 GAME {episode + 1}/{args.episodes}")
     print("-" * 70)
 
-    with SuppressOutput():
-        obs, info = env.reset()
+    obs, info = env.reset()
 
     done = False
     episode_reward = 0
     step_count = 0
     max_steps = 500
 
-    # Gameplay tracking
-    game_log = []
-
-    while not done and step_count < max_steps:
+    # --- Initial Placement Phase ---
+    while env.game_env.game.is_initial_placement_phase() and not done and step_count < max_steps:
         step_count += 1
+        
+        # DEBUG TRACING: Print legal actions before agent chooses
+        legal_actions_current_step = [action_names[i] for i, mask in enumerate(obs['action_mask']) if mask == 1]
+        print(f"  [Init Step {step_count}] Legal Actions: {legal_actions_current_step}")
 
-        # Get action from agent
-        with SuppressOutput():
-            (action, vertex, edge, trade_give, trade_get,
-             action_log_prob, vertex_log_prob, edge_log_prob,
-             trade_give_log_prob, trade_get_log_prob, value) = agent.choose_action(
-                obs,
-                obs['action_mask'],
-                obs['vertex_mask'],
-                obs['edge_mask'],
-                is_training=False
-            )
+        (action, vertex, edge, trade_give, trade_get,
+         action_log_prob, vertex_log_prob, edge_log_prob,
+         trade_give_log_prob, trade_get_log_prob, value) = agent.choose_action(
+            obs,
+            obs['action_mask'],
+            obs['vertex_mask'],
+            obs['edge_mask'],
+            is_training=False
+        )
+        
+        action_name = action_names[action] if action < len(action_names) else 'invalid'
+        print(f"  [Init Step {step_count}] Agent Chose: {action_name}")
+
+        # DEBUG TRACING: Print pre-step state
+        pre_step_obs = env.game_env.get_observation(env.player_id)
+        print(f"  [Init Step {step_count}] Pre-Step VP: {pre_step_obs['my_victory_points']} | "
+              f"Settlements: {pre_step_obs['my_settlements']} | Cities: {pre_step_obs['my_cities']} | "
+              f"Resources: {pre_step_obs['my_resources']}")
 
         # Step environment
-        with SuppressOutput():
-            next_obs, reward, terminated, truncated, step_info = env.step(action, vertex, edge, trade_give, trade_get)
+        next_obs, reward, terminated, truncated, step_info = env.step(action, vertex, edge, trade_give, trade_get)
 
         done = terminated or truncated
         episode_reward += reward
         obs = next_obs
+        
+        # DEBUG TRACING: Print post-step state
+        post_step_obs = env.game_env.get_observation(env.player_id)
+        print(f"  [Init Step {step_count}] Post-Step VP: {post_step_obs['my_victory_points']} | "
+              f"Settlements: {post_step_obs['my_settlements']} | Cities: {post_step_obs['my_cities']} | "
+              f"Resources: {post_step_obs['my_resources']} | Reward: {reward:.2f}")
+        
+        # Break if initial placement is done
+        if not env.game_env.game.is_initial_placement_phase():
+            print("--- Initial Placement Complete ---")
+            break
+
+    # --- Main Game Loop ---
+    while not done and step_count < max_steps:
+        step_count += 1
+
+        # Get action from agent
+        # DEBUG TRACING: Print legal actions before agent chooses
+        legal_actions_current_step = [action_names[i] for i, mask in enumerate(obs['action_mask']) if mask == 1]
+        print(f"  [Game Step {step_count}] Legal Actions: {legal_actions_current_step}")
+
+        (action, vertex, edge, trade_give, trade_get,
+         action_log_prob, vertex_log_prob, edge_log_prob,
+         trade_give_log_prob, trade_get_log_prob, value) = agent.choose_action(
+            obs,
+            obs['action_mask'],
+            obs['vertex_mask'],
+            obs['edge_mask'],
+            is_training=False
+        )
+        
+        action_name = action_names[action] if action < len(action_names) else 'invalid'
+        print(f"  [Game Step {step_count}] Agent Chose: {action_name}")
+
+        # DEBUG TRACING: Print pre-step state
+        pre_step_obs = env.game_env.get_observation(env.player_id)
+        print(f"  [Game Step {step_count}] Pre-Step VP: {pre_step_obs['my_victory_points']} | "
+              f"Settlements: {pre_step_obs['my_settlements']} | Cities: {pre_step_obs['my_cities']} | "
+              f"Resources: {pre_step_obs['my_resources']}")
+
+        # Step environment
+        next_obs, reward, terminated, truncated, step_info = env.step(action, vertex, edge, trade_give, trade_get)
+
+        done = terminated or truncated
+        episode_reward += reward
+        obs = next_obs
+        
+        # DEBUG TRACING: Print post-step state
+        post_step_obs = env.game_env.get_observation(env.player_id)
+        print(f"  [Game Step {step_count}] Post-Step VP: {post_step_obs['my_victory_points']} | "
+              f"Settlements: {post_step_obs['my_settlements']} | Cities: {post_step_obs['my_cities']} | "
+              f"Resources: {post_step_obs['my_resources']} | Reward: {reward:.2f}")
+
 
     # Game finished - get final raw observation
-    with SuppressOutput():
-        final_raw_obs = env.game_env.get_observation(env.player_id)
+    final_raw_obs = env.game_env.get_observation(env.player_id)
+    print("\n--- FINAL STATE ---")
+    print(f"Final Raw Obs VP: {final_raw_obs.get('my_victory_points', 0)}")
+    print(f"Final Settlements: {final_raw_obs.get('my_settlements', 0)}")
+    print(f"Final Cities: {final_raw_obs.get('my_cities', 0)}")
+    print(f"Final Roads: {final_raw_obs.get('my_roads', 0)}")
+    print(f"Final Dev Cards: {sum(final_raw_obs.get('my_dev_cards', {}).values())}")
+    print("---------------------\n")
+
 
     final_vp = final_raw_obs.get('my_victory_points', 0)
     is_timeout = step_count >= max_steps
