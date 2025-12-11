@@ -40,10 +40,6 @@ class CatanEnv(gym.Env):
         self._episode_count = 0  # Track episodes for debug output
         self.gamma = 0.99 # Discount factor for PBRS
 
-        # Action repetition tracking to prevent spam
-        self.last_actions = []  # Track last N actions
-        self.action_history_size = 5  # Look back 5 actions
-
         # Action space: 11 discrete actions
         self.action_space = spaces.Discrete(11)
 
@@ -85,7 +81,6 @@ class CatanEnv(gym.Env):
 
         self.game_env = AIGameEnvironment()
         self._episode_count += 1
-        self.last_actions = []  # Reset action history
 
         obs = self._get_obs()
         info = self._get_info()
@@ -304,11 +299,6 @@ class CatanEnv(gym.Env):
         action_name = action_names[action]
         step_info = {'action_name': action_name}
 
-        # Track action for repetition detection
-        self.last_actions.append(action_name)
-        if len(self.last_actions) > self.action_history_size:
-            self.last_actions.pop(0)  # Keep only last N actions
-
         if action_name == 'do_nothing':
             new_obs, done, _ = self.game_env.step(self.player_id, 'wait', {})
         elif action_name == 'trade_with_bank':
@@ -421,14 +411,6 @@ class CatanEnv(gym.Env):
                     hoarding_penalty += 0.5 * (excess_cards - 5)  # Reduced from 2.0
                 reward -= hoarding_penalty
                 reward_breakdown['hoarding_penalty'] = -hoarding_penalty
-        # Action repetition penalty - prevent spam exploitation
-        if len(self.last_actions) >= 2:
-            # Count how many of last N actions match current action
-            recent_same_actions = sum(1 for a in self.last_actions[-self.action_history_size:] if a == action_name)
-            if recent_same_actions >= 3:  # 3+ same actions in last 5
-                repetition_penalty = -0.5 * (recent_same_actions - 2)  # -0.5, -1.0, -1.5...
-                reward += repetition_penalty
-                reward_breakdown['repetition_penalty'] = repetition_penalty
 
         if step_info.get('result') == 'game_over':
             if step_info.get('winner') == self.player_id:
