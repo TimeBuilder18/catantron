@@ -40,6 +40,10 @@ class CatanEnv(gym.Env):
         self._episode_count = 0  # Track episodes for debug output
         self.gamma = 0.99 # Discount factor for PBRS
 
+        # Action repetition tracking to prevent spam
+        self.last_actions = []  # Track last N actions
+        self.action_history_size = 5  # Look back 5 actions
+
         # Action space: 11 discrete actions
         self.action_space = spaces.Discrete(11)
 
@@ -81,6 +85,7 @@ class CatanEnv(gym.Env):
 
         self.game_env = AIGameEnvironment()
         self._episode_count += 1
+        self.last_actions = []  # Reset action history
 
         obs = self._get_obs()
         info = self._get_info()
@@ -299,6 +304,11 @@ class CatanEnv(gym.Env):
         action_name = action_names[action]
         step_info = {'action_name': action_name}
 
+        # Track action for repetition detection
+        self.last_actions.append(action_name)
+        if len(self.last_actions) > self.action_history_size:
+            self.last_actions.pop(0)  # Keep only last N actions
+
         if action_name == 'do_nothing':
             new_obs, done, _ = self.game_env.step(self.player_id, 'wait', {})
         elif action_name == 'trade_with_bank':
@@ -377,8 +387,58 @@ class CatanEnv(gym.Env):
                 new_card_count = sum(new_obs['my_resources'].values())
                 cards_discarded = old_card_count - new_card_count
                 if cards_discarded > 0:
-                    reward -= cards_discarded * 2.0
+                    discard_event_penalty = -2.0 * cards_discarded
+                    reward += discard_event_penalty
+                    reward_breakdown['discard_event_penalty'] = discard_event_penalty
+        vp_diff = new_obs['my_victory_points'] - old_obs['my_victory_points']
+        if is_initial:
+            vp_reward = vp_diff * 0.01
+        else:
+            vp_reward = vp_diff * 3.0  # Reduced from 8.0 to reduce reward variance
+        reward += vp_reward
+        reward_breakdown['vp'] = vp_reward
+        settlement_diff = new_obs['my_settlements'] - old_obs['my_settlements']
+        city_diff = new_obs['my_cities'] - old_obs['my_cities']
+        road_diff = new_obs['my_roads'] - old_obs['my_roads']
+        if is_initial:
+            building_reward = settlement_diff * 0.005 + road_diff * 0.002
+            reward += building_reward
+            reward_breakdown['building'] = building_reward
+        else:
+            # DRASTICALLY reduced to prevent exploitation (was 1.0, 2.0, 1.5)
+            # VP change (3.0x) and PBRS are primary signals now
+            building_reward = settlement_diff * 0.05 + city_diff * 0.1 + road_diff * 0.02
+            reward += building_reward
+            reward_breakdown['building'] = building_reward
 
+        # Only penalize excessive hoarding that prevents building
+        if new_obs['my_victory_points'] > 5:  # Changed from 3
+            total_cards = sum(new_obs['my_resources'].values())
+            if total_cards > 11:  # Changed from 7 - allows holding 10 cards (for city + extras)
+                excess_cards = total_cards - 11
+                hoarding_penalty = 0.3 * excess_cards  # Reduced from 1.0
+                if excess_cards > 5:  # Reduced threshold
+                    hoarding_penalty += 0.5 * (excess_cards - 5)  # Reduced from 2.0
+                reward -= hoarding_penalty
+                reward_breakdown['hoarding_penalty'] = -hoarding_penalty
+        # Action repetition penalty - prevent spam exploitation
+        if len(self.last_actions) >= 2:
+            # Count how many of last N actions match current action
+            recent_same_actions = sum(1 for a in self.last_actions[-self.action_history_size:] if a == action_name)
+            if recent_same_actions >= 3:  # 3+ same actions in last 5
+                repetition_penalty = -0.5 * (recent_same_actions - 2)  # -0.5, -1.0, -1.5...
+                reward += repetition_penalty
+                reward_breakdown['repetition_penalty'] = repetition_penalty
+
+        if step_info.get('result') == 'game_over':
+            if step_info.get('winner') == self.player_id:
+                reward += 20.0  # Reduced from 50.0 to reduce terminal reward spike
+                reward_breakdown['win_bonus'] = 20.0
+            else:
+                reward -= 1.0
+                reward_breakdown['loss_penalty'] = -1.0
+        if debug:
+            self._last_reward_breakdown = reward_breakdown
         return reward
 
     def render(self):
