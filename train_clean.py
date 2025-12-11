@@ -131,6 +131,17 @@ trainer = PPOTrainer(
     n_epochs=args.epochs,
     batch_size=args.batch_size
 )
+
+# Add learning rate scheduler for stable long-term training
+from torch.optim.lr_scheduler import CosineAnnealingLR
+
+scheduler = CosineAnnealingLR(
+    trainer.optimizer,
+    T_max=args.episodes,
+    eta_min=1e-5  # Minimum learning rate
+)
+print(f"   Learning rate scheduler: CosineAnnealing (3e-4 → 1e-5)")
+
 buffer = ExperienceBuffer()
 
 episode_rewards = []
@@ -139,6 +150,9 @@ episode_vps = deque(maxlen=MASTERY_WINDOW)
 current_stage_index = 0
 current_vp_target = CURRICULUM_STAGES[current_stage_index]
 GameConstants.VICTORY_POINTS_TO_WIN = current_vp_target
+
+# Store initial entropy coefficient for decay
+initial_entropy_coef = trainer.entropy_coef
 
 print(f"\nStarting training... Initial Target VP: {current_vp_target}\n")
 sys.stdout.flush()
@@ -158,7 +172,8 @@ for episode in range(args.episodes):
                     current_vp_target = CURRICULUM_STAGES[current_stage_index]
                     GameConstants.VICTORY_POINTS_TO_WIN = current_vp_target
                     print(f"\n🎉 MASTERY ACHIEVED! Advancing to VP Target: {current_vp_target}\n")
-                    episode_vps.clear() # Reset VP window for new stage
+                    # DON'T clear episode_vps - keep history for smoother transition
+                    # Instead, track as percentage of target going forward
 
     debug_actions = []
     debug_resources = []
@@ -236,11 +251,20 @@ for episode in range(args.episodes):
         sys.stdout.flush()
 
     if (episode + 1) % args.update_freq == 0 and len(buffer) > 0:
+        # Update entropy coefficient (decay over time for less exploration late in training)
+        progress = (episode + 1) / args.episodes
+        trainer.entropy_coef = initial_entropy_coef * (1.0 - progress * 0.7)  # Decays to 30% of initial
+
         with SuppressOutput():
             metrics = trainer.update_policy(buffer)
+
+        # Step learning rate scheduler
+        scheduler.step()
+
         buffer.clear()
         if (episode + 1) % 500 == 0:
-            print(f"         Policy updated | Loss: {metrics['policy_loss']:.4f}")
+            current_lr = scheduler.get_last_lr()[0]
+            print(f"         Policy updated | Loss: {metrics['policy_loss']:.4f} | LR: {current_lr:.2e} | Entropy: {trainer.entropy_coef:.4f}")
             sys.stdout.flush()
 
     if (episode + 1) % args.save_freq == 0:

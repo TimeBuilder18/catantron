@@ -382,7 +382,9 @@ class CatanEnv(gym.Env):
             if opp != player:
                 opp_vp = opp.calculate_victory_points()
                 if opp_vp >= 8:
-                    potential -= (opp_vp - 7) * 5.0 # Heavy penalty for opponents close to winning
+                    # Cap penalty to reduce variance - max penalty is -10 (when opp has 10 VP)
+                    penalty = min((opp_vp - 7) * 2.0, 10.0)  # Reduced multiplier from 5.0 to 2.0, capped at 10
+                    potential -= penalty
         
         return potential
 
@@ -406,7 +408,7 @@ class CatanEnv(gym.Env):
             legal_actions = old_obs.get('legal_actions', [])
             build_actions = {'build_settlement', 'build_city', 'build_road', 'buy_dev_card'}
             if any(action in legal_actions for action in build_actions):
-                inaction_penalty = -10.0
+                inaction_penalty = -3.0  # Reduced from -10.0 - less harsh
                 reward += inaction_penalty
                 reward_breakdown['inaction_penalty'] = inaction_penalty
         if step_info.get('trade_led_to_build_opportunity'):
@@ -426,7 +428,7 @@ class CatanEnv(gym.Env):
         if is_initial:
             vp_reward = vp_diff * 0.01
         else:
-            vp_reward = vp_diff * 8.0
+            vp_reward = vp_diff * 3.0  # Reduced from 8.0 to reduce reward variance
         reward += vp_reward
         reward_breakdown['vp'] = vp_reward
         settlement_diff = new_obs['my_settlements'] - old_obs['my_settlements']
@@ -441,19 +443,20 @@ class CatanEnv(gym.Env):
             reward += building_reward
             reward_breakdown['building'] = building_reward
         
-        if new_obs['my_victory_points'] > 3:
+        # Only penalize excessive hoarding that prevents building
+        if new_obs['my_victory_points'] > 5:  # Changed from 3
             total_cards = sum(new_obs['my_resources'].values())
-            if total_cards > 7:
-                excess_cards = total_cards - 7
-                hoarding_penalty = 1.0 * excess_cards
-                if excess_cards > 10:
-                    hoarding_penalty += 2.0 * (excess_cards - 10)
+            if total_cards > 11:  # Changed from 7 - allows holding 10 cards (for city + extras)
+                excess_cards = total_cards - 11
+                hoarding_penalty = 0.3 * excess_cards  # Reduced from 1.0
+                if excess_cards > 5:  # Reduced threshold
+                    hoarding_penalty += 0.5 * (excess_cards - 5)  # Reduced from 2.0
                 reward -= hoarding_penalty
                 reward_breakdown['hoarding_penalty'] = -hoarding_penalty
         if step_info.get('result') == 'game_over':
             if step_info.get('winner') == self.player_id:
-                reward += 50.0
-                reward_breakdown['win_bonus'] = 50.0
+                reward += 20.0  # Reduced from 50.0 to reduce terminal reward spike
+                reward_breakdown['win_bonus'] = 20.0
             else:
                 reward -= 1.0
                 reward_breakdown['loss_penalty'] = -1.0

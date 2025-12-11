@@ -155,7 +155,10 @@ class PPOTrainer:
                 surr2 = torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon) * batch_advantages
                 policy_loss = -torch.min(surr1, surr2).mean()
 
-                value_loss = nn.MSELoss()(state_values.squeeze(), batch_returns)
+                # Clipped value loss to prevent extreme values
+                values_pred = state_values.squeeze()
+                batch_returns_clipped = torch.clamp(batch_returns, -100, 100)  # Prevent extreme values
+                value_loss = nn.MSELoss()(values_pred, batch_returns_clipped)
                 loss = policy_loss + self.value_coef * value_loss - self.entropy_coef * entropy
 
                 self.optimizer.zero_grad()
