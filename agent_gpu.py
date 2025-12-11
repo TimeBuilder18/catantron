@@ -17,7 +17,11 @@ class CatanAgent:
         self.policy = CatanPolicy(device=device)
         self.policy.eval()
 
-    def choose_action(self, obs, action_mask, vertex_mask=None, edge_mask=None):
+    def choose_action(self, obs, action_mask, vertex_mask=None, edge_mask=None, is_training=False):
+        """
+        Choose action and all hierarchical parameters using the policy.
+        This is the single, unified method for both training and evaluation.
+        """
         observation = torch.FloatTensor(obs['observation'])
         mask_tensor = torch.FloatTensor(action_mask)
 
@@ -29,7 +33,8 @@ class CatanAgent:
         vertex_mask_tensor = torch.FloatTensor(vertex_mask)
         edge_mask_tensor = torch.FloatTensor(edge_mask)
 
-        with torch.no_grad():
+        if is_training:
+            # Keep gradients for training
             (action, vertex, edge, trade_give, trade_get,
              action_log_prob, vertex_log_prob, edge_log_prob,
              trade_give_log_prob, trade_get_log_prob, value, entropy) = \
@@ -39,26 +44,25 @@ class CatanAgent:
                     vertex_mask_tensor,
                     edge_mask_tensor
                 )
-
-        return (action.item(), vertex.item(), edge.item(), trade_give.item(), trade_get.item(),
-                action_log_prob.item(), vertex_log_prob.item(), edge_log_prob.item(),
-                trade_give_log_prob.item(), trade_get_log_prob.item(),
-                value.item())
-
-    def choose_action_training(self, obs, action_mask):
-        observation = torch.FloatTensor(obs['observation']).to(self.policy.device)
-        mask_tensor = torch.FloatTensor(action_mask).to(self.policy.device)
-
-        (action, vertex, edge, trade_give, trade_get,
-         action_log_prob, vertex_log_prob, edge_log_prob,
-         trade_give_log_prob, trade_get_log_prob, value, entropy) = self.policy.get_action_and_value(
-            observation,
-            mask_tensor
-        )
-
-        return (action, vertex, edge, trade_give, trade_get,
-                action_log_prob, vertex_log_prob, edge_log_prob,
-                trade_give_log_prob, trade_get_log_prob, value, entropy)
+            return (action, vertex, edge, trade_give, trade_get,
+                    action_log_prob, vertex_log_prob, edge_log_prob,
+                    trade_give_log_prob, trade_get_log_prob, value, entropy)
+        else:
+            # No gradients needed for evaluation
+            with torch.no_grad():
+                (action, vertex, edge, trade_give, trade_get,
+                 action_log_prob, vertex_log_prob, edge_log_prob,
+                 trade_give_log_prob, trade_get_log_prob, value, entropy) = \
+                    self.policy.get_action_and_value(
+                        observation,
+                        mask_tensor,
+                        vertex_mask_tensor,
+                        edge_mask_tensor
+                    )
+            return (action.item(), vertex.item(), edge.item(), trade_give.item(), trade_get.item(),
+                    action_log_prob.item(), vertex_log_prob.item(), edge_log_prob.item(),
+                    trade_give_log_prob.item(), trade_get_log_prob.item(),
+                    value.item())
 
 
 class ExperienceBuffer:

@@ -73,7 +73,7 @@ parser.add_argument('--save-freq', type=int, default=10000, help="Save a checkpo
 parser.add_argument('--model-name', type=str, default='catan_overnight')
 parser.add_argument('--curriculum', action='store_true', help='Use curriculum learning (VP 4→10)')
 parser.add_argument('--batch-size', type=int, default=1024, help='Batch size for training')
-parser.add_argument('--epochs', type=int, default=20, help='Training epochs per update')
+parser.add_argument('--epochs', type=int, default=50, help='Training epochs per update')
 args = parser.parse_args()
 
 print("=" * 70)
