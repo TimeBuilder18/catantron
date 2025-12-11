@@ -21,6 +21,13 @@ class CatanPolicy(nn.Module):
         self.fc2 = nn.Linear(768, 768)
         self.fc3 = nn.Linear(768, 512)
         self.fc4 = nn.Linear(512, 256)
+
+        # Add layer normalization for training stability
+        self.ln1 = nn.LayerNorm(768)
+        self.ln2 = nn.LayerNorm(768)
+        self.ln3 = nn.LayerNorm(512)
+        self.ln4 = nn.LayerNorm(256)
+
         self.policy_head = nn.Linear(256, 11)  # 10 -> 11 actions
         self.location_head_vertex = nn.Linear(256, 54)
         self.location_head_edge = nn.Linear(256, 72)
@@ -38,10 +45,10 @@ class CatanPolicy(nn.Module):
         if len(obs.shape) == 1:
             obs = obs.unsqueeze(0)
 
-        x = F.relu(self.fc1(obs))
-        x = F.relu(self.fc2(x))
-        x = F.relu(self.fc3(x))
-        x = F.relu(self.fc4(x))
+        x = F.relu(self.ln1(self.fc1(obs)))
+        x = F.relu(self.ln2(self.fc2(x)))
+        x = F.relu(self.ln3(self.fc3(x)))
+        x = F.relu(self.ln4(self.fc4(x)))
 
         action_logits = self.policy_head(x)
         if action_mask is not None:
