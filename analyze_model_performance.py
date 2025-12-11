@@ -46,6 +46,7 @@ with SuppressOutput():
     from network_gpu import CatanPolicy
     from agent_gpu import CatanAgent
     from game_system import GameConstants
+    from rule_based_ai import play_rule_based_turn
 
 import argparse
 
@@ -182,6 +183,15 @@ for idx, (episode_num, ckpt_path) in enumerate(checkpoint_data):
         while not done and step_count < max_steps:
             step_count += 1
 
+            # Handle opponent turns (CRITICAL FIX!)
+            if not info.get('is_my_turn', True):
+                with SuppressOutput():
+                    current_player = env.game_env.game.current_player_index
+                    play_rule_based_turn(env, current_player)
+                    obs = env._get_obs()
+                    info = env._get_info()
+                continue
+
             with SuppressOutput():
                 (action, vertex, edge, trade_give, trade_get,
                  action_log_prob, vertex_log_prob, edge_log_prob,
@@ -223,6 +233,7 @@ for idx, (episode_num, ckpt_path) in enumerate(checkpoint_data):
             done = terminated or truncated
             episode_reward += reward
             obs = next_obs
+            info = step_info  # Update info for next iteration
 
         # Get final state
         with SuppressOutput():
