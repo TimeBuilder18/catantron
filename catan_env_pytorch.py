@@ -286,10 +286,12 @@ class CatanEnv(gym.Env):
         current_obs = self._get_obs()
         action_mask = current_obs['action_mask']
         if action_mask[action] == 0:
+            # Masked action - no penalty, just skip it
+            # Agent will learn these actions don't lead anywhere
             obs = self._get_obs()
             info = self._get_info()
             info['illegal_action'] = True
-            return obs, -10.0, False, False, info
+            return obs, 0.0, False, False, info
 
         old_potential = self._calculate_potential(self.game_env.game.players[self.player_id])
 
@@ -362,7 +364,8 @@ class CatanEnv(gym.Env):
             for tile in city.position.adjacent_tiles:
                  if tile.number:
                     production_potential += 2 * pip_map.get(tile.number, 0)
-        potential += production_potential * 0.1
+        # Boosted from 0.1 to 1.0 - PBRS is now primary signal (no building rewards)
+        potential += production_potential * 1.0
 
         # Strategic Asset Potential
         if player.has_longest_road: potential += 2.0
@@ -423,19 +426,10 @@ class CatanEnv(gym.Env):
             vp_reward = vp_diff * 3.0  # Reduced from 8.0 to reduce reward variance
         reward += vp_reward
         reward_breakdown['vp'] = vp_reward
-        settlement_diff = new_obs['my_settlements'] - old_obs['my_settlements']
-        city_diff = new_obs['my_cities'] - old_obs['my_cities']
-        road_diff = new_obs['my_roads'] - old_obs['my_roads']
-        if is_initial:
-            building_reward = settlement_diff * 0.005 + road_diff * 0.002
-            reward += building_reward
-            reward_breakdown['building'] = building_reward
-        else:
-            # DRASTICALLY reduced to prevent exploitation (was 1.0, 2.0, 1.5)
-            # VP change (3.0x) and PBRS are primary signals now
-            building_reward = settlement_diff * 0.05 + city_diff * 0.1 + road_diff * 0.02
-            reward += building_reward
-            reward_breakdown['building'] = building_reward
+
+        # REMOVED building rewards entirely - PBRS handles this now
+        # Any incremental reward (even 0.02) can be exploited through spam
+        # Agent must learn from outcomes (VP) and strategy (PBRS) only
 
         # Only penalize excessive hoarding that prevents building
         if new_obs['my_victory_points'] > 5:  # Changed from 3
