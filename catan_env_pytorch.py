@@ -286,11 +286,15 @@ class CatanEnv(gym.Env):
         current_obs = self._get_obs()
         action_mask = current_obs['action_mask']
         if action_mask[action] == 0:
+            # Masked action - no penalty, just skip it
+            # Agent will learn these actions don't lead anywhere
             obs = self._get_obs()
             info = self._get_info()
             info['illegal_action'] = True
-            return obs, -10.0, False, False, info
-        
+            return obs, 0.0, False, False, info
+
+        old_potential = self._calculate_potential(self.game_env.game.players[self.player_id])
+
         action_names = [
             'roll_dice', 'place_settlement', 'place_road',
             'build_settlement', 'build_city', 'build_road',
@@ -317,15 +321,17 @@ class CatanEnv(gym.Env):
             )
             step_info.update(step_info_from_env)
 
+        new_potential = self._calculate_potential(self.game_env.game.players[self.player_id])
         winner = self.game_env.game.check_victory_conditions()
         if winner is not None:
             done = True
             winner_id = self.game_env.game.players.index(winner)
             step_info['winner'] = winner_id
             step_info['result'] = 'game_over'
-        
+
         new_obs = self.game_env.get_observation(self.player_id) # Get final observation after all changes
-        reward = self._calculate_reward(raw_obs, new_obs, step_info)
+        debug_reward = (hasattr(self, '_episode_count') and self._episode_count % 50 == 0)
+        reward = self._calculate_reward(raw_obs, new_obs, step_info, old_potential, new_potential, debug=debug_reward)
         obs = self._get_obs()
         info = self._get_info()
         info.update(step_info)
@@ -344,32 +350,65 @@ class CatanEnv(gym.Env):
                 return {'edge': all_edges[edge_idx]}
         return None
 
-    def _calculate_reward(self, old_obs, new_obs, step_info):
+    def _calculate_potential(self, player: Player):
+        potential = 0.0
+
+        # Production Potential
+        pip_map = {2:1, 3:2, 4:3, 5:4, 6:5, 8:5, 9:4, 10:3, 11:2, 12:1}
+        production_potential = 0
+        for settlement in player.settlements:
+            for tile in settlement.position.adjacent_tiles:
+                if tile.number:
+                    production_potential += pip_map.get(tile.number, 0)
+        for city in player.cities:
+            for tile in city.position.adjacent_tiles:
+                 if tile.number:
+                    production_potential += 2 * pip_map.get(tile.number, 0)
+        # Boosted from 0.1 to 1.0 - PBRS is now primary signal (no building rewards)
+        potential += production_potential * 1.0
+
+        # Strategic Asset Potential
+        if player.has_longest_road: potential += 2.0
+        if player.has_largest_army: potential += 2.0
+        potential += player.development_cards.get(DevelopmentCardType.VICTORY_POINT, 0)
+
+        # Opponent Threat Potential
+        for i, opp in enumerate(self.game_env.game.players):
+            if opp != player:
+                opp_vp = opp.calculate_victory_points()
+                if opp_vp >= 8:
+                    # Cap penalty to reduce variance - max penalty is -10 (when opp has 10 VP)
+                    penalty = min((opp_vp - 7) * 2.0, 10.0)  # Reduced multiplier from 5.0 to 2.0, capped at 10
+                    potential -= penalty
+
+        return potential
+
+    def _calculate_reward(self, old_obs, new_obs, step_info, old_potential, new_potential, debug=False):
         reward = 0.0
+        reward_breakdown = {}
+        is_initial = self.game_env.game.is_initial_placement_phase()
         action_name = step_info.get('action_name')
 
-        # --- Core Rewards ---
-        # 1. Win/Loss Reward
-        if step_info.get('result') == 'game_over':
-            if step_info.get('winner') == self.player_id:
-                return 50.0  # Win bonus
-            else:
-                return -1.0 # Loss penalty
+        # PBRS Reward
+        pbrs_reward = self.gamma * new_potential - old_potential
+        reward += pbrs_reward
+        reward_breakdown['pbrs'] = pbrs_reward
 
-        # 2. Victory Point Event Reward
-        vp_diff = new_obs['my_victory_points'] - old_obs['my_victory_points']
-        if vp_diff > 0:
-            reward += vp_diff * 25.0
+        # VP State Bonus
+        vp_state_bonus = new_obs['my_victory_points'] * 0.1
+        reward += vp_state_bonus
+        reward_breakdown['vp_state_bonus'] = vp_state_bonus
 
-        # --- Penalties ---
-        # 1. Inaction Penalty
         if action_name == 'end_turn':
             legal_actions = old_obs.get('legal_actions', [])
             build_actions = {'build_settlement', 'build_city', 'build_road', 'buy_dev_card'}
             if any(action in legal_actions for action in build_actions):
-                reward -= 10.0
-        
-        # 2. Discard Penalty
+                inaction_penalty = -3.0  # Reduced from -10.0 - less harsh
+                reward += inaction_penalty
+                reward_breakdown['inaction_penalty'] = inaction_penalty
+        if step_info.get('trade_led_to_build_opportunity'):
+            reward += 5.0
+            reward_breakdown['strategic_trade'] = 5.0
         was_seven_rolled = new_obs.get('last_roll') and new_obs['last_roll'][2] == 7
         if was_seven_rolled:
             old_card_count = sum(old_obs['my_resources'].values())
@@ -387,19 +426,10 @@ class CatanEnv(gym.Env):
             vp_reward = vp_diff * 3.0  # Reduced from 8.0 to reduce reward variance
         reward += vp_reward
         reward_breakdown['vp'] = vp_reward
-        settlement_diff = new_obs['my_settlements'] - old_obs['my_settlements']
-        city_diff = new_obs['my_cities'] - old_obs['my_cities']
-        road_diff = new_obs['my_roads'] - old_obs['my_roads']
-        if is_initial:
-            building_reward = settlement_diff * 0.005 + road_diff * 0.002
-            reward += building_reward
-            reward_breakdown['building'] = building_reward
-        else:
-            # DRASTICALLY reduced to prevent exploitation (was 1.0, 2.0, 1.5)
-            # VP change (3.0x) and PBRS are primary signals now
-            building_reward = settlement_diff * 0.05 + city_diff * 0.1 + road_diff * 0.02
-            reward += building_reward
-            reward_breakdown['building'] = building_reward
+
+        # REMOVED building rewards entirely - PBRS handles this now
+        # Any incremental reward (even 0.02) can be exploited through spam
+        # Agent must learn from outcomes (VP) and strategy (PBRS) only
 
         # Only penalize excessive hoarding that prevents building
         if new_obs['my_victory_points'] > 5:  # Changed from 3
