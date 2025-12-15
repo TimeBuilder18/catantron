@@ -133,14 +133,14 @@ trainer = PPOTrainer(
 )
 
 # Add learning rate scheduler for stable long-term training
-from torch.optim.lr_scheduler import CosineAnnealingLR
+# STABILITY FIX: Use ExponentialLR for more aggressive decay in late training
+from torch.optim.lr_scheduler import ExponentialLR
 
-scheduler = CosineAnnealingLR(
+scheduler = ExponentialLR(
     trainer.optimizer,
-    T_max=args.episodes,
-    eta_min=1e-5  # Minimum learning rate
+    gamma=0.9995  # Decays to ~1e-5 by episode 25000
 )
-print(f"   Learning rate scheduler: CosineAnnealing (3e-4 → 1e-5)")
+print(f"   Learning rate scheduler: Exponential (gamma=0.9995, 3e-4 → ~1e-5)")
 
 buffer = ExperienceBuffer()
 
@@ -153,6 +153,10 @@ GameConstants.VICTORY_POINTS_TO_WIN = current_vp_target
 
 # Store initial entropy coefficient for decay
 initial_entropy_coef = trainer.entropy_coef
+
+# STABILITY FIX: Track best model by VP performance
+best_avg_vp = 0.0
+best_episode = 0
 
 print(f"\nStarting training... Initial Target VP: {current_vp_target}\n")
 sys.stdout.flush()
@@ -244,6 +248,14 @@ for episode in range(args.episodes):
         progress_str += f" | Target VP: {current_vp_target}"
         print(progress_str)
 
+        # STABILITY FIX: Save best model by VP performance
+        if avg_vp > best_avg_vp:
+            best_avg_vp = avg_vp
+            best_episode = episode + 1
+            best_path = f"models/{args.model_name}_BEST.pt"
+            agent.policy.save(best_path)
+            print(f"         🏆 New best! VP: {best_avg_vp:.2f} (saved to {best_path})")
+
         if (episode + 1) % 500 == 0:
             timeout_pct = timeout_count / (episode + 1) * 100
             natural_pct = natural_end_count / (episode + 1) * 100
@@ -251,9 +263,12 @@ for episode in range(args.episodes):
         sys.stdout.flush()
 
     if (episode + 1) % args.update_freq == 0 and len(buffer) > 0:
-        # Update entropy coefficient (decay over time for less exploration late in training)
+        # STABILITY FIX: Exponential entropy decay - drops faster in late training
         progress = (episode + 1) / args.episodes
-        trainer.entropy_coef = initial_entropy_coef * (1.0 - progress * 0.7)  # Decays to 30% of initial
+        trainer.entropy_coef = initial_entropy_coef * (0.3 ** progress)  # Exponential decay
+
+        # STABILITY FIX: Decay clip ratio in late training for tighter policy updates
+        trainer.clip_epsilon = 0.2 * (1.0 - progress * 0.5)  # 0.2 → 0.1 by end
 
         with SuppressOutput():
             metrics = trainer.update_policy(buffer)
@@ -280,5 +295,8 @@ print(f"Natural endings: {natural_end_count}/{args.episodes} = {natural_end_coun
 elapsed_time = time.time() - start_time
 print(f"Total time: {elapsed_time/60:.1f} minutes ({elapsed_time/3600:.2f} hours)")
 print(f"Average speed: {args.episodes / (elapsed_time / 60):.0f} episodes/min")
+print()
+print(f"🏆 Best performance: {best_avg_vp:.2f} VP at episode {best_episode}")
+print(f"   Best model saved: models/{args.model_name}_BEST.pt")
 print("=" * 70)
 sys.stdout.flush()
