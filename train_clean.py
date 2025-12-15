@@ -74,6 +74,7 @@ parser.add_argument('--model-name', type=str, default='catan_overnight')
 parser.add_argument('--curriculum', action='store_true', help='Use curriculum learning (VP 4→10)')
 parser.add_argument('--batch-size', type=int, default=1024, help='Batch size for training')
 parser.add_argument('--epochs', type=int, default=50, help='Training epochs per update')
+parser.add_argument('--resume', type=str, default=None, help='Resume training from checkpoint (e.g., models/stable_v1_BEST.pt)')
 args = parser.parse_args()
 
 print("=" * 70)
@@ -113,11 +114,20 @@ print(f"   Episodes: {args.episodes}")
 print(f"   Update frequency: {args.update_freq}")
 print(f"   Save frequency: {args.save_freq}")
 print(f"   Model name: {args.model_name}")
+if args.resume:
+    print(f"   Resume from: {args.resume}")
 print()
 sys.stdout.flush()
 
 env = CatanEnv(player_id=0)
 agent = CatanAgent(device=device)
+
+# Resume from checkpoint if specified
+if args.resume:
+    print(f"\n📂 Resuming from checkpoint: {args.resume}")
+    agent.policy.load(args.resume)
+    print(f"   ✅ Checkpoint loaded successfully")
+    sys.stdout.flush()
 
 trainer = PPOTrainer(
     policy=agent.policy,
