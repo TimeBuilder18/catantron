@@ -40,6 +40,12 @@ class CatanEnv(gym.Env):
         self._episode_count = 0  # Track episodes for debug output
         self.gamma = 0.99 # Discount factor for PBRS
 
+        # Track game state for phase-aware rewards
+        self._turn_count = 0
+        self._bank_trades_this_game = 0
+        self._last_city_count = 0
+        self._resources_spent_on_trades = 0
+
         # Action space: 11 discrete actions
         self.action_space = spaces.Discrete(11)
 
@@ -81,6 +87,12 @@ class CatanEnv(gym.Env):
 
         self.game_env = AIGameEnvironment()
         self._episode_count += 1
+
+        # Reset game state tracking
+        self._turn_count = 0
+        self._bank_trades_this_game = 0
+        self._last_city_count = 0
+        self._resources_spent_on_trades = 0
 
         obs = self._get_obs()
         info = self._get_info()
@@ -313,6 +325,11 @@ class CatanEnv(gym.Env):
             success, message = self.game_env.game.execute_bank_trade(player, give_res, get_res)
             step_info['success'] = success
             step_info['message'] = message
+            step_info['bank_trade'] = True
+            # Track bank trades for efficiency penalty
+            if success:
+                self._bank_trades_this_game += 1
+                self._resources_spent_on_trades += 4  # 4:1 trade ratio
             new_obs, done, _ = self.game_env.step(self.player_id, 'wait', {})
         else:
             action_params = self._get_action_params(action_name, vertex_idx, edge_idx)
@@ -320,6 +337,14 @@ class CatanEnv(gym.Env):
                 self.player_id, action_name, action_params
             )
             step_info.update(step_info_from_env)
+
+            # Track turn count for phase awareness
+            if action_name == 'end_turn':
+                self._turn_count += 1
+
+            # Track city building for rewards
+            if action_name == 'build_city':
+                step_info['built_city'] = True
 
         new_potential = self._calculate_potential(self.game_env.game.players[self.player_id])
         winner = self.game_env.game.check_victory_conditions()
@@ -353,32 +378,77 @@ class CatanEnv(gym.Env):
     def _calculate_potential(self, player: Player):
         potential = 0.0
 
-        # Production Potential
+        # ========== PRODUCTION POTENTIAL ==========
         pip_map = {2:1, 3:2, 4:3, 5:4, 6:5, 8:5, 9:4, 10:3, 11:2, 12:1}
+        resource_type_map = {
+            'forest': 'wood', 'hill': 'brick', 'field': 'wheat',
+            'mountain': 'ore', 'pasture': 'sheep', 'desert': None
+        }
+
         production_potential = 0
+        ore_wheat_production = 0  # Track city-enabling resource production
+
         for settlement in player.settlements:
             for tile in settlement.position.adjacent_tiles:
                 if tile.number:
-                    production_potential += pip_map.get(tile.number, 0)
+                    pips = pip_map.get(tile.number, 0)
+                    production_potential += pips
+                    # Bonus for ore/wheat production (city resources)
+                    resource = resource_type_map.get(tile.terrain, None)
+                    if resource in ('ore', 'wheat'):
+                        ore_wheat_production += pips
+
         for city in player.cities:
             for tile in city.position.adjacent_tiles:
-                 if tile.number:
-                    production_potential += 2 * pip_map.get(tile.number, 0)
-        # Boosted from 0.1 to 1.0 - PBRS is now primary signal (no building rewards)
-        potential += production_potential * 1.0
+                if tile.number:
+                    pips = pip_map.get(tile.number, 0)
+                    production_potential += 2 * pips
+                    resource = resource_type_map.get(tile.terrain, None)
+                    if resource in ('ore', 'wheat'):
+                        ore_wheat_production += 2 * pips
 
-        # Strategic Asset Potential
+        potential += production_potential * 1.0
+        # Ore/wheat production bonus - encourages city-enabling positions
+        potential += ore_wheat_production * 0.3
+
+        # ========== CITY BUILDING INCENTIVE (NEW) ==========
+        # Explicit bonus for each city built - cities are strategically superior
+        num_cities = len(player.cities)
+        # First city: +3, Second: +3.5, Third: +4 (compound bonus)
+        city_bonus = sum(3.0 + 0.5 * i for i in range(num_cities))
+        potential += city_bonus
+
+        # ========== CITY READINESS BONUS (NEW) ==========
+        # Reward for being close to building a city
+        ore_count = player.resources.get(ResourceType.ORE, 0)
+        wheat_count = player.resources.get(ResourceType.WHEAT, 0)
+        # How close are we to city resources? (3 ore, 2 wheat needed)
+        ore_progress = min(ore_count / 3.0, 1.0)
+        wheat_progress = min(wheat_count / 2.0, 1.0)
+        # Only give readiness bonus if we have a settlement to upgrade
+        if len(player.settlements) > 0:
+            city_readiness = ore_progress * wheat_progress  # 0 to 1
+            potential += city_readiness * 2.0  # Up to +2 when ready to build
+
+        # ========== STRATEGIC ASSET POTENTIAL ==========
         if player.has_longest_road: potential += 2.0
         if player.has_largest_army: potential += 2.0
-        potential += player.development_cards.get(DevelopmentCardType.VICTORY_POINT, 0)
+        potential += player.development_cards.get(DevelopmentCardType.VICTORY_POINT, 0) * 1.5
 
-        # Opponent Threat Potential
-        for i, opp in enumerate(self.game_env.game.players):
+        # ========== DEVELOPMENT CARD BONUS (NEW) ==========
+        # Knights are valuable for largest army AND robber control
+        knights = player.development_cards.get(DevelopmentCardType.KNIGHT, 0)
+        potential += knights * 0.5
+        # Total dev cards encourage buying
+        total_dev = sum(player.development_cards.values())
+        potential += total_dev * 0.3
+
+        # ========== OPPONENT THREAT POTENTIAL ==========
+        for opp in self.game_env.game.players:
             if opp != player:
                 opp_vp = opp.calculate_victory_points()
                 if opp_vp >= 8:
-                    # Cap penalty to reduce variance - max penalty is -10 (when opp has 10 VP)
-                    penalty = min((opp_vp - 7) * 2.0, 10.0)  # Reduced multiplier from 5.0 to 2.0, capped at 10
+                    penalty = min((opp_vp - 7) * 2.0, 10.0)
                     potential -= penalty
 
         return potential
@@ -389,26 +459,83 @@ class CatanEnv(gym.Env):
         is_initial = self.game_env.game.is_initial_placement_phase()
         action_name = step_info.get('action_name')
 
-        # PBRS Reward
+        # ========== PBRS REWARD ==========
         pbrs_reward = self.gamma * new_potential - old_potential
         reward += pbrs_reward
         reward_breakdown['pbrs'] = pbrs_reward
 
-        # VP State Bonus
+        # ========== VP REWARDS ==========
+        vp_diff = new_obs['my_victory_points'] - old_obs['my_victory_points']
+        if is_initial:
+            vp_reward = vp_diff * 0.01
+        else:
+            vp_reward = vp_diff * 3.0
+        reward += vp_reward
+        reward_breakdown['vp'] = vp_reward
+
+        # VP State Bonus (encourages maintaining high VP)
         vp_state_bonus = new_obs['my_victory_points'] * 0.1
         reward += vp_state_bonus
         reward_breakdown['vp_state_bonus'] = vp_state_bonus
 
+        # ========== CITY BUILDING BONUS (CRITICAL FIX) ==========
+        # Explicit reward for building cities - this is the key fix!
+        if step_info.get('built_city') or (action_name == 'build_city' and vp_diff > 0):
+            # Determine game phase for phase-aware bonus
+            turn = self._turn_count
+            if turn < 15:
+                # Early game: small city bonus (focus on expansion first)
+                phase_multiplier = 1.0
+            elif turn < 40:
+                # Mid game: STRONG city bonus - this is when cities matter most!
+                phase_multiplier = 2.5
+            else:
+                # Late game: still good but less critical
+                phase_multiplier = 1.5
+
+            # Base city bonus + phase multiplier
+            city_bonus = 5.0 * phase_multiplier
+            reward += city_bonus
+            reward_breakdown['city_bonus'] = city_bonus
+
+        # ========== BANK TRADE PENALTY (DIMINISHING RETURNS) ==========
+        # Penalize excessive bank trading - it's wasteful (4 resources for 1)
+        if step_info.get('bank_trade') and step_info.get('success'):
+            # First few trades are fine, but gets increasingly penalized
+            trades_so_far = self._bank_trades_this_game
+            if trades_so_far <= 5:
+                # First 5 trades: no penalty
+                trade_penalty = 0.0
+            elif trades_so_far <= 15:
+                # Trades 6-15: small penalty
+                trade_penalty = 0.1 * (trades_so_far - 5)
+            else:
+                # 16+ trades: heavy penalty
+                trade_penalty = 1.0 + 0.2 * (trades_so_far - 15)
+
+            if trade_penalty > 0:
+                reward -= trade_penalty
+                reward_breakdown['bank_trade_penalty'] = -trade_penalty
+
+        # ========== INACTION PENALTY ==========
         if action_name == 'end_turn':
             legal_actions = old_obs.get('legal_actions', [])
             build_actions = {'build_settlement', 'build_city', 'build_road', 'buy_dev_card'}
             if any(action in legal_actions for action in build_actions):
-                inaction_penalty = -3.0  # Reduced from -10.0 - less harsh
+                # Stronger penalty if city was available but not built
+                if 'build_city' in legal_actions:
+                    inaction_penalty = -5.0  # Strong penalty for not building city
+                else:
+                    inaction_penalty = -2.0
                 reward += inaction_penalty
                 reward_breakdown['inaction_penalty'] = inaction_penalty
+
+        # ========== STRATEGIC TRADE BONUS ==========
         if step_info.get('trade_led_to_build_opportunity'):
             reward += 5.0
             reward_breakdown['strategic_trade'] = 5.0
+
+        # ========== DISCARD PENALTY (7 ROLLED) ==========
         was_seven_rolled = new_obs.get('last_roll') and new_obs['last_roll'][2] == 7
         if was_seven_rolled:
             old_card_count = sum(old_obs['my_resources'].values())
@@ -419,36 +546,32 @@ class CatanEnv(gym.Env):
                     discard_event_penalty = -2.0 * cards_discarded
                     reward += discard_event_penalty
                     reward_breakdown['discard_event_penalty'] = discard_event_penalty
-        vp_diff = new_obs['my_victory_points'] - old_obs['my_victory_points']
-        if is_initial:
-            vp_reward = vp_diff * 0.01
-        else:
-            vp_reward = vp_diff * 3.0  # Reduced from 8.0 to reduce reward variance
-        reward += vp_reward
-        reward_breakdown['vp'] = vp_reward
 
-        # REMOVED building rewards entirely - PBRS handles this now
-        # Any incremental reward (even 0.02) can be exploited through spam
-        # Agent must learn from outcomes (VP) and strategy (PBRS) only
+        # ========== RESOURCE HOARDING PENALTY ==========
+        # Diminishing returns on holding resources
+        total_cards = sum(new_obs['my_resources'].values())
+        if total_cards > 10:
+            # Penalize hoarding beyond 10 cards (risky for 7s anyway)
+            excess_cards = total_cards - 10
+            hoarding_penalty = 0.2 * excess_cards
+            if excess_cards > 5:
+                hoarding_penalty += 0.3 * (excess_cards - 5)
+            reward -= hoarding_penalty
+            reward_breakdown['hoarding_penalty'] = -hoarding_penalty
 
-        # Only penalize excessive hoarding that prevents building
-        if new_obs['my_victory_points'] > 5:  # Changed from 3
-            total_cards = sum(new_obs['my_resources'].values())
-            if total_cards > 11:  # Changed from 7 - allows holding 10 cards (for city + extras)
-                excess_cards = total_cards - 11
-                hoarding_penalty = 0.3 * excess_cards  # Reduced from 1.0
-                if excess_cards > 5:  # Reduced threshold
-                    hoarding_penalty += 0.5 * (excess_cards - 5)  # Reduced from 2.0
-                reward -= hoarding_penalty
-                reward_breakdown['hoarding_penalty'] = -hoarding_penalty
-
+        # ========== GAME END REWARDS ==========
         if step_info.get('result') == 'game_over':
             if step_info.get('winner') == self.player_id:
-                reward += 20.0  # Reduced from 50.0 to reduce terminal reward spike
-                reward_breakdown['win_bonus'] = 20.0
+                # Win bonus scales with VP (higher VP wins are better)
+                final_vp = new_obs['my_victory_points']
+                win_bonus = 15.0 + final_vp * 1.0  # e.g., 10VP win = +25
+                reward += win_bonus
+                reward_breakdown['win_bonus'] = win_bonus
             else:
+                # Small loss penalty
                 reward -= 1.0
                 reward_breakdown['loss_penalty'] = -1.0
+
         if debug:
             self._last_reward_breakdown = reward_breakdown
         return reward
