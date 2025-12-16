@@ -394,7 +394,7 @@ class CatanEnv(gym.Env):
                     pips = pip_map.get(tile.number, 0)
                     production_potential += pips
                     # Bonus for ore/wheat production (city resources)
-                    resource = resource_type_map.get(tile.terrain, None)
+                    resource = resource_type_map.get(tile.resource, None)
                     if resource in ('ore', 'wheat'):
                         ore_wheat_production += pips
 
@@ -403,7 +403,7 @@ class CatanEnv(gym.Env):
                 if tile.number:
                     pips = pip_map.get(tile.number, 0)
                     production_potential += 2 * pips
-                    resource = resource_type_map.get(tile.terrain, None)
+                    resource = resource_type_map.get(tile.resource, None)
                     if resource in ('ore', 'wheat'):
                         ore_wheat_production += 2 * pips
 
