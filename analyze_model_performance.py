@@ -53,6 +53,8 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument('--model-pattern', type=str, default='models/*episode*.pt',
                     help='Glob pattern for checkpoints')
+parser.add_argument('--model', type=str, default=None,
+                    help='Single model file to analyze (overrides --model-pattern)')
 parser.add_argument('--eval-episodes', type=int, default=20,
                     help='Episodes to evaluate per checkpoint')
 parser.add_argument('--vp-target', type=int, default=10,
@@ -71,10 +73,18 @@ print("=" * 80)
 os.makedirs(args.output_dir, exist_ok=True)
 
 # Find checkpoints
-checkpoints = sorted(glob.glob(args.model_pattern))
-if not checkpoints:
-    print(f"\n❌ No checkpoints found matching pattern: {args.model_pattern}")
-    exit(1)
+if args.model:
+    # Single model specified
+    if not os.path.exists(args.model):
+        print(f"\n❌ Model file not found: {args.model}")
+        exit(1)
+    checkpoints = [args.model]
+else:
+    # Pattern matching
+    checkpoints = sorted(glob.glob(args.model_pattern))
+    if not checkpoints:
+        print(f"\n❌ No checkpoints found matching pattern: {args.model_pattern}")
+        exit(1)
 
 # Extract episode numbers and sort
 checkpoint_data = []
@@ -86,6 +96,11 @@ for ckpt_path in checkpoints:
         checkpoint_data.append((episode_num, ckpt_path))
     elif 'final' in filename.lower():
         checkpoint_data.append((999999, ckpt_path))  # Sort final last
+    elif 'BEST' in filename or 'best' in filename:
+        checkpoint_data.append((888888, ckpt_path))  # Sort best models
+    else:
+        # Unknown naming - just add with episode 0
+        checkpoint_data.append((0, ckpt_path))
 
 checkpoint_data.sort()
 
@@ -121,7 +136,17 @@ print("EVALUATING CHECKPOINTS")
 print("=" * 80)
 
 for idx, (episode_num, ckpt_path) in enumerate(checkpoint_data):
-    print(f"\n[{idx+1}/{len(checkpoint_data)}] Episode {episode_num}: {os.path.basename(ckpt_path)}")
+    # Display episode number nicely
+    if episode_num == 888888:
+        ep_display = "BEST"
+    elif episode_num == 999999:
+        ep_display = "FINAL"
+    elif episode_num == 0:
+        ep_display = "Unknown"
+    else:
+        ep_display = str(episode_num)
+
+    print(f"\n[{idx+1}/{len(checkpoint_data)}] Episode {ep_display}: {os.path.basename(ckpt_path)}")
     print("-" * 80)
 
     # Load model
@@ -287,6 +312,12 @@ print("\n" + "=" * 80)
 print("LEARNING PROGRESSION ANALYSIS")
 print("=" * 80)
 
+# Check if we have any results
+if not all_results:
+    print("\n❌ No checkpoints were successfully analyzed.")
+    print("   Check that model files are valid PyTorch checkpoints.")
+    exit(1)
+
 # Extract metrics over training
 episodes = [r['episode_num'] for r in all_results]
 avg_vps = [np.mean(r['vps']) for r in all_results]
@@ -374,14 +405,21 @@ if latest_actions:
     axes[1, 1].barh(actions, counts)
     axes[1, 1].set_xlabel('Count')
     axes[1, 1].set_title('Action Distribution (Latest Checkpoint)')
+else:
+    axes[1, 1].text(0.5, 0.5, 'No action data', ha='center', va='center')
+    axes[1, 1].set_title('Action Distribution (Latest Checkpoint)')
 
 # Plot 6: Value function predictions
-value_samples = all_results[-1]['value_predictions'][:1000]  # Sample for visibility
-axes[1, 2].hist(value_samples, bins=50, alpha=0.7)
-axes[1, 2].set_xlabel('Value Prediction')
-axes[1, 2].set_ylabel('Frequency')
-axes[1, 2].set_title('Value Function Distribution (Latest)')
-axes[1, 2].grid(True)
+if all_results[-1]['value_predictions']:
+    value_samples = all_results[-1]['value_predictions'][:1000]  # Sample for visibility
+    axes[1, 2].hist(value_samples, bins=50, alpha=0.7)
+    axes[1, 2].set_xlabel('Value Prediction')
+    axes[1, 2].set_ylabel('Frequency')
+    axes[1, 2].set_title('Value Function Distribution (Latest)')
+    axes[1, 2].grid(True)
+else:
+    axes[1, 2].text(0.5, 0.5, 'No value data', ha='center', va='center')
+    axes[1, 2].set_title('Value Function Distribution (Latest)')
 
 plt.tight_layout()
 plot_path = os.path.join(args.output_dir, 'performance_analysis.png')
@@ -396,7 +434,17 @@ with open(report_path, 'w') as f:
     f.write("=" * 80 + "\n\n")
 
     for r in all_results:
-        f.write(f"\nEpisode {r['episode_num']}:\n")
+        # Display episode number nicely
+        if r['episode_num'] == 888888:
+            ep_display = "BEST"
+        elif r['episode_num'] == 999999:
+            ep_display = "FINAL"
+        elif r['episode_num'] == 0:
+            ep_display = "Unknown"
+        else:
+            ep_display = str(r['episode_num'])
+
+        f.write(f"\nEpisode {ep_display}:\n")
         f.write(f"  VP: {np.mean(r['vps']):.2f} ± {np.std(r['vps']):.2f}\n")
         f.write(f"  Reward: {np.mean(r['rewards']):.1f}\n")
         f.write(f"  Steps: {np.mean(r['steps']):.0f}\n")
