@@ -122,13 +122,6 @@ sys.stdout.flush()
 env = CatanEnv(player_id=0)
 agent = CatanAgent(device=device)
 
-# Resume from checkpoint if specified
-if args.resume:
-    print(f"\n📂 Resuming from checkpoint: {args.resume}")
-    agent.policy.load(args.resume)
-    print(f"   ✅ Checkpoint loaded successfully")
-    sys.stdout.flush()
-
 trainer = PPOTrainer(
     policy=agent.policy,
     learning_rate=3e-4,
@@ -168,6 +161,37 @@ initial_entropy_coef = trainer.entropy_coef
 best_avg_vp = 0.0
 best_episode = 0
 
+# Episode offset for resume
+start_episode = 0
+
+# Resume from checkpoint if specified - LOAD FULL TRAINING STATE
+if args.resume:
+    print(f"\n📂 Resuming from checkpoint: {args.resume}")
+    checkpoint = torch.load(args.resume, map_location=device)
+
+    # Check if this is a full training state checkpoint or just model weights
+    if 'model_state_dict' in checkpoint and 'optimizer_state_dict' in checkpoint:
+        # Full training state - restore everything
+        agent.policy.load_state_dict(checkpoint['model_state_dict'])
+        trainer.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        start_episode = checkpoint['episode']
+        best_avg_vp = checkpoint['best_avg_vp']
+        best_episode = checkpoint['best_episode']
+        # Restore training progress for proper decay calculations
+        initial_entropy_coef = checkpoint.get('initial_entropy_coef', trainer.entropy_coef)
+        print(f"   ✅ Full training state loaded")
+        print(f"   📍 Resuming from episode {start_episode}")
+        print(f"   🏆 Previous best: {best_avg_vp:.2f} VP at episode {best_episode}")
+        print(f"   📉 LR: {scheduler.get_last_lr()[0]:.2e}, Entropy: {trainer.entropy_coef:.4f}")
+    else:
+        # Old-style checkpoint (model weights only)
+        print(f"   ⚠️  WARNING: Old checkpoint format detected (model weights only)")
+        print(f"   ⚠️  Training will restart from scratch with loaded weights")
+        print(f"   ⚠️  For proper resume, train from scratch or use new checkpoints")
+        agent.policy.load(args.resume)
+    sys.stdout.flush()
+
 print(f"\nStarting training... Initial Target VP: {current_vp_target}\n")
 sys.stdout.flush()
 start_time = time.time()
@@ -175,7 +199,7 @@ start_time = time.time()
 timeout_count = 0
 natural_end_count = 0
 
-for episode in range(args.episodes):
+for episode in range(start_episode, start_episode + args.episodes):
     if args.curriculum:
         # Check for mastery and advance curriculum
         if len(episode_vps) == MASTERY_WINDOW:
@@ -247,34 +271,45 @@ for episode in range(args.episodes):
     if (episode + 1) % 100 == 0:
         avg_reward = np.mean(episode_rewards[-100:])
         avg_vp = np.mean(episode_vps)
-        progress = (episode + 1) / args.episodes * 100
+        episodes_trained = episode + 1 - start_episode
+        progress = episodes_trained / args.episodes * 100
         elapsed = time.time() - start_time
-        speed = (episode + 1) / (elapsed / 60)
+        speed = episodes_trained / (elapsed / 60)
+        total_episodes = episode + 1
 
         progress_str = (
-            f"[{progress:5.1f}%] Ep {episode + 1:6d}/{args.episodes} | "
+            f"[{progress:5.1f}%] Ep {total_episodes:6d} ({episodes_trained}/{args.episodes}) | "
             f"VP: {avg_vp:.2f} | Reward: {avg_reward:7.2f} | {speed:4.0f} eps/min"
         )
         progress_str += f" | Target VP: {current_vp_target}"
         print(progress_str)
 
-        # STABILITY FIX: Save best model by VP performance
+        # STABILITY FIX: Save best model by VP performance (include full training state)
         if avg_vp > best_avg_vp:
             best_avg_vp = avg_vp
-            best_episode = episode + 1
+            best_episode = total_episodes
             best_path = f"models/{args.model_name}_BEST.pt"
-            agent.policy.save(best_path)
+            torch.save({
+                'episode': total_episodes,
+                'model_state_dict': agent.policy.state_dict(),
+                'optimizer_state_dict': trainer.optimizer.state_dict(),
+                'scheduler_state_dict': scheduler.state_dict(),
+                'best_avg_vp': best_avg_vp,
+                'best_episode': best_episode,
+                'initial_entropy_coef': initial_entropy_coef,
+            }, best_path)
             print(f"         🏆 New best! VP: {best_avg_vp:.2f} (saved to {best_path})")
 
         if (episode + 1) % 500 == 0:
-            timeout_pct = timeout_count / (episode + 1) * 100
-            natural_pct = natural_end_count / (episode + 1) * 100
+            timeout_pct = timeout_count / episodes_trained * 100
+            natural_pct = natural_end_count / episodes_trained * 100
             print(f"         📊 Timeouts: {timeout_pct:.1f}% | Natural endings: {natural_pct:.1f}%")
         sys.stdout.flush()
 
     if (episode + 1) % args.update_freq == 0 and len(buffer) > 0:
         # STABILITY FIX: Exponential entropy decay - drops faster in late training
-        progress = (episode + 1) / args.episodes
+        # Use total episodes (not episodes_trained) for proper continuation
+        progress = (episode + 1) / (start_episode + args.episodes)
         trainer.entropy_coef = initial_entropy_coef * (0.3 ** progress)  # Exponential decay
 
         # STABILITY FIX: Decay clip ratio in late training for tighter policy updates
@@ -294,18 +329,31 @@ for episode in range(args.episodes):
 
     if (episode + 1) % args.save_freq == 0:
         save_path = f"models/{args.model_name}_episode_{episode + 1}.pt"
-        agent.policy.save(save_path)
+        # Save full training state for proper resume
+        torch.save({
+            'episode': episode + 1,
+            'model_state_dict': agent.policy.state_dict(),
+            'optimizer_state_dict': trainer.optimizer.state_dict(),
+            'scheduler_state_dict': scheduler.state_dict(),
+            'best_avg_vp': best_avg_vp,
+            'best_episode': best_episode,
+            'initial_entropy_coef': initial_entropy_coef,
+        }, save_path)
         print(f"         Checkpoint saved -> {save_path}")
         sys.stdout.flush()
 
+total_episodes_trained = args.episodes
 print("\n" + "=" * 70)
 print("TRAINING COMPLETE!")
-print(f"Final timeout rate: {timeout_count}/{args.episodes} = {timeout_count / args.episodes * 100:.1f}%")
-print(f"Natural endings: {natural_end_count}/{args.episodes} = {natural_end_count / args.episodes * 100:.1f}%")
+print(f"Final timeout rate: {timeout_count}/{total_episodes_trained} = {timeout_count / total_episodes_trained * 100:.1f}%")
+print(f"Natural endings: {natural_end_count}/{total_episodes_trained} = {natural_end_count / total_episodes_trained * 100:.1f}%")
 elapsed_time = time.time() - start_time
 print(f"Total time: {elapsed_time/60:.1f} minutes ({elapsed_time/3600:.2f} hours)")
-print(f"Average speed: {args.episodes / (elapsed_time / 60):.0f} episodes/min")
+print(f"Average speed: {total_episodes_trained / (elapsed_time / 60):.0f} episodes/min")
 print()
+if start_episode > 0:
+    print(f"📍 Resumed from episode {start_episode}")
+    print(f"   Trained {total_episodes_trained} additional episodes (total: {start_episode + total_episodes_trained})")
 print(f"🏆 Best performance: {best_avg_vp:.2f} VP at episode {best_episode}")
 print(f"   Best model saved: models/{args.model_name}_BEST.pt")
 print("=" * 70)
