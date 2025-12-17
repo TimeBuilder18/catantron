@@ -267,13 +267,18 @@ for idx, (episode_num, ckpt_path) in enumerate(checkpoint_data):
         final_vp = final_raw_obs.get('my_victory_points', 0)
         is_timeout = step_count >= max_steps
 
+        # Get ACTUAL building counts from game state (not action attempts!)
+        actual_cities = final_raw_obs.get('my_cities', 0)
+        actual_settlements = final_raw_obs.get('my_settlements', 0)
+        actual_roads = final_raw_obs.get('my_roads', 0)
+
         # Store results
         episode_stats['vps'].append(final_vp)
         episode_stats['rewards'].append(episode_reward)
         episode_stats['steps'].append(step_count)
-        episode_stats['cities'].append(cities_count)
-        episode_stats['settlements'].append(settlements_count)
-        episode_stats['roads'].append(roads_count)
+        episode_stats['cities'].append(actual_cities)  # Use actual, not attempts
+        episode_stats['settlements'].append(actual_settlements)
+        episode_stats['roads'].append(actual_roads)
         episode_stats['dev_cards'].append(dev_cards_count)
         episode_stats['max_cards'].append(max_cards_in_game)
         episode_stats['value_predictions'].extend(values_in_episode)
