@@ -411,14 +411,14 @@ class CatanEnv(gym.Env):
         # Ore/wheat production bonus - encourages city-enabling positions
         potential += ore_wheat_production * 0.3
 
-        # ========== CITY BUILDING INCENTIVE (NEW) ==========
-        # Explicit bonus for each city built - cities are strategically superior
+        # ========== CITY BUILDING INCENTIVE (STRONGER v2) ==========
+        # MASSIVE bonus for cities - this is the KEY to winning
         num_cities = len(player.cities)
-        # First city: +3, Second: +3.5, Third: +4 (compound bonus)
-        city_bonus = sum(3.0 + 0.5 * i for i in range(num_cities))
+        # First city: +8, Second: +9, Third: +10 (compound bonus)
+        city_bonus = sum(8.0 + 1.0 * i for i in range(num_cities))
         potential += city_bonus
 
-        # ========== CITY READINESS BONUS (NEW) ==========
+        # ========== CITY READINESS BONUS (STRONGER) ==========
         # Reward for being close to building a city
         ore_count = player.resources.get(ResourceType.ORE, 0)
         wheat_count = player.resources.get(ResourceType.WHEAT, 0)
@@ -428,7 +428,18 @@ class CatanEnv(gym.Env):
         # Only give readiness bonus if we have a settlement to upgrade
         if len(player.settlements) > 0:
             city_readiness = ore_progress * wheat_progress  # 0 to 1
-            potential += city_readiness * 2.0  # Up to +2 when ready to build
+            potential += city_readiness * 5.0  # Up to +5 when ready to build (was 2)
+
+        # ========== ROAD SPAM PENALTY ==========
+        # Penalize having too many roads without settlements to show for it
+        num_roads = len(player.roads)
+        num_settlements = len(player.settlements)
+        # Expected: ~2-3 roads per settlement. Penalize excess
+        expected_roads = (num_settlements + num_cities) * 3
+        excess_roads = max(0, num_roads - expected_roads)
+        if excess_roads > 5:
+            road_penalty = 0.2 * (excess_roads - 5)
+            potential -= road_penalty
 
         # ========== STRATEGIC ASSET POTENTIAL ==========
         if player.has_longest_road: potential += 2.0
@@ -478,55 +489,52 @@ class CatanEnv(gym.Env):
         reward += vp_state_bonus
         reward_breakdown['vp_state_bonus'] = vp_state_bonus
 
-        # ========== CITY BUILDING BONUS (CRITICAL FIX) ==========
-        # Explicit reward for building cities - this is the key fix!
+        # ========== CITY BUILDING BONUS (CRITICAL FIX v2) ==========
+        # MASSIVELY increased reward - cities are THE key to winning
         if step_info.get('built_city') or (action_name == 'build_city' and vp_diff > 0):
             # Determine game phase for phase-aware bonus
             turn = self._turn_count
             if turn < 15:
-                # Early game: small city bonus (focus on expansion first)
-                phase_multiplier = 1.0
+                # Early game: still reward cities (don't wait!)
+                phase_multiplier = 1.5
             elif turn < 40:
-                # Mid game: STRONG city bonus - this is when cities matter most!
-                phase_multiplier = 2.5
+                # Mid game: HUGE city bonus - this is when cities matter most!
+                phase_multiplier = 2.0
             else:
-                # Late game: still good but less critical
+                # Late game: still very valuable
                 phase_multiplier = 1.5
 
-            # Base city bonus + phase multiplier
-            city_bonus = 5.0 * phase_multiplier
+            # Base city bonus TRIPLED: 15.0 instead of 5.0
+            city_bonus = 15.0 * phase_multiplier
             reward += city_bonus
             reward_breakdown['city_bonus'] = city_bonus
 
-        # ========== BANK TRADE PENALTY (DIMINISHING RETURNS) ==========
-        # Penalize excessive bank trading - it's wasteful (4 resources for 1)
+        # ========== BANK TRADE PENALTY (IMMEDIATE) ==========
+        # Penalize ALL bank trading - it's wasteful (4 resources for 1)
+        # Every trade costs penalty from the start!
         if step_info.get('bank_trade') and step_info.get('success'):
-            # First few trades are fine, but gets increasingly penalized
             trades_so_far = self._bank_trades_this_game
-            if trades_so_far <= 5:
-                # First 5 trades: no penalty
-                trade_penalty = 0.0
-            elif trades_so_far <= 15:
-                # Trades 6-15: small penalty
-                trade_penalty = 0.1 * (trades_so_far - 5)
-            else:
-                # 16+ trades: heavy penalty
-                trade_penalty = 1.0 + 0.2 * (trades_so_far - 15)
+            # Immediate penalty that scales: 0.5 base + 0.1 per trade
+            trade_penalty = 0.5 + 0.1 * trades_so_far
+            # Heavy penalty after 10 trades
+            if trades_so_far > 10:
+                trade_penalty += 0.3 * (trades_so_far - 10)
 
-            if trade_penalty > 0:
-                reward -= trade_penalty
-                reward_breakdown['bank_trade_penalty'] = -trade_penalty
+            reward -= trade_penalty
+            reward_breakdown['bank_trade_penalty'] = -trade_penalty
 
-        # ========== INACTION PENALTY ==========
+        # ========== INACTION PENALTY (STRONGER) ==========
         if action_name == 'end_turn':
             legal_actions = old_obs.get('legal_actions', [])
             build_actions = {'build_settlement', 'build_city', 'build_road', 'buy_dev_card'}
             if any(action in legal_actions for action in build_actions):
-                # Stronger penalty if city was available but not built
+                # MASSIVE penalty if city was available but not built
                 if 'build_city' in legal_actions:
-                    inaction_penalty = -5.0  # Strong penalty for not building city
+                    inaction_penalty = -15.0  # HUGE penalty - you MUST build cities!
+                elif 'build_settlement' in legal_actions:
+                    inaction_penalty = -5.0  # Strong penalty for not building settlement
                 else:
-                    inaction_penalty = -2.0
+                    inaction_penalty = -1.0  # Small penalty for other builds
                 reward += inaction_penalty
                 reward_breakdown['inaction_penalty'] = inaction_penalty
 
