@@ -346,6 +346,10 @@ class CatanEnv(gym.Env):
             if action_name == 'build_city':
                 step_info['built_city'] = True
 
+            # Track settlement building for rewards
+            if action_name == 'build_settlement':
+                step_info['built_settlement'] = True
+
         new_potential = self._calculate_potential(self.game_env.game.players[self.player_id])
         winner = self.game_env.game.check_victory_conditions()
         if winner is not None:
@@ -410,6 +414,32 @@ class CatanEnv(gym.Env):
         potential += production_potential * 1.0
         # Ore/wheat production bonus - encourages city-enabling positions
         potential += ore_wheat_production * 0.3
+
+        # ========== SETTLEMENT BUILDING INCENTIVE (NEW) ==========
+        # Settlements are crucial - need them to upgrade to cities!
+        num_settlements = len(player.settlements)
+        # Bonus for each settlement beyond starting 2
+        # 3rd settlement: +5, 4th: +6, 5th: +7
+        if num_settlements > 2:
+            extra_settlements = num_settlements - 2
+            settlement_bonus = sum(5.0 + 1.0 * i for i in range(extra_settlements))
+            potential += settlement_bonus
+        # Small bonus for having settlements (encourages not losing them all to cities too fast)
+        potential += num_settlements * 2.0
+
+        # ========== SETTLEMENT READINESS BONUS (NEW) ==========
+        # Reward for being close to building a settlement (wood, brick, sheep, wheat)
+        wood_count = player.resources.get(ResourceType.WOOD, 0)
+        brick_count = player.resources.get(ResourceType.BRICK, 0)
+        sheep_count = player.resources.get(ResourceType.SHEEP, 0)
+        wheat_count_settle = player.resources.get(ResourceType.WHEAT, 0)
+        # How close are we to settlement resources?
+        wood_ok = min(wood_count, 1)
+        brick_ok = min(brick_count, 1)
+        sheep_ok = min(sheep_count, 1)
+        wheat_ok = min(wheat_count_settle, 1)
+        settlement_readiness = (wood_ok + brick_ok + sheep_ok + wheat_ok) / 4.0
+        potential += settlement_readiness * 3.0  # Up to +3 when ready to build
 
         # ========== CITY BUILDING INCENTIVE (STRONGER v2) ==========
         # MASSIVE bonus for cities - this is the KEY to winning
@@ -508,6 +538,18 @@ class CatanEnv(gym.Env):
             city_bonus = 15.0 * phase_multiplier
             reward += city_bonus
             reward_breakdown['city_bonus'] = city_bonus
+
+        # ========== SETTLEMENT BUILDING BONUS (NEW) ==========
+        # Settlements are critical - you need them to upgrade to cities!
+        if step_info.get('built_settlement') or (action_name == 'build_settlement' and vp_diff > 0):
+            # Each new settlement expands your resource generation AND gives upgrade potential
+            num_settlements = new_obs.get('my_settlements', 0)
+            # Higher bonus for 3rd, 4th, 5th settlement (beyond starting 2)
+            settlement_bonus = 8.0  # Strong base bonus
+            if num_settlements > 2:
+                settlement_bonus += 3.0 * (num_settlements - 2)  # Extra for expansion
+            reward += settlement_bonus
+            reward_breakdown['settlement_bonus'] = settlement_bonus
 
         # ========== BANK TRADE PENALTY (IMMEDIATE) ==========
         # Penalize ALL bank trading - it's wasteful (4 resources for 1)
