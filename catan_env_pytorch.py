@@ -342,12 +342,12 @@ class CatanEnv(gym.Env):
             if action_name == 'end_turn':
                 self._turn_count += 1
 
-            # Track city building for rewards
-            if action_name == 'build_city':
+            # Track city building for rewards - ONLY if build actually succeeded!
+            if action_name == 'build_city' and step_info.get('success', False):
                 step_info['built_city'] = True
 
-            # Track settlement building for rewards
-            if action_name == 'build_settlement':
+            # Track settlement building for rewards - ONLY if build actually succeeded!
+            if action_name == 'build_settlement' and step_info.get('success', False):
                 step_info['built_settlement'] = True
 
         new_potential = self._calculate_potential(self.game_env.game.players[self.player_id])
