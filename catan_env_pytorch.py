@@ -492,6 +492,13 @@ class CatanEnv(gym.Env):
                     penalty = min((opp_vp - 7) * 2.0, 10.0)
                     potential -= penalty
 
+        # ========== EXCESSIVE TRADING PENALTY (PBRS) ==========
+        # Penalize states where agent has wasted resources on trades
+        # This shapes long-term behavior to avoid trading addiction
+        if self._bank_trades_this_game > 3:
+            trade_waste_penalty = 0.5 * (self._bank_trades_this_game - 3)
+            potential -= trade_waste_penalty
+
         return potential
 
     def _calculate_reward(self, old_obs, new_obs, step_info, old_potential, new_potential, debug=False):
@@ -551,16 +558,21 @@ class CatanEnv(gym.Env):
             reward += settlement_bonus
             reward_breakdown['settlement_bonus'] = settlement_bonus
 
-        # ========== BANK TRADE PENALTY (IMMEDIATE) ==========
-        # Penalize ALL bank trading - it's wasteful (4 resources for 1)
-        # Every trade costs penalty from the start!
+        # ========== BANK TRADE PENALTY (MUCH STRONGER) ==========
+        # Agent was doing 70-170 trades per game! This MUST be heavily penalized.
+        # 4:1 trades waste 3 resources - that's almost a full settlement worth!
         if step_info.get('bank_trade') and step_info.get('success'):
             trades_so_far = self._bank_trades_this_game
-            # Immediate penalty that scales: 0.5 base + 0.1 per trade
-            trade_penalty = 0.5 + 0.1 * trades_so_far
-            # Heavy penalty after 10 trades
-            if trades_so_far > 10:
-                trade_penalty += 0.3 * (trades_so_far - 10)
+            # STRONG base penalty: 3.0 per trade (comparable to build rewards)
+            trade_penalty = 3.0
+            # Escalating penalty: each additional trade costs more
+            trade_penalty += 0.5 * trades_so_far
+            # SEVERE penalty after just 5 trades per game
+            if trades_so_far > 5:
+                trade_penalty += 1.0 * (trades_so_far - 5)
+            # Exponential penalty after 15 trades - this should NEVER happen
+            if trades_so_far > 15:
+                trade_penalty += 2.0 * (trades_so_far - 15)
 
             reward -= trade_penalty
             reward_breakdown['bank_trade_penalty'] = -trade_penalty
