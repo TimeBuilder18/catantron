@@ -190,7 +190,7 @@ class AIGameEnvironment:
                     actions.append('build_road')
 
                 if (res[ResourceType.ORE] >= 1 and res[ResourceType.WHEAT] >= 1 and
-                    res[ResourceType.SHEEP] >= 1):
+                    res[ResourceType.SHEEP] >= 1 and not self.game.dev_deck.is_empty()):
                     actions.append('buy_dev_card')
 
                 # FIX: Only allow bank trade if player actually CAN trade

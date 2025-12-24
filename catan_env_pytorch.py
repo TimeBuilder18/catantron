@@ -298,12 +298,12 @@ class CatanEnv(gym.Env):
         current_obs = self._get_obs()
         action_mask = current_obs['action_mask']
         if action_mask[action] == 0:
-            # Masked action - no penalty, just skip it
-            # Agent will learn these actions don't lead anywhere
+            # Masked action - PENALIZE to discourage illegal action spam
             obs = self._get_obs()
             info = self._get_info()
             info['illegal_action'] = True
-            return obs, 0.0, False, False, info
+            illegal_penalty = -2.0  # Strong penalty for trying illegal actions
+            return obs, illegal_penalty, False, False, info
 
         old_potential = self._calculate_potential(self.game_env.game.players[self.player_id])
 
