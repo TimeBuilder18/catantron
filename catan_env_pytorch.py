@@ -415,9 +415,10 @@ class CatanEnv(gym.Env):
         # Ore/wheat production bonus - encourages city-enabling positions
         potential += ore_wheat_production * 0.3
 
-        # ========== SETTLEMENT BUILDING INCENTIVE (NEW) ==========
+        # ========== SETTLEMENT BUILDING INCENTIVE (CAPPED AT 5) ==========
         # Settlements are crucial - need them to upgrade to cities!
-        num_settlements = len(player.settlements)
+        # Max 5 settlements per player in Catan
+        num_settlements = min(len(player.settlements), 5)  # Cap at 5 (Catan max)
         # Bonus for each settlement beyond starting 2
         # 3rd settlement: +5, 4th: +6, 5th: +7
         if num_settlements > 2:
@@ -441,10 +442,11 @@ class CatanEnv(gym.Env):
         settlement_readiness = (wood_ok + brick_ok + sheep_ok + wheat_ok) / 4.0
         potential += settlement_readiness * 3.0  # Up to +3 when ready to build
 
-        # ========== CITY BUILDING INCENTIVE (STRONGER v2) ==========
+        # ========== CITY BUILDING INCENTIVE (CAPPED AT 4) ==========
         # MASSIVE bonus for cities - this is the KEY to winning
-        num_cities = len(player.cities)
-        # First city: +8, Second: +9, Third: +10 (compound bonus)
+        # Max 4 cities per player in Catan
+        num_cities = min(len(player.cities), 4)  # Cap at 4 (Catan max)
+        # First city: +8, Second: +9, Third: +10, Fourth: +11 (compound bonus)
         city_bonus = sum(8.0 + 1.0 * i for i in range(num_cities))
         potential += city_bonus
 
@@ -481,12 +483,13 @@ class CatanEnv(gym.Env):
         if player.has_largest_army: potential += 2.0
         potential += player.development_cards.get(DevelopmentCardType.VICTORY_POINT, 0) * 1.5
 
-        # ========== DEVELOPMENT CARD BONUS (NEW) ==========
+        # ========== DEVELOPMENT CARD BONUS (CAPPED) ==========
         # Knights are valuable for largest army AND robber control
-        knights = player.development_cards.get(DevelopmentCardType.KNIGHT, 0)
+        # 14 knights in deck total, cap bonus at reasonable amount
+        knights = min(player.development_cards.get(DevelopmentCardType.KNIGHT, 0), 10)
         potential += knights * 0.5
-        # Total dev cards encourage buying
-        total_dev = sum(player.development_cards.values())
+        # Total dev cards encourage buying (25 in deck total, cap at 15)
+        total_dev = min(sum(player.development_cards.values()), 15)
         potential += total_dev * 0.3
 
         # ========== OPPONENT THREAT POTENTIAL ==========
