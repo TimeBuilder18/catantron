@@ -298,12 +298,12 @@ class CatanEnv(gym.Env):
         current_obs = self._get_obs()
         action_mask = current_obs['action_mask']
         if action_mask[action] == 0:
-            # Masked action - no penalty, just skip it
-            # Agent will learn these actions don't lead anywhere
+            # Masked action - PENALIZE to discourage illegal action spam
             obs = self._get_obs()
             info = self._get_info()
             info['illegal_action'] = True
-            return obs, 0.0, False, False, info
+            illegal_penalty = -2.0  # Strong penalty for trying illegal actions
+            return obs, illegal_penalty, False, False, info
 
         old_potential = self._calculate_potential(self.game_env.game.players[self.player_id])
 
@@ -460,16 +460,21 @@ class CatanEnv(gym.Env):
             city_readiness = ore_progress * wheat_progress  # 0 to 1
             potential += city_readiness * 5.0  # Up to +5 when ready to build (was 2)
 
-        # ========== ROAD SPAM PENALTY ==========
-        # Penalize having too many roads without settlements to show for it
-        num_roads = len(player.roads)
-        num_settlements = len(player.settlements)
-        # Expected: ~2-3 roads per settlement. Penalize excess
-        expected_roads = (num_settlements + num_cities) * 3
-        excess_roads = max(0, num_roads - expected_roads)
-        if excess_roads > 5:
-            road_penalty = 0.2 * (excess_roads - 5)
-            potential -= road_penalty
+        # ========== ROAD VALUE (CAPPED AT 15) ==========
+        # Roads are valuable for expansion and longest road!
+        # Max 15 roads per player in Catan - cap bonuses there
+        num_roads = min(len(player.roads), 15)  # Cap at 15 (Catan max)
+        # Bonus for each road - roads enable expansion
+        potential += num_roads * 0.3
+        # Extra bonus for longest road progress
+        if num_roads >= 5:
+            potential += 1.0
+        if num_roads >= 8:
+            potential += 1.0  # Getting close to longest road
+        if num_roads >= 10:
+            potential += 1.5  # Strong longest road contender
+        if num_roads >= 13:
+            potential += 2.0  # Near max roads - dominating the board
 
         # ========== STRATEGIC ASSET POTENTIAL ==========
         if player.has_longest_road: potential += 2.0
@@ -591,6 +596,9 @@ class CatanEnv(gym.Env):
                     inaction_penalty = -1.0  # Small penalty for other builds
                 reward += inaction_penalty
                 reward_breakdown['inaction_penalty'] = inaction_penalty
+
+        # Roads are valuable - no penalty for building them
+        # Agent will learn to prioritize through VP rewards
 
         # ========== STRATEGIC TRADE BONUS ==========
         if step_info.get('trade_led_to_build_opportunity'):
