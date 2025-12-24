@@ -460,15 +460,23 @@ class CatanEnv(gym.Env):
             city_readiness = ore_progress * wheat_progress  # 0 to 1
             potential += city_readiness * 5.0  # Up to +5 when ready to build (was 2)
 
-        # ========== ROAD SPAM PENALTY ==========
-        # Penalize having too many roads without settlements to show for it
+        # ========== ROAD SPAM PENALTY (MUCH STRONGER) ==========
+        # Agent was building 100-400 roads per game! This is insane.
+        # Roads are only valuable if they lead to settlements.
         num_roads = len(player.roads)
         num_settlements = len(player.settlements)
-        # Expected: ~2-3 roads per settlement. Penalize excess
-        expected_roads = (num_settlements + num_cities) * 3
+        # Tighter ratio: only 2 roads per building is reasonable
+        expected_roads = (num_settlements + num_cities) * 2
         excess_roads = max(0, num_roads - expected_roads)
-        if excess_roads > 5:
-            road_penalty = 0.2 * (excess_roads - 5)
+        # Immediate penalty for ANY excess roads
+        if excess_roads > 0:
+            road_penalty = 1.0 * excess_roads  # 5x stronger than before
+            # Extra penalty after 5 excess roads
+            if excess_roads > 5:
+                road_penalty += 0.5 * (excess_roads - 5)
+            # Severe penalty after 10 excess roads
+            if excess_roads > 10:
+                road_penalty += 1.0 * (excess_roads - 10)
             potential -= road_penalty
 
         # ========== STRATEGIC ASSET POTENTIAL ==========
@@ -591,6 +599,21 @@ class CatanEnv(gym.Env):
                     inaction_penalty = -1.0  # Small penalty for other builds
                 reward += inaction_penalty
                 reward_breakdown['inaction_penalty'] = inaction_penalty
+
+        # ========== ROAD OVER BUILDING PENALTY ==========
+        # Penalize choosing roads when settlements/cities were available
+        if action_name in ['build_road', 'place_road']:
+            legal_actions = old_obs.get('legal_actions', [])
+            # Strong penalty for road when city was available
+            if 'build_city' in legal_actions:
+                road_over_city = -8.0  # Should have built city instead!
+                reward += road_over_city
+                reward_breakdown['road_over_city'] = road_over_city
+            # Moderate penalty for road when settlement was available
+            elif 'build_settlement' in legal_actions:
+                road_over_settlement = -4.0  # Should have built settlement!
+                reward += road_over_settlement
+                reward_breakdown['road_over_settlement'] = road_over_settlement
 
         # ========== STRATEGIC TRADE BONUS ==========
         if step_info.get('trade_led_to_build_opportunity'):
