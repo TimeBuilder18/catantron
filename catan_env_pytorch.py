@@ -460,19 +460,21 @@ class CatanEnv(gym.Env):
             city_readiness = ore_progress * wheat_progress  # 0 to 1
             potential += city_readiness * 5.0  # Up to +5 when ready to build (was 2)
 
-        # ========== ROAD VALUE (NO PENALTY) ==========
+        # ========== ROAD VALUE (CAPPED AT 15) ==========
         # Roads are valuable for expansion and longest road!
-        # Max 15 roads per player in Catan - encourage building them
-        num_roads = len(player.roads)
+        # Max 15 roads per player in Catan - cap bonuses there
+        num_roads = min(len(player.roads), 15)  # Cap at 15 (Catan max)
         # Bonus for each road - roads enable expansion
         potential += num_roads * 0.3
-        # Extra bonus for longest road progress (5+ roads)
+        # Extra bonus for longest road progress
         if num_roads >= 5:
             potential += 1.0
         if num_roads >= 8:
             potential += 1.0  # Getting close to longest road
         if num_roads >= 10:
             potential += 1.5  # Strong longest road contender
+        if num_roads >= 13:
+            potential += 2.0  # Near max roads - dominating the board
 
         # ========== STRATEGIC ASSET POTENTIAL ==========
         if player.has_longest_road: potential += 2.0
