@@ -1,243 +1,191 @@
-# Catan Game - Three Versions
+# Catantron - Catan AI Training Environment
 
-This project provides **three different ways** to play/train Catan:
-
-## 🎮 Three Versions
-
-| File | Purpose | Use Case |
-|------|---------|----------|
-| **`main.py`** | Full pygame game with complete UI | Human play, full features with trading |
-| **`visual_ai_game.py`** | Visual AI training environment | Watch AI train, simplified (no trading) |
-| **`ai_interface.py`** | Headless AI training | Fast AI training, no visualization |
-
-### Supporting Files
-- `game_system.py` - Core game logic (players, buildings, resources, ports)
-- `tile.py` - Hexagonal tile system
-- `test_environment.py` - Test that environment works
+A reinforcement learning environment for training AI agents to play Catan using PyTorch and PPO.
 
 ---
 
 ## Quick Start
 
-### 🎮 Option 1: Play the Full Game (Human Players)
+### Play the Game (Human)
 ```bash
 python3 huPlay.py
 ```
-- Full pygame UI with all features
-- Supports trading, development cards, etc.
-- Mouse + keyboard controls
-- 4 players on one screen
 
-### 🤖 Option 2: Visual AI Training (Watch AI Learn)
+### Train AI (GPU - Recommended)
 ```bash
-python3 visual_ai_game.py
-```
-- See AI agents play in real-time
-- Simplified game (no trading)
-- Better for AI training
-- Manual controls for testing
-
-### ⚡ Option 3: Headless AI Training (Maximum Speed)
-```bash
-# Test the environment
-python3 test_environment.py
-
-# Use in your code
-from ai_interface import AIGameEnvironment
-
-env = AIGameEnvironment()
-observations = env.reset()  # Returns list of 4 observations
-
-done = False
-while not done:
-    current_player = env.game.current_player_index
-    obs = observations[current_player]
-
-    # Your AI decides
-    action = your_ai.choose_action(obs)
-    params = your_ai.choose_params(obs)
-
-    # Execute
-    obs, done, info = env.step(current_player, action, params)
-    observations[current_player] = obs
-
-    # Calculate reward
-    reward = your_reward_function(obs, info)
-    your_ai.learn(obs, action, reward)
+python3 train_gpu.py --episodes 5000 --model-name my_model --curriculum
 ```
 
 ---
 
+## Project Structure
+
+### Core Files
+| File | Purpose |
+|------|---------|
+| `huPlay.py` | Full pygame GUI game for human play |
+| `visual_ai_game.py` | Visual AI training with pygame |
+| `train_gpu.py` | Main GPU training script |
+| `game_system.py` | Core Catan game logic |
+| `tile.py` | Hexagonal tile system |
+| `ai_interface.py` | Headless AI training environment |
+| `network_gpu.py` | Neural network with GPU support |
+| `agent_gpu.py` | RL agent implementation |
+| `trainer_gpu.py` | PPO trainer |
+| `rule_based_ai.py` | Rule-based AI opponents |
+| `catan_env_pytorch.py` | PyTorch environment wrapper |
+
+### Deprecated Files
+See `useless_files/` folder for old/unused scripts and documentation.
+
 ---
 
-## Key Game Rules Implemented
+## Game Features
 
-### Robber & Discard Rule (7 Rolled)
-When a **7** is rolled:
-1. **All players with 8+ cards must discard half** (rounded down)
-   - Example: 8 cards → discard 4, 9 cards → discard 4, 10 cards → discard 5
-2. Players **choose which cards** to discard
-3. After all discards complete, **robber is moved**
-4. Current player steals from adjacent players
+### Core Mechanics
+- 4 players, 10 VP to win
+- Initial placement (2 settlements + 2 roads each)
+- Dice rolling, resource distribution
+- Building: settlements, cities, roads
+- Development cards (Knights, VP, Road Building, Year of Plenty, Monopoly)
+- Robber mechanics (7 rolled = discard if 8+ cards)
+- Trading (4:1 bank, 3:1/2:1 ports)
+- Longest Road & Largest Army bonuses
+
+### Building Costs
+| Building | Cost |
+|----------|------|
+| Settlement | 1 wood, 1 brick, 1 wheat, 1 sheep |
+| City | 2 wheat, 3 ore |
+| Road | 1 wood, 1 brick |
+| Dev Card | 1 wheat, 1 sheep, 1 ore |
 
 ---
 
-## Observation Format
+## Training Guide
 
-Each observation contains:
+### Basic Commands
+```bash
+# Quick test (10 episodes)
+python3 train_gpu.py --episodes 10 --model-name test
 
+# Standard training (~40 min on RTX 2080)
+python3 train_gpu.py --episodes 5000 --model-name catan_v1 --curriculum
+
+# Extended training (~3-4 hours)
+python3 train_gpu.py --episodes 25000 --model-name extended --curriculum --batch-size 1024
+```
+
+### Training Parameters
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--episodes` | 1000 | Number of training episodes |
+| `--curriculum` | False | Enable curriculum learning |
+| `--batch-size` | 256 | Batch size for updates |
+| `--epochs` | 10 | PPO epochs per update |
+| `--update-freq` | 20 | Episodes between updates |
+| `--save-freq` | 500 | Episodes between saves |
+
+### Curriculum Learning
+Stages: VP targets [4, 5, 6, 7, 8, 10]
+- Agent advances when achieving 90% of current target
+
+---
+
+## AI Interface
+
+### Observation Format
 ```python
 obs = {
-    # Turn info
     'is_my_turn': bool,
-    'current_player': int,
     'game_phase': str,  # 'INITIAL_PLACEMENT_1', 'INITIAL_PLACEMENT_2', 'NORMAL_PLAY'
-    'turn_phase': str,  # 'ROLL_DICE', 'TRADE_BUILD', etc.
-
-    # My private info
     'my_resources': {'wood': 0, 'brick': 0, 'wheat': 0, 'sheep': 0, 'ore': 0},
-    'my_dev_cards': {...},
     'my_settlements': int,
     'my_cities': int,
     'my_roads': int,
     'my_victory_points': int,
-
-    # Opponents (public info only)
-    'opponents': [
-        {'resource_count': int, 'settlements': int, ...},
-        {...},
-        {...}
-    ],
-
-    # Board state
-    'tiles': [(q, r, resource, number), ...],
-    'ports': [...],
-
-    # What you can do
     'legal_actions': ['roll_dice', 'place_settlement', ...]
 }
 ```
 
----
-
-## Available Actions
-
+### Actions
 | Action | When | Params |
 |--------|------|--------|
-| `'roll_dice'` | Start of turn | None |
-| `'place_settlement'` | Initial placement / After rolling | `{'vertex': Vertex}` |
-| `'place_road'` | After settlement | `{'edge': Edge}` |
-| `'build_settlement'` | Your turn, after dice | `{'vertex': Vertex}` |
-| `'build_city'` | Your turn, after dice | `{'vertex': Vertex}` |
-| `'build_road'` | Your turn, after dice | `{'edge': Edge}` |
-| `'buy_dev_card'` | Your turn, after dice | None |
-| `'end_turn'` | After rolling | None |
+| `roll_dice` | Start of turn | None |
+| `place_settlement` | Initial/After rolling | `{'vertex': Vertex}` |
+| `place_road` | After settlement | `{'edge': Edge}` |
+| `build_settlement` | Your turn | `{'vertex': Vertex}` |
+| `build_city` | Your turn | `{'vertex': Vertex}` |
+| `build_road` | Your turn | `{'edge': Edge}` |
+| `buy_dev_card` | Your turn | None |
+| `end_turn` | After rolling | None |
 
 ---
 
-## Game Rules (Standard Catan)
+## Reward System (Outcome-Based)
 
-- **4 players** compete to reach **10 victory points**
-- **Initial placement:** Each player places 2 settlements + 2 roads (forward then reverse order)
-- **Turn structure:** Roll dice → Collect resources → Build/Trade → End turn
-- **Building costs:**
-  - Settlement: 1 wood, 1 brick, 1 wheat, 1 sheep
-  - City: 2 wheat, 3 ore
-  - Road: 1 wood, 1 brick
-  - Dev Card: 1 wheat, 1 sheep, 1 ore
-- **Trading:** 4:1 with bank, 3:1 with generic port, 2:1 with specialized port
-- **Victory points:** Settlements (1), Cities (2), Longest Road (2), Largest Army (2), VP cards (1 each)
+| Component | Value | Purpose |
+|-----------|-------|---------|
+| VP changes | +3.0 per VP | Main learning signal |
+| PBRS | 10x multiplier | Strategic quality guidance |
+| Win bonus | +20.0 | Terminal reward |
+| Inaction penalty | -3.0 | Prevents passing when can build |
 
 ---
 
-## Example: Random Agent
+## Performance
 
-```python
-import random
-from ai_interface import AIGameEnvironment
+### GPU Training Speed (RTX 2080 Super)
+| Episodes | Time |
+|----------|------|
+| 1,000 | ~8 min |
+| 5,000 | ~40 min |
+| 25,000 | ~3-4 hours |
 
-env = AIGameEnvironment()
-observations = env.reset()
-
-done = False
-while not done:
-    current_player = env.game.current_player_index
-    obs = observations[current_player]
-
-    # Choose random legal action
-    action = random.choice(obs['legal_actions'])
-
-    # Get random valid parameters
-    if action == 'place_settlement':
-        # Find empty vertex (simplified - you'd want smarter logic)
-        vertices = env.game.game_board.vertices
-        empty = [v for v in vertices if v.structure is None]
-        params = {'vertex': random.choice(empty)} if empty else None
-    elif action == 'place_road':
-        # Find empty edge connected to your infrastructure
-        edges = env.game.game_board.edges
-        empty = [e for e in edges if e.structure is None]
-        params = {'edge': random.choice(empty)} if empty else None
-    else:
-        params = None
-
-    # Execute
-    obs, done, info = env.step(current_player, action, params)
-    observations[current_player] = obs
-
-    if done:
-        #print(f"Game over! Winner: Player {info['winner'] + 1}")
-```
+### Expected Learning
+| Episodes | Expected VP |
+|----------|-------------|
+| 0-5k | 2.3-2.6 |
+| 5k-15k | 2.6-2.8 |
+| 15k-25k | 2.7-3.0 |
 
 ---
 
-## Training Tips
+## Setup
 
-1. **Start simple:** Get a random agent working first
-2. **Action masking:** Use `obs['legal_actions']` to filter invalid actions
-3. **Partial observability:** Each agent only sees their own hand
-4. **Reward shaping:** Design rewards that guide learning (VPs, building, resource collection, etc.)
-5. **Curriculum learning:** Train on simpler tasks first (e.g., just initial placement)
-
----
-
-## Architecture for Multi-Agent RL
-
-```
-┌─────────────────────────────────┐
-│   AIGameEnvironment (this repo) │
-└─────────────────────────────────┘
-         ↓         ↓         ↓         ↓
-     [Agent 1] [Agent 2] [Agent 3] [Agent 4]
-       (You)     (You)     (You)     (You)
-```
-
-**You implement:**
-- Neural network architecture
-- Action selection policy
-- Reward function
-- Training algorithm (PPO, DQN, A3C, etc.)
-
-**We provide:**
-- Game rules and state management
-- Legal action masking
-- Observation formatting
-- Turn management
-
----
-
-## Requirements
-
+### Requirements
 ```bash
-pip install pygame  # Only needed by game_system.py (legacy import)
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+pip install gymnasium numpy matplotlib pygame
 ```
 
-Note: We don't actually use pygame for AI training, but `game_system.py` has a legacy import. You can remove it if you want to make the environment pygame-free.
+### Verify GPU
+```bash
+python3 -c "import torch; print(f'GPU: {torch.cuda.is_available()}')"
+```
 
 ---
 
-## Questions?
+## Architecture
 
-Read the docstrings in `ai_interface.py` for detailed API documentation.
+```
+train_gpu.py
+  ├── catan_env_pytorch.py (environment)
+  ├── agent_gpu.py (RL agent)
+  ├── trainer_gpu.py (PPO training)
+  └── rule_based_ai.py (opponents)
 
-**Good luck training your agents!** 🤖
+game_system.py
+  ├── tile.py (board/hexes)
+  └── ai_interface.py (headless env)
+```
+
+---
+
+## Tips
+
+1. **Start simple**: Test with 10-50 episodes first
+2. **Use curriculum**: Helps prevent getting stuck
+3. **Monitor checkpoints**: Best model may not be final model
+4. **Watch for exploitation**: Roads/game should be 20-35, not 100+
+5. **GPU recommended**: 20-30x faster than CPU
