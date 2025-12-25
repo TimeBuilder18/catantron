@@ -34,7 +34,7 @@ class PortType(Enum):
 class GameConstants:
     """Game constants for Catan"""
     # Victory conditions
-    VICTORY_POINTS_TO_WIN = 5 # 10
+    VICTORY_POINTS_TO_WIN = 10 # 10
     LARGEST_ARMY_MIN_KNIGHTS = 3
     LONGEST_ROAD_MIN_LENGTH = 5
 
