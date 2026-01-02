@@ -40,6 +40,8 @@ def get_device():
 
 def play_random_turn(env, player_id):
     """Weak opponent - makes random legal moves"""
+    from game_system import ResourceType
+    
     game = env.game_env.game
     player = game.players[player_id]
     
@@ -71,20 +73,31 @@ def play_random_turn(env, player_id):
     
     if game.can_trade_or_build():
         actions = []
+        res = player.resources
         
-        if player.can_afford_settlement():
+        # Check if can afford settlement (1 wood, 1 brick, 1 wheat, 1 sheep)
+        can_settlement = (res[ResourceType.WOOD] >= 1 and res[ResourceType.BRICK] >= 1 and 
+                         res[ResourceType.WHEAT] >= 1 and res[ResourceType.SHEEP] >= 1)
+        if can_settlement:
             v = game.get_buildable_vertices_for_settlements()
             if v: actions.append(('sett', v))
         
-        if player.can_afford_city():
+        # Check if can afford city (2 wheat, 3 ore)
+        can_city = (res[ResourceType.WHEAT] >= 2 and res[ResourceType.ORE] >= 3)
+        if can_city:
             v = game.get_buildable_vertices_for_cities()
             if v: actions.append(('city', v))
         
-        if player.can_afford_road():
+        # Check if can afford road (1 wood, 1 brick)
+        can_road = (res[ResourceType.WOOD] >= 1 and res[ResourceType.BRICK] >= 1)
+        if can_road:
             e = game.get_buildable_edges()
             if e: actions.append(('road', e))
         
-        if player.can_afford_development_card() and not game.dev_deck.is_empty():
+        # Check if can afford dev card (1 wheat, 1 sheep, 1 ore)
+        can_dev = (res[ResourceType.WHEAT] >= 1 and res[ResourceType.SHEEP] >= 1 and 
+                  res[ResourceType.ORE] >= 1)
+        if can_dev and not game.dev_deck.is_empty():
             actions.append(('dev', None))
         
         if actions and random.random() < 0.6:
@@ -192,7 +205,16 @@ class CurriculumMCTSTrainer:
                     state.env.game_env.game.end_turn()
         
         winner = state.get_winner()
-        value = 1.0 if winner == 0 else (-1.0 if winner is not None else 0.0)
+        my_vp = state.get_victory_points(0)
+        
+        # VALUE BASED ON VP, NOT JUST WIN/LOSE
+        # This gives gradient signal even when losing!
+        # 10 VP (win) = 1.0, 5 VP = 0.5, 2 VP = 0.2
+        value = my_vp / 10.0
+        
+        # Bonus for actually winning
+        if winner == 0:
+            value = 1.0
         
         training_examples = [
             {'observation': ex['observation'], 'action_probs': ex['action_probs'], 'value': value}
@@ -201,7 +223,6 @@ class CurriculumMCTSTrainer:
         self.replay_buffer.add_batch(training_examples)
         self.games_played += 1
         
-        my_vp = state.get_victory_points(0)
         return winner, my_vp
     
     def _dict_to_array(self, probs_dict):
