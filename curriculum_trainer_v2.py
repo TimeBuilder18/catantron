@@ -216,12 +216,13 @@ class CurriculumTrainerV2:
         for r in reversed(episode_rewards):
             G = r + gamma * G
             returns.insert(0, G)
-        
-        # Don't normalize - just scale to reasonable range
+
+        # Standardize returns (preserve magnitude differences between games)
         returns = np.array(returns)
-        # Scale returns to [-1, 1] range roughly
-        max_abs = max(abs(returns.max()), abs(returns.min()), 1.0)
-        returns = returns / max_abs
+        if len(returns) > 1:
+            # Standardize to mean=0, std=1 (doesn't destroy magnitude info)
+            returns = (returns - returns.mean()) / (returns.std() + 1e-8)
+        # Don't normalize to [-1,1] - that destroys signal!
         
         # Add to buffer
         for obs_t, probs_t, ret_t in zip(episode_obs, episode_probs, returns):
@@ -288,16 +289,26 @@ class CurriculumTrainerV2:
             with torch.amp.autocast('cuda'):
                 action_probs, _, _, _, _, value = self.network.forward(obs)
                 value = value.squeeze()
-                
-                # Policy loss: encourage actions that led to high returns
+
+                # Policy gradient loss with baseline
+                # Compute log probability of actions that were taken
                 log_probs = torch.log(action_probs + 1e-8)
-                policy_loss = -(log_probs * target_probs).sum(dim=1)
-                policy_loss = (policy_loss * returns).mean()
-                
+                action_log_probs = (log_probs * target_probs).sum(dim=1)
+
+                # Advantage = return - baseline (value prediction)
+                advantages = returns - value.detach()
+
+                # Policy loss: maximize log_prob * advantage
+                policy_loss = -(action_log_probs * advantages).mean()
+
+                # Entropy bonus for exploration
+                entropy = -(action_probs * log_probs).sum(dim=1).mean()
+
                 # Value loss
                 value_loss = F.mse_loss(value, returns)
-                
-                loss = policy_loss + 0.5 * value_loss
+
+                # Combined loss (entropy bonus encourages exploration)
+                loss = policy_loss + 0.5 * value_loss - 0.01 * entropy
             
             self.optimizer.zero_grad()
             self.scaler.scale(loss).backward()
@@ -308,20 +319,32 @@ class CurriculumTrainerV2:
         else:
             action_probs, _, _, _, _, value = self.network.forward(obs)
             value = value.squeeze()
-            
+
+            # Policy gradient loss with baseline
             log_probs = torch.log(action_probs + 1e-8)
-            policy_loss = -(log_probs * target_probs).sum(dim=1)
-            policy_loss = (policy_loss * returns).mean()
-            
+            action_log_probs = (log_probs * target_probs).sum(dim=1)
+
+            # Advantage = return - baseline
+            advantages = returns - value.detach()
+
+            # Policy loss: maximize log_prob * advantage
+            policy_loss = -(action_log_probs * advantages).mean()
+
+            # Entropy bonus for exploration
+            entropy = -(action_probs * log_probs).sum(dim=1).mean()
+
+            # Value loss
             value_loss = F.mse_loss(value, returns)
-            loss = policy_loss + 0.5 * value_loss
+
+            # Combined loss
+            loss = policy_loss + 0.5 * value_loss - 0.01 * entropy
             
             self.optimizer.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.network.parameters(), 1.0)
             self.optimizer.step()
         
-        return {'policy': policy_loss.item(), 'value': value_loss.item()}
+        return {'policy': policy_loss.item(), 'value': value_loss.item(), 'entropy': entropy.item()}
     
     def train(self, games_per_phase=300, parallel_games=8, save_path='models/curriculum_v2'):
         """Curriculum training with phases"""
@@ -395,7 +418,8 @@ class CurriculumTrainerV2:
                         if losses:
                             avg_p = np.mean([l['policy'] for l in losses])
                             avg_v = np.mean([l['value'] for l in losses])
-                            print(f"    └─ Train: policy={avg_p:.4f}, value={avg_v:.4f}")
+                            avg_e = np.mean([l['entropy'] for l in losses])
+                            print(f"    └─ Train: policy={avg_p:.4f}, value={avg_v:.4f}, entropy={avg_e:.4f}")
             
             # Phase summary
             phase_wr = phase_wins / games_per_phase * 100

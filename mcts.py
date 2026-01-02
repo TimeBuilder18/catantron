@@ -99,6 +99,9 @@ class MCTS:
             best_action: (action, vertex, edge) tuple
             action_probs: dict mapping actions to visit probabilities
         """
+        # Track which player we're optimizing for
+        root_player = root_state.get_current_player()
+
         # Create root node
         root = MCTSNode(root_state.copy())
 
@@ -121,10 +124,10 @@ class MCTS:
                 value = self._evaluate(node)
             else:
                 # Terminal node - get actual result
-                value = node.state.get_result(root_state.get_current_player())
+                value = node.state.get_result(root_player)
 
-            # 3. BACKPROPAGATE
-            self._backpropagate(search_path, value)
+            # 3. BACKPROPAGATE (always from root player's perspective)
+            self._backpropagate(search_path, value, root_player)
 
         # Return best action (most visited)
         best_action = self._get_best_action(root)
@@ -212,13 +215,23 @@ class MCTS:
 
         return priors
 
-    def _backpropagate(self, search_path, value):
-        """Update all nodes in search path with value"""
+    def _backpropagate(self, search_path, value, root_player):
+        """
+        Update all nodes in search path with value
+
+        For multi-player games, we always evaluate from root_player's perspective.
+        Value is positive if good for root_player, negative if bad.
+        """
         for node in reversed(search_path):
             node.visits += 1
-            node.value_sum += value
-            # Flip value for opponent's perspective
-            value = -value
+            # In multi-player, only the root player gets positive value
+            # All other players are opponents
+            current_player = node.state.get_current_player()
+            if current_player == root_player:
+                node.value_sum += value
+            else:
+                # Opponent's node - invert value
+                node.value_sum -= value
 
     def _get_best_action(self, root):
         """Get action with most visits"""

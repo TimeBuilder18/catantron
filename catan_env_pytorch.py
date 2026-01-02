@@ -566,21 +566,19 @@ class CatanEnv(gym.Env):
             reward += settlement_bonus
             reward_breakdown['settlement_bonus'] = settlement_bonus
 
-        # ========== BANK TRADE PENALTY (MUCH STRONGER) ==========
-        # Agent was doing 70-170 trades per game! This MUST be heavily penalized.
-        # 4:1 trades waste 3 resources - that's almost a full settlement worth!
+        # ========== BANK TRADE PENALTY (BALANCED) ==========
+        # Discourage excessive trading but allow strategic trades
+        # Some trades are necessary, especially early game
         if step_info.get('bank_trade') and step_info.get('success'):
             trades_so_far = self._bank_trades_this_game
-            # STRONG base penalty: 3.0 per trade (comparable to build rewards)
-            trade_penalty = 3.0
-            # Escalating penalty: each additional trade costs more
-            trade_penalty += 0.5 * trades_so_far
-            # SEVERE penalty after just 5 trades per game
-            if trades_so_far > 5:
-                trade_penalty += 1.0 * (trades_so_far - 5)
-            # Exponential penalty after 15 trades - this should NEVER happen
+            # Small base penalty - trading is inefficient but sometimes needed
+            trade_penalty = 0.5
+            # Only escalate after many trades (>8 is excessive)
+            if trades_so_far > 8:
+                trade_penalty += 0.5 * (trades_so_far - 8)
+            # Strong penalty after 15 trades - clearly inefficient play
             if trades_so_far > 15:
-                trade_penalty += 2.0 * (trades_so_far - 15)
+                trade_penalty += 1.0 * (trades_so_far - 15)
 
             reward -= trade_penalty
             reward_breakdown['bank_trade_penalty'] = -trade_penalty
@@ -647,6 +645,11 @@ class CatanEnv(gym.Env):
 
         if debug:
             self._last_reward_breakdown = reward_breakdown
+
+        # Clip reward to prevent extreme values that destabilize training
+        # Range allows for strong signals while preventing explosions
+        reward = np.clip(reward, -20.0, 20.0)
+
         return reward
 
     def render(self):
