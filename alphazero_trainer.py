@@ -170,19 +170,27 @@ class AlphaZeroTrainer:
                     if state.env.game_env.game.can_end_turn():
                         state.env.game_env.game.end_turn()
 
-        # Determine outcome
+        # Determine outcome from player 0's perspective
         winner = state.get_winner()
-        value = 1.0 if winner == 0 else (-1.0 if winner is not None else 0.0)
+        final_value = 1.0 if winner == 0 else (-1.0 if winner is not None else 0.0)
 
-        # Create training examples with values
-        training_examples = [
-            {
+        # Create training examples with discounted values
+        # Later positions get values closer to final outcome
+        gamma = 0.99
+        training_examples = []
+        num_examples = len(examples)
+
+        for i, ex in enumerate(examples):
+            # Discount factor: positions earlier in game are less certain
+            # Position near end: discount ~= 1.0, Position at start: discount ~= gamma^n
+            steps_to_end = num_examples - i - 1
+            discounted_value = final_value * (gamma ** steps_to_end)
+
+            training_examples.append({
                 'observation': ex['observation'],
                 'action_probs': ex['action_probs'],
-                'value': value
-            }
-            for ex in examples
-        ]
+                'value': discounted_value
+            })
 
         self.replay_buffer.add_batch(training_examples)
         self.games_played += 1
