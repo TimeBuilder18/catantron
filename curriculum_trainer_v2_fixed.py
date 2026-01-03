@@ -225,14 +225,15 @@ class CurriculumTrainerV2:
             G = r + gamma * G
             returns.insert(0, G)
 
-        # FIX: DO NOT NORMALIZE! Preserve the actual magnitude of returns
-        # This is critical - we need the network to learn that winning (high returns)
-        # is better than losing (low/negative returns)
+        # FIX: Scale returns to reasonable range for training
+        # The issue: returns can be -1500 to +200, causing huge losses
+        # Solution: Divide by a constant to bring into [-10, 10] range
+        # This preserves relative magnitudes while keeping gradients stable
         returns = np.array(returns)
+        returns = returns / 100.0  # Scale down by 100x
 
-        # Optional: Clip extreme outliers to prevent single-game domination
-        # But preserve sign and relative magnitude
-        returns = np.clip(returns, -1000, 1000)
+        # Clip extreme outliers just in case
+        returns = np.clip(returns, -50, 50)
 
         # Add to buffer
         for obs_t, probs_t, ret_t in zip(episode_obs, episode_probs, returns):
