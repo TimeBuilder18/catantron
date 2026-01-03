@@ -131,7 +131,14 @@ python alphazero_trainer_curriculum.py \
 
 ### Training Time
 
+On A100 (40GB):
+- Batch size: 8192 (optimized for high GPU utilization)
+- Training steps: 50 per batch
+- ~300-500 games/hour with 100 MCTS simulations
+- 2000 games ≈ 4-7 hours
+
 On RTX 2080 Super:
+- Batch size: 3072-4096
 - ~100-150 games/hour with 100 MCTS simulations
 - 2000 games ≈ 13-20 hours
 
