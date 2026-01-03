@@ -63,7 +63,7 @@ def play_random_turn(game, player_id):
             if valid:
                 game.try_place_initial_settlement(random.choice(valid), player)
                 return True
-        return False
+        return True  # Always return True to prevent infinite loops
 
     # Normal play
     if game.can_roll_dice():
@@ -111,7 +111,7 @@ def play_random_turn(game, player_id):
     if game.can_end_turn():
         game.end_turn()
         return True
-    return False
+    return True  # Always return True to prevent infinite loops
 
 
 def play_opponent_turn(game, player_id, random_prob):

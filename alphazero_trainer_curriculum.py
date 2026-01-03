@@ -90,7 +90,7 @@ class OpponentPlayer:
             if valid:
                 game.try_place_initial_settlement(random.choice(valid), player)
                 return True
-        return False
+        return True  # Always return True to prevent infinite loops
 
     def _play_random(self, game, player):
         """Fully random play"""
