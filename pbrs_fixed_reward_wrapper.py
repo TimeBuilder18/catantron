@@ -21,6 +21,7 @@ class PBRSFixedRewardWrapper:
         self.env = CatanEnv(player_id=player_id)
         self.player_id = player_id
         self.last_potential = 0.0
+        self.last_vp = 0
         self.gamma = 0.99
 
     def reset(self):
@@ -28,6 +29,7 @@ class PBRSFixedRewardWrapper:
         # Calculate initial potential
         player = self.env.game_env.game.players[self.player_id]
         self.last_potential = self._calculate_scaled_potential(player)
+        self.last_vp = obs.get('my_victory_points', 0)
         return obs, info
 
     def _calculate_scaled_potential(self, player):
@@ -63,7 +65,8 @@ class PBRSFixedRewardWrapper:
         base_reward = 0.0
 
         # VP changes (main signal)
-        vp_diff = obs.get('my_victory_points', 0) - obs.get('prev_vp', 0)
+        current_vp = obs.get('my_victory_points', 0)
+        vp_diff = current_vp - self.last_vp
         if vp_diff > 0:
             base_reward += vp_diff * 10.0  # +10 per VP
 
@@ -78,8 +81,8 @@ class PBRSFixedRewardWrapper:
         # Total reward = base + PBRS shaping
         total_reward = base_reward + pbrs_reward
 
-        # Track prev VP for next step
-        obs['prev_vp'] = obs.get('my_victory_points', 0)
+        # Track current VP for next step
+        self.last_vp = current_vp
 
         return obs, total_reward, terminated, truncated, info
 

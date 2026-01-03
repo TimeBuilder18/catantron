@@ -239,14 +239,11 @@ class CurriculumTrainerV2:
             returns.insert(0, G)
 
         # FIX: Scale returns to reasonable range for training
-        # The issue: returns can be -1500 to +200, causing huge losses
-        # Solution: Divide by a constant to bring into [-10, 10] range
-        # This preserves relative magnitudes while keeping gradients stable
+        # With simplified/PBRS rewards, returns are -20 to +150 (already good!)
+        # OLD: divided by 100, making them -0.2 to +1.5 (TOO SMALL for gradients)
+        # NEW: Just clip extreme outliers, no scaling needed
         returns = np.array(returns)
-        returns = returns / 100.0  # Scale down by 100x
-
-        # Clip extreme outliers just in case
-        returns = np.clip(returns, -50, 50)
+        returns = np.clip(returns, -200, 200)
 
         # Add to buffer
         for obs_t, probs_t, ret_t in zip(episode_obs, episode_probs, returns):
