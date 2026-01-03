@@ -228,7 +228,7 @@ class AlphaZeroCurriculumTrainer:
         # Mixed precision for CUDA
         self.use_amp = (self.device.type == 'cuda')
         if self.use_amp:
-            self.scaler = torch.cuda.amp.GradScaler()
+            self.scaler = torch.amp.GradScaler('cuda')
             print("Using mixed precision training (FP16)")
 
         # Stats
