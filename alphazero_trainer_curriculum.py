@@ -201,7 +201,7 @@ class AlphaZeroCurriculumTrainer:
         # Auto-set batch size based on device
         if batch_size is None:
             if self.device.type == 'cuda':
-                batch_size = 3072
+                batch_size = 8192  # Increased from 3072 - A100 can handle it!
             elif self.device.type == 'mps':
                 batch_size = 256
             else:
@@ -429,8 +429,8 @@ class AlphaZeroCurriculumTrainer:
 
     def train(self,
               num_games=2000,
-              games_per_training=10,
-              training_steps_per_batch=20,
+              games_per_training=5,  # Train more frequently
+              training_steps_per_batch=50,  # More training steps per batch
               save_frequency=100,
               save_path='models/alphazero_curriculum'):
         """Main training loop with curriculum"""
@@ -584,8 +584,8 @@ if __name__ == "__main__":
 
     trainer.train(
         num_games=args.num_games,
-        games_per_training=10,
-        training_steps_per_batch=20,
+        games_per_training=5,  # Train more frequently with GPU power
+        training_steps_per_batch=50,  # More steps per batch
         save_frequency=args.save_freq,
         save_path=args.save_path
     )
