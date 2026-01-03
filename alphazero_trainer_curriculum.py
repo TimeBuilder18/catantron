@@ -127,12 +127,20 @@ class OpponentPlayer:
                 elif action_type == 'road':
                     game.try_build_road(random.choice(locs), player)
                 return True
+            else:
+                # No actions or chose not to build - end turn
+                if game.can_end_turn():
+                    game.end_turn()
+                    return True
+                # If can't end turn yet, return True anyway to avoid infinite loop
+                return True
 
         if game.can_end_turn():
             game.end_turn()
             return True
 
-        return False
+        # Fallback: always return True to prevent infinite loops
+        return True
 
     def _play_rule_based(self, state, player_id):
         """Smart rule-based play"""
