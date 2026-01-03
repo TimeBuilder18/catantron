@@ -21,6 +21,7 @@ import random
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from catan_env_pytorch import CatanEnv
+from simplified_reward_wrapper import SimplifiedRewardWrapper
 from network_wrapper import NetworkWrapper
 from game_system import ResourceType
 
@@ -147,7 +148,7 @@ class ReplayBuffer:
 class CurriculumTrainerV2:
     """Uses full CatanEnv with your existing reward system - FIXED"""
 
-    def __init__(self, model_path=None, learning_rate=1e-3, batch_size=None, epsilon=0.1):
+    def __init__(self, model_path=None, learning_rate=1e-3, batch_size=None, epsilon=0.1, reward_mode='vp_only'):
         self.device = get_device()
 
         if batch_size is None:
@@ -168,14 +169,16 @@ class CurriculumTrainerV2:
         self.entropy_coef = 0.3  # FIX: Increased to 0.3 (was 0.15, still collapsed!)
         self.epsilon = epsilon  # Epsilon-greedy exploration
         self.min_entropy = 0.5  # Minimum entropy threshold
+        self.reward_mode = reward_mode  # Simplified reward mode
         print(f"Batch size: {self.batch_size}")
+        print(f"Reward mode: {self.reward_mode}")
         print(f"Entropy coefficient: {self.entropy_coef} (constant)")
         print(f"Epsilon-greedy: {self.epsilon}")
         print(f"Minimum entropy threshold: {self.min_entropy}")
 
     def play_game(self, opponent_random_prob=1.0):
-        """Play game using CatanEnv with full rewards"""
-        env = CatanEnv(player_id=0)
+        """Play game using SimplifiedRewardWrapper"""
+        env = SimplifiedRewardWrapper(player_id=0, reward_mode=self.reward_mode)
         obs, _ = env.reset()
 
         episode_rewards = []
@@ -403,7 +406,7 @@ class CurriculumTrainerV2:
         print(f"Games per phase: {games_per_phase}")
         print(f"Batch size: {self.batch_size}")
         print("FIXES:")
-        print("  1. Removed return normalization (preserves learning signal)")
+        print("  1. SIMPLIFIED REWARDS (vp_only mode - no complex PBRS!)")
         print("  2. Scaled returns by /100 (prevents gradient explosion)")
         print("  3. STRONG entropy coefficient 0.3 (2x increase!)")
         print("  4. Entropy FLOOR penalty (prevents collapse below 0.5)")
@@ -411,6 +414,11 @@ class CurriculumTrainerV2:
         print("  6. Reduced value loss weight 0.5 -> 0.1")
         print("  7. Fixed random opponent to play 90% of the time")
         print("  8. Increased training frequency (4x more steps)")
+        print("\nREWARD SYSTEM:")
+        print(f"  Mode: {self.reward_mode}")
+        print("  • VP gain: +10 per VP")
+        print("  • Win bonus: +50")
+        print("  • No PBRS decay (no -1000 drift!)")
         print("=" * 70 + "\n")
 
         total_wins = 0
