@@ -201,7 +201,7 @@ class AlphaZeroCurriculumTrainer:
         # Auto-set batch size based on device
         if batch_size is None:
             if self.device.type == 'cuda':
-                batch_size = 1024
+                batch_size = 3072
             elif self.device.type == 'mps':
                 batch_size = 256
             else:
