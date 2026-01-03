@@ -23,11 +23,6 @@ class PBRSFixedRewardWrapper:
         self.last_potential = 0.0
         self.gamma = 0.99
 
-        print("PBRS Fixed Reward Wrapper:")
-        print("  - Potential scaled to ±5 max")
-        print("  - Win: +100, Loss: -10")
-        print("  - PBRS is small guide, not main signal")
-
     def reset(self):
         obs, info = self.env.reset()
         # Calculate initial potential
