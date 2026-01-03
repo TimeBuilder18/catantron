@@ -123,7 +123,7 @@ class OpponentPlayer:
                 if action_type == 'sett':
                     game.try_build_settlement(random.choice(locs), player)
                 elif action_type == 'city':
-                    game.try_upgrade_to_city(random.choice(locs), player)
+                    player.try_build_city(random.choice(locs))
                 elif action_type == 'road':
                     game.try_build_road(random.choice(locs), player)
                 return True
