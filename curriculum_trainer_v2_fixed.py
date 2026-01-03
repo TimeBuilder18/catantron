@@ -165,11 +165,13 @@ class CurriculumTrainerV2:
             self.scaler = torch.amp.GradScaler('cuda')
 
         self.games_played = 0
-        self.entropy_coef = 0.15  # FIX: Constant 0.15 (no decay!)
+        self.entropy_coef = 0.3  # FIX: Increased to 0.3 (was 0.15, still collapsed!)
         self.epsilon = epsilon  # Epsilon-greedy exploration
+        self.min_entropy = 0.5  # Minimum entropy threshold
         print(f"Batch size: {self.batch_size}")
         print(f"Entropy coefficient: {self.entropy_coef} (constant)")
         print(f"Epsilon-greedy: {self.epsilon}")
+        print(f"Minimum entropy threshold: {self.min_entropy}")
 
     def play_game(self, opponent_random_prob=1.0):
         """Play game using CatanEnv with full rewards"""
@@ -328,10 +330,13 @@ class CurriculumTrainerV2:
                 # Value loss
                 value_loss = F.mse_loss(value, returns)
 
+                # Entropy floor penalty: punish if entropy too low
+                entropy_penalty = torch.clamp(self.min_entropy - entropy, min=0.0)
+
                 # FIX: Adjusted loss weights
-                # - Reduced value loss weight from 0.5 to 0.1 (more stable)
-                # - Constant entropy coef 0.15 (no decay!)
-                loss = policy_loss + 0.1 * value_loss - self.entropy_coef * entropy
+                # - Entropy coef: 0.3 (increased from 0.15)
+                # - Entropy floor penalty: prevents collapse below 0.5
+                loss = policy_loss + 0.1 * value_loss - self.entropy_coef * entropy + 2.0 * entropy_penalty
 
             self.optimizer.zero_grad()
             self.scaler.scale(loss).backward()
@@ -359,15 +364,25 @@ class CurriculumTrainerV2:
             # Value loss
             value_loss = F.mse_loss(value, returns)
 
-            # FIX: Adjusted loss weights (constant entropy coef 0.15)
-            loss = policy_loss + 0.1 * value_loss - self.entropy_coef * entropy
+            # Entropy floor penalty: punish if entropy too low
+            entropy_penalty = torch.clamp(self.min_entropy - entropy, min=0.0)
+
+            # FIX: Adjusted loss weights
+            # - Entropy coef: 0.3 (increased from 0.15)
+            # - Entropy floor penalty: prevents collapse below 0.5
+            loss = policy_loss + 0.1 * value_loss - self.entropy_coef * entropy + 2.0 * entropy_penalty
 
             self.optimizer.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.network.parameters(), 1.0)
             self.optimizer.step()
 
-        return {'policy': policy_loss.item(), 'value': value_loss.item(), 'entropy': entropy.item()}
+        return {
+            'policy': policy_loss.item(),
+            'value': value_loss.item(),
+            'entropy': entropy.item(),
+            'entropy_penalty': entropy_penalty.item()
+        }
 
     def train(self, games_per_phase=1000, parallel_games=8, save_path='models/curriculum_v2_fixed'):
         """Curriculum training with phases"""
@@ -390,11 +405,12 @@ class CurriculumTrainerV2:
         print("FIXES:")
         print("  1. Removed return normalization (preserves learning signal)")
         print("  2. Scaled returns by /100 (prevents gradient explosion)")
-        print("  3. CONSTANT entropy coefficient 0.15 (no decay!)")
-        print("  4. Epsilon-greedy exploration (10% random actions)")
-        print("  5. Reduced value loss weight 0.5 -> 0.1")
-        print("  6. Fixed random opponent to play 90% of the time")
-        print("  7. Increased training frequency (4x more steps)")
+        print("  3. STRONG entropy coefficient 0.3 (2x increase!)")
+        print("  4. Entropy FLOOR penalty (prevents collapse below 0.5)")
+        print("  5. Epsilon-greedy exploration (10% random actions)")
+        print("  6. Reduced value loss weight 0.5 -> 0.1")
+        print("  7. Fixed random opponent to play 90% of the time")
+        print("  8. Increased training frequency (4x more steps)")
         print("=" * 70 + "\n")
 
         total_wins = 0
@@ -444,6 +460,7 @@ class CurriculumTrainerV2:
                             avg_p = np.mean([l['policy'] for l in losses])
                             avg_v = np.mean([l['value'] for l in losses])
                             avg_e = np.mean([l['entropy'] for l in losses])
+                            avg_ep = np.mean([l['entropy_penalty'] for l in losses])
 
                             # Only print every 10 games to reduce spam
                             if game_num % 10 == 0:
@@ -452,7 +469,9 @@ class CurriculumTrainerV2:
                                       f"VP: {avg_vp:.1f} | "
                                       f"Reward: {avg_reward:.1f} | "
                                       f"Speed: {speed:.1f} g/min")
-                                print(f"    └─ Train: policy={avg_p:.4f}, value={avg_v:.4f}, entropy={avg_e:.4f}")
+                                # Show warning if entropy penalty is active
+                                penalty_warn = " ⚠️" if avg_ep > 0.01 else ""
+                                print(f"    └─ Train: policy={avg_p:.4f}, value={avg_v:.4f}, entropy={avg_e:.4f}{penalty_warn}")
 
             # Phase summary
             phase_wr = phase_wins / games_per_phase * 100
