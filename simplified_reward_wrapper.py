@@ -29,8 +29,6 @@ class SimplifiedRewardWrapper:
         self.player_id = player_id
         self.last_vp = 0
 
-        print(f"Simplified Reward Wrapper: mode={reward_mode}")
-
     def reset(self):
         """Reset environment"""
         obs, info = self.env.reset()

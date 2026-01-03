@@ -22,6 +22,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from catan_env_pytorch import CatanEnv
 from simplified_reward_wrapper import SimplifiedRewardWrapper
+from pbrs_fixed_reward_wrapper import PBRSFixedRewardWrapper
 from network_wrapper import NetworkWrapper
 from game_system import ResourceType
 
@@ -177,8 +178,12 @@ class CurriculumTrainerV2:
         print(f"Minimum entropy threshold: {self.min_entropy}")
 
     def play_game(self, opponent_random_prob=1.0):
-        """Play game using SimplifiedRewardWrapper"""
-        env = SimplifiedRewardWrapper(player_id=0, reward_mode=self.reward_mode)
+        """Play game using SimplifiedRewardWrapper or PBRSFixedRewardWrapper"""
+        # Choose wrapper based on reward_mode
+        if self.reward_mode == 'pbrs_fixed':
+            env = PBRSFixedRewardWrapper(player_id=0)
+        else:
+            env = SimplifiedRewardWrapper(player_id=0, reward_mode=self.reward_mode)
         obs, _ = env.reset()
 
         episode_rewards = []
@@ -416,9 +421,15 @@ class CurriculumTrainerV2:
         print("  8. Increased training frequency (4x more steps)")
         print("\nREWARD SYSTEM:")
         print(f"  Mode: {self.reward_mode}")
-        print("  • VP gain: +10 per VP")
-        print("  • Win bonus: +50")
-        print("  • No PBRS decay (no -1000 drift!)")
+        if self.reward_mode == 'pbrs_fixed':
+            print("  • VP gain: +10 per VP")
+            print("  • Win bonus: +100 (strong terminal reward)")
+            print("  • PBRS: Scaled potential (±5 max)")
+            print("  • PBRS is small guide, base rewards dominate")
+        else:
+            print("  • VP gain: +10 per VP")
+            print("  • Win bonus: +50")
+            print("  • No PBRS decay (no -1000 drift!)")
         print("=" * 70 + "\n")
 
         total_wins = 0
