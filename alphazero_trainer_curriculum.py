@@ -481,8 +481,9 @@ class AlphaZeroCurriculumTrainer:
 
             game_time = time.time() - game_start
 
-            # Progress update
-            if game_num % 5 == 0:
+            # Progress update (every game for first 20, then every 5)
+            show_progress = (game_num <= 20) or (game_num % 5 == 0)
+            if show_progress:
                 elapsed = time.time() - start_time
                 games_per_min = game_num / elapsed * 60
                 win_rate = wins / game_num * 100
@@ -492,7 +493,7 @@ class AlphaZeroCurriculumTrainer:
                 print(f"Game {game_num:4d}/{num_games} | Phase: {phase} ({phase_name:12s}) | "
                       f"WR: {win_rate:5.1f}% (recent: {recent_wr:5.1f}%, phase: {phase_wr:5.1f}%) | "
                       f"Buffer: {len(self.replay_buffer):6d} | "
-                      f"Speed: {games_per_min:.1f} g/min")
+                      f"Speed: {games_per_min:.1f} g/min | Time: {game_time:.1f}s")
 
             # Training phase
             if game_num % games_per_training == 0 and len(self.replay_buffer) >= self.batch_size:
