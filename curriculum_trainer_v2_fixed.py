@@ -522,7 +522,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--games-per-phase', type=int, default=1000)
     parser.add_argument('--parallel', type=int, default=1)  # Sequential for now
+    parser.add_argument('--reward-mode', type=str, default='vp_only',
+                        choices=['vp_only', 'sparse', 'simplified', 'pbrs_fixed'],
+                        help='Reward mode: vp_only (default), sparse, simplified, or pbrs_fixed')
     args = parser.parse_args()
 
-    trainer = CurriculumTrainerV2()
+    trainer = CurriculumTrainerV2(reward_mode=args.reward_mode)
     trainer.train(games_per_phase=args.games_per_phase)
