@@ -53,9 +53,9 @@ while not state.is_terminal() and move_count < max_moves:
             game.roll_dice()
             print("  Rolled dice")
         elif game.can_trade_or_build():
-            if game.can_end_turn():
-                game.end_turn()
-                print("  Ended turn")
+            # Skip trade/build phase and end turn
+            game.end_turn()
+            print("  Ended turn (skipped trade/build)")
         elif game.can_end_turn():
             game.end_turn()
             print("  Ended turn")
