@@ -147,7 +147,7 @@ class ReplayBuffer:
 class CurriculumTrainerV2:
     """Uses full CatanEnv with your existing reward system - FIXED"""
 
-    def __init__(self, model_path=None, learning_rate=1e-3, batch_size=None):
+    def __init__(self, model_path=None, learning_rate=1e-3, batch_size=None, epsilon=0.1):
         self.device = get_device()
 
         if batch_size is None:
@@ -165,8 +165,11 @@ class CurriculumTrainerV2:
             self.scaler = torch.amp.GradScaler('cuda')
 
         self.games_played = 0
-        self.current_entropy_coef = 0.1  # FIX: Increased from 0.01 to 0.1
+        self.entropy_coef = 0.15  # FIX: Constant 0.15 (no decay!)
+        self.epsilon = epsilon  # Epsilon-greedy exploration
         print(f"Batch size: {self.batch_size}")
+        print(f"Entropy coefficient: {self.entropy_coef} (constant)")
+        print(f"Epsilon-greedy: {self.epsilon}")
 
     def play_game(self, opponent_random_prob=1.0):
         """Play game using CatanEnv with full rewards"""
@@ -225,14 +228,15 @@ class CurriculumTrainerV2:
             G = r + gamma * G
             returns.insert(0, G)
 
-        # FIX: DO NOT NORMALIZE! Preserve the actual magnitude of returns
-        # This is critical - we need the network to learn that winning (high returns)
-        # is better than losing (low/negative returns)
+        # FIX: Scale returns to reasonable range for training
+        # The issue: returns can be -1500 to +200, causing huge losses
+        # Solution: Divide by a constant to bring into [-10, 10] range
+        # This preserves relative magnitudes while keeping gradients stable
         returns = np.array(returns)
+        returns = returns / 100.0  # Scale down by 100x
 
-        # Optional: Clip extreme outliers to prevent single-game domination
-        # But preserve sign and relative magnitude
-        returns = np.clip(returns, -1000, 1000)
+        # Clip extreme outliers just in case
+        returns = np.clip(returns, -50, 50)
 
         # Add to buffer
         for obs_t, probs_t, ret_t in zip(episode_obs, episode_probs, returns):
@@ -248,7 +252,7 @@ class CurriculumTrainerV2:
         return winner_id, my_vp, sum(episode_rewards)
 
     def _get_action(self, obs):
-        """Get action from network"""
+        """Get action from network with epsilon-greedy exploration"""
         with torch.no_grad():
             observation = torch.FloatTensor(obs['observation']).unsqueeze(0).to(self.device)
             action_mask = torch.FloatTensor(obs['action_mask']).unsqueeze(0).to(self.device)
@@ -276,10 +280,17 @@ class CurriculumTrainerV2:
         vp = safe_probs(vp)
         ep = safe_probs(ep)
 
-        # Sample action from distribution
-        action_id = np.random.choice(len(ap), p=ap)
-        vertex_id = np.random.choice(len(vp), p=vp)
-        edge_id = np.random.choice(len(ep), p=ep)
+        # Epsilon-greedy: random action with probability epsilon
+        if np.random.random() < self.epsilon:
+            # Random action (uniform over valid actions)
+            action_id = np.random.choice(len(ap))
+            vertex_id = np.random.choice(len(vp))
+            edge_id = np.random.choice(len(ep))
+        else:
+            # Sample from network's distribution
+            action_id = np.random.choice(len(ap), p=ap)
+            vertex_id = np.random.choice(len(vp), p=vp)
+            edge_id = np.random.choice(len(ep), p=ep)
 
         return (action_id, vertex_id, edge_id), ap
 
@@ -319,8 +330,8 @@ class CurriculumTrainerV2:
 
                 # FIX: Adjusted loss weights
                 # - Reduced value loss weight from 0.5 to 0.1 (more stable)
-                # - Increased entropy coef from 0.01 to adaptive (starts at 0.1)
-                loss = policy_loss + 0.1 * value_loss - self.current_entropy_coef * entropy
+                # - Constant entropy coef 0.15 (no decay!)
+                loss = policy_loss + 0.1 * value_loss - self.entropy_coef * entropy
 
             self.optimizer.zero_grad()
             self.scaler.scale(loss).backward()
@@ -348,8 +359,8 @@ class CurriculumTrainerV2:
             # Value loss
             value_loss = F.mse_loss(value, returns)
 
-            # FIX: Adjusted loss weights
-            loss = policy_loss + 0.1 * value_loss - self.current_entropy_coef * entropy
+            # FIX: Adjusted loss weights (constant entropy coef 0.15)
+            loss = policy_loss + 0.1 * value_loss - self.entropy_coef * entropy
 
             self.optimizer.zero_grad()
             loss.backward()
@@ -378,10 +389,12 @@ class CurriculumTrainerV2:
         print(f"Batch size: {self.batch_size}")
         print("FIXES:")
         print("  1. Removed return normalization (preserves learning signal)")
-        print("  2. Increased entropy coefficient 0.01 -> 0.1")
-        print("  3. Reduced value loss weight 0.5 -> 0.1")
-        print("  4. Fixed random opponent to play 90% of the time")
-        print("  5. Increased training frequency")
+        print("  2. Scaled returns by /100 (prevents gradient explosion)")
+        print("  3. CONSTANT entropy coefficient 0.15 (no decay!)")
+        print("  4. Epsilon-greedy exploration (10% random actions)")
+        print("  5. Reduced value loss weight 0.5 -> 0.1")
+        print("  6. Fixed random opponent to play 90% of the time")
+        print("  7. Increased training frequency (4x more steps)")
         print("=" * 70 + "\n")
 
         total_wins = 0
@@ -392,10 +405,6 @@ class CurriculumTrainerV2:
             print(f"\n{'='*70}")
             print(f"PHASE {phase_idx + 1}: {phase_name}")
             print(f"{'='*70}")
-
-            # FIX: Adaptive entropy - start high, decay over time
-            self.current_entropy_coef = 0.1 * (1.0 - phase_idx / len(phases))
-            print(f"Entropy coefficient: {self.current_entropy_coef:.4f}")
 
             phase_wins = 0
             phase_vp = 0
