@@ -188,6 +188,27 @@ class ImitationPPOTrainer:
         vertex_mask = obs.get('vertex_mask', [])
         edge_mask = obs.get('edge_mask', [])
 
+        # ===== INITIAL PLACEMENT PHASE (CRITICAL - was missing!) =====
+        if game.is_initial_placement_phase():
+            if game.waiting_for_road:
+                # Place road connected to last settlement
+                if action_mask[5] == 1:
+                    valid_edges = [i for i, m in enumerate(edge_mask) if m == 1]
+                    if valid_edges:
+                        return 5, 0, random.choice(valid_edges)
+            else:
+                # Place settlement
+                if action_mask[3] == 1:
+                    valid_vertices = [i for i, m in enumerate(vertex_mask) if m == 1]
+                    if valid_vertices:
+                        return 3, random.choice(valid_vertices), 0
+
+        # ===== ROLL DICE PHASE =====
+        if action_mask[0] == 1:  # roll dice
+            return 0, 0, 0
+
+        # ===== BUILDING PHASE =====
+
         # Priority 1: Build city (2 wheat + 3 ore) = 2 VP!
         if action_mask[4] == 1:  # build_city is valid
             if (resources[ResourceType.WHEAT] >= 2 and
@@ -232,13 +253,11 @@ class ImitationPPOTrainer:
         if action_mask[7] == 1:  # end_turn is valid
             return 7, 0, 0
 
-        # Fallback: Roll dice or wait
-        if action_mask[0] == 1:  # roll_dice
-            return 0, 0, 0
+        # Fallback: Wait or first valid action
         if action_mask[8] == 1:  # wait
             return 8, 0, 0
 
-        # Last resort: return first valid action
+        # Last resort: First valid action
         valid_actions = [i for i, mask in enumerate(action_mask) if mask == 1]
         if valid_actions:
             return valid_actions[0], 0, 0
