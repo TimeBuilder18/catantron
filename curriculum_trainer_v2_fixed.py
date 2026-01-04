@@ -522,7 +522,9 @@ if __name__ == "__main__":
     parser.add_argument('--reward-mode', type=str, default='vp_only',
                         choices=['vp_only', 'sparse', 'simplified', 'pbrs_fixed'],
                         help='Reward mode: vp_only (default), sparse, simplified, or pbrs_fixed')
+    parser.add_argument('--batch-size', type=int, default=None,
+                        help='Training batch size (default: 2048 for CUDA, 256 for CPU)')
     args = parser.parse_args()
 
-    trainer = CurriculumTrainerV2(reward_mode=args.reward_mode)
+    trainer = CurriculumTrainerV2(reward_mode=args.reward_mode, batch_size=args.batch_size)
     trainer.train(games_per_phase=args.games_per_phase)
