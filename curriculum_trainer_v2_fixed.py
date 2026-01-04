@@ -389,8 +389,14 @@ class CurriculumTrainerV2:
             'entropy_penalty': entropy_penalty.item()
         }
 
-    def train(self, games_per_phase=1000, parallel_games=8, save_path='models/curriculum_v2_fixed'):
-        """Curriculum training with phases"""
+    def train(self, games_per_phase=1000, parallel_games=8, save_path='models/curriculum_v2_fixed',
+              train_frequency=5, train_steps=20):
+        """Curriculum training with phases
+
+        Args:
+            train_frequency: Train every N games (lower = more training, faster learning)
+            train_steps: Number of gradient steps per training session
+        """
         os.makedirs('models', exist_ok=True)
 
         phases = [
@@ -460,17 +466,17 @@ class CurriculumTrainerV2:
                 else:
                     recent_wins.append(0)
 
-                # FIX: Train more frequently (every 5 games instead of 10)
-                if game_num % 5 == 0:
+                # Train based on configured frequency
+                if game_num % train_frequency == 0:
                     elapsed = time.time() - start_time
                     speed = total_games / elapsed * 60
                     recent_wr = sum(recent_wins) / len(recent_wins) * 100 if recent_wins else 0
                     avg_vp = sum(recent_vp) / len(recent_vp) if recent_vp else 0
                     avg_reward = phase_rewards / game_num
 
-                    # FIX: Increased training steps from 10 to 20
+                    # Train with configured number of steps
                     if len(self.replay_buffer) >= self.batch_size:
-                        losses = [self.train_step() for _ in range(20)]
+                        losses = [self.train_step() for _ in range(train_steps)]
                         losses = [l for l in losses if l]
                         if losses:
                             avg_p = np.mean([l['policy'] for l in losses])
@@ -524,7 +530,21 @@ if __name__ == "__main__":
                         help='Reward mode: vp_only (default), sparse, simplified, or pbrs_fixed')
     parser.add_argument('--batch-size', type=int, default=None,
                         help='Training batch size (default: 2048 for CUDA, 256 for CPU)')
+    parser.add_argument('--learning-rate', type=float, default=1e-3,
+                        help='Learning rate (default: 0.001)')
+    parser.add_argument('--train-frequency', type=int, default=5,
+                        help='Train every N games (lower = more training, default: 5)')
+    parser.add_argument('--train-steps', type=int, default=20,
+                        help='Gradient steps per training session (default: 20)')
     args = parser.parse_args()
 
-    trainer = CurriculumTrainerV2(reward_mode=args.reward_mode, batch_size=args.batch_size)
-    trainer.train(games_per_phase=args.games_per_phase)
+    trainer = CurriculumTrainerV2(
+        reward_mode=args.reward_mode,
+        batch_size=args.batch_size,
+        learning_rate=args.learning_rate
+    )
+    trainer.train(
+        games_per_phase=args.games_per_phase,
+        train_frequency=args.train_frequency,
+        train_steps=args.train_steps
+    )
