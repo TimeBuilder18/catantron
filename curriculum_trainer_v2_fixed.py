@@ -340,8 +340,8 @@ class CurriculumTrainerV2:
 
                 # FIX: Adjusted loss weights
                 # - Entropy coef: 0.3 (increased from 0.15)
-                # - Entropy floor penalty: prevents collapse below 0.5 (MASSIVELY INCREASED!)
-                loss = policy_loss + 0.1 * value_loss - self.entropy_coef * entropy + 50.0 * entropy_penalty
+                # - Entropy floor penalty: prevents collapse below 0.5 (NUCLEAR OPTION: 200x base!)
+                loss = policy_loss + 0.1 * value_loss - self.entropy_coef * entropy + 200.0 * entropy_penalty
 
             self.optimizer.zero_grad()
             self.scaler.scale(loss).backward()
@@ -374,8 +374,8 @@ class CurriculumTrainerV2:
 
             # FIX: Adjusted loss weights
             # - Entropy coef: 0.3 (increased from 0.15)
-            # - Entropy floor penalty: prevents collapse below 0.5 (MASSIVELY INCREASED!)
-            loss = policy_loss + 0.1 * value_loss - self.entropy_coef * entropy + 50.0 * entropy_penalty
+            # - Entropy floor penalty: prevents collapse below 0.5 (NUCLEAR OPTION: 200x base!)
+            loss = policy_loss + 0.1 * value_loss - self.entropy_coef * entropy + 200.0 * entropy_penalty
 
             self.optimizer.zero_grad()
             loss.backward()
