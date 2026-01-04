@@ -32,26 +32,33 @@ class ImitationLearningBuffer:
     def __init__(self):
         self.demonstrations = []
     
-    def add_demo(self, observation, action_id, vertex_id=None, edge_id=None):
-        """Add expert demonstration"""
+    def add_demo(self, observation, action_id, vertex_id=None, edge_id=None,
+                 action_mask=None, vertex_mask=None, edge_mask=None):
+        """Add expert demonstration with masks"""
         self.demonstrations.append({
             'obs': observation.copy(),
             'action_id': action_id,
             'vertex_id': vertex_id if vertex_id is not None else 0,
-            'edge_id': edge_id if edge_id is not None else 0
+            'edge_id': edge_id if edge_id is not None else 0,
+            'action_mask': action_mask.copy() if action_mask is not None else None,
+            'vertex_mask': vertex_mask.copy() if vertex_mask is not None else None,
+            'edge_mask': edge_mask.copy() if edge_mask is not None else None
         })
     
     def sample(self, batch_size):
-        """Sample random batch"""
-        indices = np.random.choice(len(self.demonstrations), 
-                                   min(batch_size, len(self.demonstrations)), 
+        """Sample random batch with masks"""
+        indices = np.random.choice(len(self.demonstrations),
+                                   min(batch_size, len(self.demonstrations)),
                                    replace=False)
-        
+
         batch = {
             'observations': np.array([self.demonstrations[i]['obs'] for i in indices]),
             'action_ids': np.array([self.demonstrations[i]['action_id'] for i in indices]),
             'vertex_ids': np.array([self.demonstrations[i]['vertex_id'] for i in indices]),
-            'edge_ids': np.array([self.demonstrations[i]['edge_id'] for i in indices])
+            'edge_ids': np.array([self.demonstrations[i]['edge_id'] for i in indices]),
+            'action_masks': np.array([self.demonstrations[i]['action_mask'] for i in indices]),
+            'vertex_masks': np.array([self.demonstrations[i]['vertex_mask'] for i in indices]),
+            'edge_masks': np.array([self.demonstrations[i]['edge_mask'] for i in indices])
         }
         return batch
     
@@ -113,12 +120,15 @@ class ImitationPPOTrainer:
                     action_id, vertex_id, edge_id = self._get_expert_action(env, obs)
                     
                     if action_id is not None:
-                        # Store demonstration
+                        # Store demonstration WITH MASKS (critical for learning legal actions!)
                         self.demo_buffer.add_demo(
                             obs['observation'],
                             action_id,
                             vertex_id,
-                            edge_id
+                            edge_id,
+                            action_mask=obs.get('action_mask'),
+                            vertex_mask=obs.get('vertex_mask'),
+                            edge_mask=obs.get('edge_mask')
                         )
                         demos_collected += 1
                         
@@ -272,31 +282,36 @@ class ImitationPPOTrainer:
         """Single imitation learning training step"""
         if len(self.demo_buffer) < self.batch_size:
             return None, None
-        
+
         # Sample batch
         batch = self.demo_buffer.sample(self.batch_size)
-        
+
         observations = torch.FloatTensor(batch['observations']).to(self.device)
         target_actions = torch.LongTensor(batch['action_ids']).to(self.device)
-        
+        action_masks = torch.FloatTensor(batch['action_masks']).to(self.device)
+        vertex_masks = torch.FloatTensor(batch['vertex_masks']).to(self.device)
+        edge_masks = torch.FloatTensor(batch['edge_masks']).to(self.device)
+
         self.network.train()
-        
-        # Forward pass
-        action_probs, _, _, _, _, _ = self.network.forward(observations)
-        
-        # Cross-entropy loss (classification)
-        loss = F.cross_entropy(torch.log(action_probs + 1e-8), target_actions)
-        
+
+        # Forward pass WITH MASKS (critical!)
+        action_probs, _, _, _, _, _ = self.network.forward(
+            observations, action_masks, vertex_masks, edge_masks
+        )
+
+        # FIX: Use nll_loss for log probabilities (not cross_entropy which expects logits!)
+        loss = F.nll_loss(torch.log(action_probs + 1e-8), target_actions)
+
         # Calculate accuracy
         predicted_actions = torch.argmax(action_probs, dim=1)
         accuracy = (predicted_actions == target_actions).float().mean().item() * 100
-        
+
         # Backward pass
         self.optimizer.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.network.parameters(), 1.0)
         self.optimizer.step()
-        
+
         return loss.item(), accuracy
     
     
