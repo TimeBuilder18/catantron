@@ -314,14 +314,15 @@ class ImitationPPOTrainer:
 
 # ==================== MAIN TRAINING PIPELINE ====================
 
-def train_full_pipeline(demo_games=1000, imitation_epochs=10, ppo_games_per_phase=2000):
+def train_full_pipeline(demo_games=1000, imitation_epochs=10, ppo_games_per_phase=2000, batch_size=8192):
     """
     Complete two-phase training pipeline
-    
+
     Args:
         demo_games: Number of games to collect demonstrations
         imitation_epochs: Epochs of supervised learning
         ppo_games_per_phase: Games per PPO curriculum phase
+        batch_size: Training batch size (higher = more GPU usage)
     """
     print("\n" + "="*70)
     print("IMITATION LEARNING + PPO TRAINING PIPELINE")
@@ -333,7 +334,7 @@ def train_full_pipeline(demo_games=1000, imitation_epochs=10, ppo_games_per_phas
     print("="*70 + "\n")
     
     # Create trainer
-    trainer = ImitationPPOTrainer(batch_size=8192, learning_rate=1e-3)
+    trainer = ImitationPPOTrainer(batch_size=batch_size, learning_rate=1e-3)
     
     # Phase 1A: Collect demonstrations
     demos = trainer.collect_demonstrations(num_games=demo_games)
@@ -357,10 +358,13 @@ if __name__ == "__main__":
                         help='Epochs of supervised learning')
     parser.add_argument('--ppo-games', type=int, default=2000,
                         help='Games per phase in PPO fine-tuning')
+    parser.add_argument('--batch-size', type=int, default=8192,
+                        help='Training batch size (8192/16384/24576 for RTX 2080 Super)')
     args = parser.parse_args()
-    
+
     train_full_pipeline(
         demo_games=args.demo_games,
         imitation_epochs=args.imitation_epochs,
-        ppo_games_per_phase=args.ppo_games
+        ppo_games_per_phase=args.ppo_games,
+        batch_size=args.batch_size
     )
