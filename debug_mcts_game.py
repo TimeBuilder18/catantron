@@ -48,13 +48,30 @@ while not state.is_terminal() and move_count < max_moves:
         # Random opponent
         print(f"Move {move_count}: Player {current_player} (random opponent)")
         game = state.env.game_env.game
+        player = game.players[current_player]
 
-        # DEBUG: Show game state
-        print(f"  DEBUG: can_roll={game.can_roll_dice()}, can_trade={game.can_trade_or_build()}, can_end={game.can_end_turn()}")
-        print(f"  DEBUG: game_phase={game.game_phase}, turn_phase={game.turn_phase}")
-        print(f"  DEBUG: is_initial={game.is_initial_placement_phase()}, waiting_for_road={game.waiting_for_road}")
-
-        if game.can_roll_dice():
+        # Handle initial placement phase
+        if game.is_initial_placement_phase():
+            import random
+            if game.waiting_for_road:
+                if game.last_settlement_vertex:
+                    edges = game.game_board.edges
+                    valid = [e for e in edges
+                            if e.structure is None and
+                            (e.vertex1 == game.last_settlement_vertex or
+                             e.vertex2 == game.last_settlement_vertex)]
+                    if valid:
+                        game.try_place_initial_road(random.choice(valid), player)
+                        print("  Placed initial road")
+            else:
+                vertices = game.game_board.vertices
+                valid = [v for v in vertices if v.structure is None and
+                        not any(adj.structure for adj in v.adjacent_vertices)]
+                if valid:
+                    game.try_place_initial_settlement(random.choice(valid), player)
+                    print("  Placed initial settlement")
+        # Normal gameplay
+        elif game.can_roll_dice():
             game.roll_dice()
             print("  Rolled dice")
         elif game.can_trade_or_build():
@@ -64,10 +81,6 @@ while not state.is_terminal() and move_count < max_moves:
         elif game.can_end_turn():
             game.end_turn()
             print("  Ended turn")
-        else:
-            # NOTHING is possible - force advance by ending turn anyway
-            print("  WARNING: No valid actions! Forcing end_turn()")
-            game.end_turn()
 
     # Check if stuck
     if move_count % 10 == 0:
