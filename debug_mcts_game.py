@@ -49,6 +49,11 @@ while not state.is_terminal() and move_count < max_moves:
         print(f"Move {move_count}: Player {current_player} (random opponent)")
         game = state.env.game_env.game
 
+        # DEBUG: Show game state
+        print(f"  DEBUG: can_roll={game.can_roll_dice()}, can_trade={game.can_trade_or_build()}, can_end={game.can_end_turn()}")
+        print(f"  DEBUG: game_phase={game.game_phase}, turn_phase={game.turn_phase}")
+        print(f"  DEBUG: is_initial={game.is_initial_placement_phase()}, waiting_for_road={game.waiting_for_road}")
+
         if game.can_roll_dice():
             game.roll_dice()
             print("  Rolled dice")
@@ -59,6 +64,10 @@ while not state.is_terminal() and move_count < max_moves:
         elif game.can_end_turn():
             game.end_turn()
             print("  Ended turn")
+        else:
+            # NOTHING is possible - force advance by ending turn anyway
+            print("  WARNING: No valid actions! Forcing end_turn()")
+            game.end_turn()
 
     # Check if stuck
     if move_count % 10 == 0:
