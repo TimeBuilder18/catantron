@@ -156,43 +156,84 @@ class ImitationPPOTrainer:
         return demos_collected
     
     def _get_expert_action(self, env, obs):
-        """Get action from rule-based AI"""
-        # Rule-based AI decides what to do
+        """
+        Get action from rule-based AI logic
+
+        Uses same priority as rule_based_ai.py:
+        1. Build city (if affordable) → action_id=4
+        2. Build settlement (if affordable) → action_id=3
+        3. Build road (if affordable) → action_id=5
+        4. Buy dev card (if affordable) → action_id=6
+        5. Trade (if beneficial) → action_id=9
+        6. End turn → action_id=7
+        """
+        from game_system import ResourceType
+        import random
+
         game = env.game_env.game
-        
-        # Try to infer action from game state changes
-        # This is a simplified version - captures main actions
-        
-        # Check what action masks allow
+        player = game.players[env.player_id]
+        resources = player.resources
+
         action_mask = obs['action_mask']
+        vertex_mask = obs.get('vertex_mask', [])
+        edge_mask = obs.get('edge_mask', [])
+
+        # Priority 1: Build city (2 wheat + 3 ore) = 2 VP!
+        if action_mask[4] == 1:  # build_city is valid
+            if (resources[ResourceType.WHEAT] >= 2 and
+                resources[ResourceType.ORE] >= 3):
+                valid_vertices = [i for i, m in enumerate(vertex_mask) if m == 1]
+                if valid_vertices:
+                    return 4, random.choice(valid_vertices), 0
+
+        # Priority 2: Build settlement (1 wood + 1 brick + 1 wheat + 1 sheep) = 1 VP
+        if action_mask[3] == 1:  # build_settlement is valid
+            if (resources[ResourceType.WOOD] >= 1 and
+                resources[ResourceType.BRICK] >= 1 and
+                resources[ResourceType.WHEAT] >= 1 and
+                resources[ResourceType.SHEEP] >= 1):
+                valid_vertices = [i for i, m in enumerate(vertex_mask) if m == 1]
+                if valid_vertices:
+                    return 3, random.choice(valid_vertices), 0
+
+        # Priority 3: Build road (1 wood + 1 brick) = Progress
+        if action_mask[5] == 1:  # build_road is valid
+            if (resources[ResourceType.WOOD] >= 1 and
+                resources[ResourceType.BRICK] >= 1):
+                valid_edges = [i for i, m in enumerate(edge_mask) if m == 1]
+                if valid_edges:
+                    return 5, 0, random.choice(valid_edges)
+
+        # Priority 4: Buy development card (1 wheat + 1 sheep + 1 ore)
+        if action_mask[6] == 1:  # buy_dev_card is valid
+            if (resources[ResourceType.WHEAT] >= 1 and
+                resources[ResourceType.SHEEP] >= 1 and
+                resources[ResourceType.ORE] >= 1):
+                return 6, 0, 0
+
+        # Priority 5: Trade if we have 4+ of one resource
+        if action_mask[9] == 1:  # trade_with_bank is valid
+            for resource_type, amount in resources.items():
+                if amount >= 4:
+                    # Simplified trade: give excess resource, get what we need most
+                    return 9, 0, 0  # Note: trade indices handled separately
+
+        # Priority 6: End turn if nothing else to do
+        if action_mask[7] == 1:  # end_turn is valid
+            return 7, 0, 0
+
+        # Fallback: Roll dice or wait
+        if action_mask[0] == 1:  # roll_dice
+            return 0, 0, 0
+        if action_mask[8] == 1:  # wait
+            return 8, 0, 0
+
+        # Last resort: return first valid action
         valid_actions = [i for i, mask in enumerate(action_mask) if mask == 1]
-        
-        if not valid_actions:
-            return None, None, None
-        
-        # Let rule-based AI play and see what it does
-        # We'll use action 0 (roll dice) or action 10 (end turn) as defaults
-        # For building actions, we sample from valid actions
-        
-        # Simplified: just return first valid action for now
-        # In production, you'd want to actually capture the rule-based AI's decision
-        action_id = valid_actions[0]
-        
-        vertex_id = 0
-        if action_id in [1, 2]:  # Settlement or city
-            vertex_mask = obs.get('vertex_mask', [])
-            valid_vertices = [i for i, m in enumerate(vertex_mask) if m == 1]
-            if valid_vertices:
-                vertex_id = valid_vertices[0]
-        
-        edge_id = 0
-        if action_id == 3:  # Road
-            edge_mask = obs.get('edge_mask', [])
-            valid_edges = [i for i, m in enumerate(edge_mask) if m == 1]
-            if valid_edges:
-                edge_id = valid_edges[0]
-        
-        return action_id, vertex_id, edge_id
+        if valid_actions:
+            return valid_actions[0], 0, 0
+
+        return None, None, None
     
     def train_imitation(self, num_epochs=10, steps_per_epoch=100):
         """
