@@ -335,18 +335,28 @@ class CurriculumTrainerV2:
                 # Value loss
                 value_loss = F.mse_loss(value, returns)
 
-                # Entropy floor penalty: punish if entropy too low
-                entropy_penalty = torch.clamp(self.min_entropy - entropy, min=0.0)
+                # STABLE FIX: Smooth quadratic entropy penalty (not harsh step function!)
+                # Quadratic penalty creates smooth gradients, avoiding oscillation
+                target_entropy = 1.8
+                entropy_diff = target_entropy - entropy
+                if entropy_diff > 0:
+                    entropy_penalty = entropy_diff ** 2  # Smooth quadratic
+                else:
+                    entropy_penalty = torch.tensor(0.0, device=self.device)
 
-                # FIX: Adjusted loss weights
-                # - Entropy coef: 0.3 (increased from 0.15)
-                # - Entropy floor penalty: prevents collapse below 0.5 (NUCLEAR OPTION: 200x base!)
-                loss = policy_loss + 0.1 * value_loss - self.entropy_coef * entropy + 200.0 * entropy_penalty
+                # Normalize advantages for stability
+                advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+                policy_loss = -(action_log_probs * advantages).mean()
+
+                # STABLE LOSS: Reduced entropy penalty coefficient (5x not 200x!)
+                loss = policy_loss + 0.1 * value_loss - self.entropy_coef * entropy + 5.0 * entropy_penalty
 
             self.optimizer.zero_grad()
             self.scaler.scale(loss).backward()
             self.scaler.unscale_(self.optimizer)
-            torch.nn.utils.clip_grad_norm_(self.network.parameters(), 1.0)
+            # Adaptive gradient clipping based on entropy health
+            grad_norm = 0.3 if entropy.item() < 1.2 else 0.5 if entropy.item() < 1.5 else 1.0
+            torch.nn.utils.clip_grad_norm_(self.network.parameters(), grad_norm)
             self.scaler.step(self.optimizer)
             self.scaler.update()
         else:
@@ -369,17 +379,26 @@ class CurriculumTrainerV2:
             # Value loss
             value_loss = F.mse_loss(value, returns)
 
-            # Entropy floor penalty: punish if entropy too low
-            entropy_penalty = torch.clamp(self.min_entropy - entropy, min=0.0)
+            # STABLE FIX: Smooth quadratic entropy penalty (not harsh step function!)
+            target_entropy = 1.8
+            entropy_diff = target_entropy - entropy
+            if entropy_diff > 0:
+                entropy_penalty = entropy_diff ** 2  # Smooth quadratic
+            else:
+                entropy_penalty = torch.tensor(0.0, device=self.device)
 
-            # FIX: Adjusted loss weights
-            # - Entropy coef: 0.3 (increased from 0.15)
-            # - Entropy floor penalty: prevents collapse below 0.5 (NUCLEAR OPTION: 200x base!)
-            loss = policy_loss + 0.1 * value_loss - self.entropy_coef * entropy + 200.0 * entropy_penalty
+            # Normalize advantages for stability
+            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+            policy_loss = -(action_log_probs * advantages).mean()
+
+            # STABLE LOSS: Reduced entropy penalty coefficient (5x not 200x!)
+            loss = policy_loss + 0.1 * value_loss - self.entropy_coef * entropy + 5.0 * entropy_penalty
 
             self.optimizer.zero_grad()
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.network.parameters(), 1.0)
+            # Adaptive gradient clipping based on entropy health
+            grad_norm = 0.3 if entropy.item() < 1.2 else 0.5 if entropy.item() < 1.5 else 1.0
+            torch.nn.utils.clip_grad_norm_(self.network.parameters(), grad_norm)
             self.optimizer.step()
 
         return {
