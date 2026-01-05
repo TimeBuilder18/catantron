@@ -22,6 +22,7 @@ import random
 
 from catan_env_pytorch import CatanEnv
 from simplified_reward_wrapper import SimplifiedRewardWrapper
+from pbrs_fixed_reward_wrapper import PBRSFixedRewardWrapper
 from network_wrapper import NetworkWrapper
 from game_system import ResourceType
 
@@ -174,8 +175,9 @@ class PrioritizedReplayBuffer:
 class CurriculumTrainerV3:
     """Stable curriculum trainer with entropy collapse prevention"""
 
-    def __init__(self, model_path=None, learning_rate=5e-4, batch_size=None):
+    def __init__(self, model_path=None, learning_rate=5e-4, batch_size=None, reward_mode='vp_only'):
         self.device = get_device()
+        self.reward_mode = reward_mode
 
         if batch_size is None:
             batch_size = 1024 if self.device.type == 'cuda' else 256
@@ -221,6 +223,7 @@ class CurriculumTrainerV3:
 
         print(f"Batch size: {self.batch_size}")
         print(f"Base LR: {self.base_lr}")
+        print(f"Reward mode: {self.reward_mode}")
         print(f"Target entropy: {self.target_entropy}")
         print(f"Base entropy coef: {self.entropy_coef}")
         print(f"Max KL divergence: {self.max_kl}")
@@ -284,7 +287,10 @@ class CurriculumTrainerV3:
 
     def play_game(self, opponent_random_prob=1.0):
         """Play game and collect experiences"""
-        env = SimplifiedRewardWrapper(player_id=0, reward_mode='vp_only')
+        if self.reward_mode == 'pbrs_fixed':
+            env = PBRSFixedRewardWrapper(player_id=0)
+        else:
+            env = SimplifiedRewardWrapper(player_id=0, reward_mode=self.reward_mode)
         obs, _ = env.reset()
 
         episode_rewards = []
@@ -668,12 +674,16 @@ if __name__ == "__main__":
                         help='Minimum games before curriculum can advance')
     parser.add_argument('--model', type=str, default=None,
                         help='Path to existing model to continue training')
+    parser.add_argument('--reward-mode', type=str, default='vp_only',
+                        choices=['sparse', 'vp_only', 'simplified', 'pbrs_fixed'],
+                        help='Reward mode: sparse, vp_only (default), simplified, or pbrs_fixed')
     args = parser.parse_args()
 
     trainer = CurriculumTrainerV3(
         model_path=args.model,
         batch_size=args.batch_size,
-        learning_rate=args.learning_rate
+        learning_rate=args.learning_rate,
+        reward_mode=args.reward_mode
     )
     trainer.train(
         total_games=args.total_games,
