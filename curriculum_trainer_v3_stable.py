@@ -22,6 +22,7 @@ import random
 
 from catan_env_pytorch import CatanEnv
 from simplified_reward_wrapper import SimplifiedRewardWrapper
+from pbrs_fixed_reward_wrapper import PBRSFixedRewardWrapper
 from network_wrapper import NetworkWrapper
 from game_system import ResourceType
 
@@ -286,7 +287,10 @@ class CurriculumTrainerV3:
 
     def play_game(self, opponent_random_prob=1.0):
         """Play game and collect experiences"""
-        env = SimplifiedRewardWrapper(player_id=0, reward_mode=self.reward_mode)
+        if self.reward_mode == 'pbrs_fixed':
+            env = PBRSFixedRewardWrapper(player_id=0)
+        else:
+            env = SimplifiedRewardWrapper(player_id=0, reward_mode=self.reward_mode)
         obs, _ = env.reset()
 
         episode_rewards = []
@@ -671,8 +675,8 @@ if __name__ == "__main__":
     parser.add_argument('--model', type=str, default=None,
                         help='Path to existing model to continue training')
     parser.add_argument('--reward-mode', type=str, default='vp_only',
-                        choices=['sparse', 'vp_only', 'simplified'],
-                        help='Reward mode: sparse, vp_only (default), or simplified')
+                        choices=['sparse', 'vp_only', 'simplified', 'pbrs_fixed'],
+                        help='Reward mode: sparse, vp_only (default), simplified, or pbrs_fixed')
     args = parser.parse_args()
 
     trainer = CurriculumTrainerV3(
