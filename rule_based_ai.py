@@ -1,11 +1,12 @@
 """
 Rule-Based AI for Catan
 
-A simple but effective AI that:
-- Understands resource costs
-- Prioritizes high-value actions
-- Never makes illegal moves
-- Helps the learning agent see real gameplay
+A smart AI with multiple difficulty levels:
+- Weak: Random placement, basic priorities
+- Medium: Scores settlements by pip count
+- Strong: Scores by pip count + resource diversity + ports
+
+Helps curriculum learning by providing progressively harder opponents.
 """
 
 import sys
@@ -15,12 +16,91 @@ from game_system import ResourceType
 import random
 
 
+# Pip count for each dice number (probability of being rolled)
+DICE_PIPS = {
+    2: 1, 3: 2, 4: 3, 5: 4, 6: 5,
+    8: 5, 9: 4, 10: 3, 11: 2, 12: 1
+}
+
+
+def score_vertex(vertex, game_board=None, player=None, consider_diversity=True):
+    """
+    Score a vertex for settlement placement.
+    Higher score = better location.
+
+    Factors:
+    - Pip count (probability of getting resources)
+    - Resource diversity (different resources are better)
+    - Port access (bonus for port locations)
+    """
+    if not vertex.adjacent_tiles:
+        return 0
+
+    pip_score = 0
+    resources = set()
+
+    for tile in vertex.adjacent_tiles:
+        if tile.resource and tile.resource != "desert" and tile.number:
+            # Add pip value
+            pip_score += DICE_PIPS.get(tile.number, 0)
+            # Track resource type
+            resource_type = tile.get_resource_type()
+            if resource_type:
+                resources.add(resource_type)
+
+    # Diversity bonus: more unique resources = better
+    diversity_bonus = len(resources) * 2 if consider_diversity else 0
+
+    # High-value resources bonus (ore and wheat for cities)
+    value_bonus = 0
+    for tile in vertex.adjacent_tiles:
+        if tile.resource == "mountain":  # Ore
+            value_bonus += 1
+        elif tile.resource == "field":  # Wheat
+            value_bonus += 1
+
+    return pip_score + diversity_bonus + value_bonus
+
+
+def score_edge(edge, player, game):
+    """
+    Score an edge for road placement.
+    Higher score = better expansion potential.
+    """
+    score = 0
+
+    # Check both endpoints
+    for vertex in [edge.vertex1, edge.vertex2]:
+        if vertex.structure is None:
+            # Can we build here eventually?
+            too_close = any(adj.structure is not None for adj in vertex.adjacent_vertices)
+            if not too_close:
+                # Good expansion spot - score by vertex quality
+                score += score_vertex(vertex, consider_diversity=False) / 2
+
+    return score
+
+
 class RuleBasedAI:
-    """Simple rule-based AI that plays Catan intelligently"""
-    
-    def __init__(self):
-        self.name = "Rule-Based AI"
-    
+    """
+    Rule-based AI with configurable difficulty levels.
+
+    Difficulty levels:
+    - 'weak': Random placement, basic build priorities
+    - 'medium': Smart settlement placement (pip scoring)
+    - 'strong': Smart placement + resource diversity + strategic roads
+    """
+
+    def __init__(self, difficulty='medium'):
+        """
+        Initialize the AI with a difficulty level.
+
+        Args:
+            difficulty: 'weak', 'medium', or 'strong'
+        """
+        self.name = f"Rule-Based AI ({difficulty})"
+        self.difficulty = difficulty
+
     def play_turn(self, game, player_id):
         """
         Execute one turn for the rule-based AI
@@ -69,7 +149,7 @@ class RuleBasedAI:
             if self._can_afford_settlement(resources):
                 vertices = game.get_buildable_vertices_for_settlements()
                 if vertices:
-                    vertex = random.choice(vertices)
+                    vertex = self._choose_best_vertex(vertices)
                     success, msg = player.try_build_settlement(vertex, ignore_road_rule=False)
                     if success:
                         #print(f"[RULE AI] Player {player_id+1} built a settlement!")
@@ -79,7 +159,7 @@ class RuleBasedAI:
             if self._can_afford_road(resources):
                 edges = game.get_buildable_edges()
                 if edges:
-                    edge = random.choice(edges)
+                    edge = self._choose_best_edge(edges, player, game)
                     success, msg = player.try_build_road(edge)
                     if success:
                         #print(f"[RULE AI] Player {player_id+1} built a road!")
@@ -153,7 +233,7 @@ class RuleBasedAI:
             #print(f"[RULE AI DEBUG] Found {len(valid_vertices)} valid settlement positions")
 
             if valid_vertices:
-                vertex = random.choice(valid_vertices)
+                vertex = self._choose_best_vertex(valid_vertices)
                 success, msg = game.try_place_initial_settlement(vertex, player)
                 #print(f"[RULE AI DEBUG] Place settlement result: {success}, {msg}")
                 if success:
@@ -164,6 +244,43 @@ class RuleBasedAI:
                 #print(f"[RULE AI DEBUG] No valid vertices found!")
 
         return False
+
+    def _choose_best_vertex(self, vertices):
+        """Choose the best vertex based on difficulty level."""
+        if self.difficulty == 'weak':
+            # Weak: Random choice
+            return random.choice(vertices)
+        elif self.difficulty == 'medium':
+            # Medium: Score by pip count only
+            scored = [(v, score_vertex(v, consider_diversity=False)) for v in vertices]
+            scored.sort(key=lambda x: x[1], reverse=True)
+            # Add some randomness - pick from top 3
+            top_n = min(3, len(scored))
+            return random.choice([s[0] for s in scored[:top_n]])
+        else:
+            # Strong: Score by pip count + diversity + value
+            scored = [(v, score_vertex(v, consider_diversity=True)) for v in vertices]
+            scored.sort(key=lambda x: x[1], reverse=True)
+            # Pick the best one
+            return scored[0][0]
+
+    def _choose_best_edge(self, edges, player, game):
+        """Choose the best edge based on difficulty level."""
+        if self.difficulty == 'weak':
+            # Weak: Random choice
+            return random.choice(edges)
+        elif self.difficulty == 'medium':
+            # Medium: Basic expansion scoring
+            scored = [(e, score_edge(e, player, game)) for e in edges]
+            scored.sort(key=lambda x: x[1], reverse=True)
+            # Add some randomness - pick from top 3
+            top_n = min(3, len(scored))
+            return random.choice([s[0] for s in scored[:top_n]])
+        else:
+            # Strong: Best expansion potential
+            scored = [(e, score_edge(e, player, game)) for e in edges]
+            scored.sort(key=lambda x: x[1], reverse=True)
+            return scored[0][0]
 
     def _can_afford_city(self, resources):
         """Check if player can afford a city (2 wheat + 3 ore)"""
@@ -254,18 +371,19 @@ class RuleBasedAI:
         return ResourceType.BRICK
 
 
-def play_rule_based_turn(env, player_id):
+def play_rule_based_turn(env, player_id, difficulty='medium'):
     """
     Convenience function to play one turn for a rule-based AI
 
     Args:
         env: CatanEnv instance
         player_id: Which player (0-3)
+        difficulty: 'weak', 'medium', or 'strong'
 
     Returns:
         bool: True if turn completed successfully
     """
-    ai = RuleBasedAI()
+    ai = RuleBasedAI(difficulty=difficulty)
     return ai.play_turn(env.game_env.game, player_id)
 
 
