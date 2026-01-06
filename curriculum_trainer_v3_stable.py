@@ -540,19 +540,22 @@ class CurriculumTrainerV3:
         recent_wr = np.mean(list(self.phase_wins)[-50:])
         recent_vp = np.mean(list(self.phase_vps)[-50:])
 
-        # Advancement criteria based on difficulty
-        if current_random_prob >= 0.75:
-            # Easy opponents: need >15% WR or >4.5 VP
-            return recent_wr > 0.15 or recent_vp > 4.5
-        elif current_random_prob >= 0.5:
-            # Medium random: need >10% WR or >4.0 VP
-            return recent_wr > 0.10 or recent_vp > 4.0
-        elif current_random_prob >= 0.25:
-            # Low random: need >8% WR or >3.5 VP
-            return recent_wr > 0.08 or recent_vp > 3.5
-        elif ai_difficulty == 'medium':
-            # 100% Medium AI: need >6% WR or >3.0 VP to advance to Strong
+        # Advancement criteria based on difficulty (lowered thresholds for gradual progression)
+        if current_random_prob >= 0.85:
+            # Very easy (100-90% random): need >10% WR or >3.5 VP
+            return recent_wr > 0.10 or recent_vp > 3.5
+        elif current_random_prob >= 0.65:
+            # Easy (80-70% random): need >8% WR or >3.2 VP
+            return recent_wr > 0.08 or recent_vp > 3.2
+        elif current_random_prob >= 0.45:
+            # Medium random (60-50%): need >6% WR or >3.0 VP
             return recent_wr > 0.06 or recent_vp > 3.0
+        elif current_random_prob >= 0.25:
+            # Low random (40-25%): need >5% WR or >2.8 VP
+            return recent_wr > 0.05 or recent_vp > 2.8
+        elif ai_difficulty == 'medium':
+            # 100% Medium AI: need >4% WR or >2.5 VP to advance to Strong
+            return recent_wr > 0.04 or recent_vp > 2.5
         else:
             # Strong AI: never auto-advance (final phase)
             return False
@@ -563,12 +566,18 @@ class CurriculumTrainerV3:
         os.makedirs('models', exist_ok=True)
 
         # Phases: (random_prob, ai_difficulty, phase_name)
-        # Graduated curriculum: more random → less random, weak AI → strong AI
+        # GRADUAL curriculum: 10% increments to prevent distribution shift collapse
         phases = [
             (1.0, 'weak', "100% Random"),
-            (0.75, 'weak', "75% Random + Weak AI"),
-            (0.5, 'weak', "50% Random + Weak AI"),
-            (0.25, 'medium', "25% Random + Medium AI"),
+            (0.90, 'weak', "90% Random + 10% Weak AI"),
+            (0.80, 'weak', "80% Random + 20% Weak AI"),
+            (0.70, 'weak', "70% Random + 30% Weak AI"),
+            (0.60, 'weak', "60% Random + 40% Weak AI"),
+            (0.50, 'weak', "50% Random + 50% Weak AI"),
+            (0.40, 'medium', "40% Random + 60% Medium AI"),
+            (0.30, 'medium', "30% Random + 70% Medium AI"),
+            (0.20, 'medium', "20% Random + 80% Medium AI"),
+            (0.10, 'medium', "10% Random + 90% Medium AI"),
             (0.0, 'medium', "100% Medium AI"),
             (0.0, 'strong', "100% Strong AI"),
         ]
@@ -643,8 +652,9 @@ class CurriculumTrainerV3:
                 print(f"    Recent WR: {np.mean(list(self.phase_wins)[-50:])*100:.1f}%")
                 print(f"    Recent VP: {np.mean(list(self.phase_vps)[-50:]):.1f}\n")
 
-                # Clear some old experiences to reduce distribution mismatch
-                self.replay_buffer.clear_old(keep_fraction=0.5)
+                # Clear most old experiences to reduce distribution mismatch
+                # Keep only 25% to allow faster adaptation to new opponent mix
+                self.replay_buffer.clear_old(keep_fraction=0.25)
 
                 current_phase += 1
                 phase_game_count = 0
