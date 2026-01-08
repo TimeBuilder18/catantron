@@ -182,9 +182,12 @@ class PrioritizedReplayBuffer:
 class CurriculumTrainerV3:
     """Stable curriculum trainer with entropy collapse prevention"""
 
-    def __init__(self, model_path=None, learning_rate=5e-4, batch_size=None, reward_mode='vp_only'):
+    def __init__(self, model_path=None, learning_rate=5e-4, batch_size=None, reward_mode='vp_only',
+                 lr_decay=1.0, value_weight=0.5):
         self.device = get_device()
         self.reward_mode = reward_mode
+        self.lr_decay = lr_decay  # Learning rate decay per 1000 games
+        self.value_weight = value_weight  # Weight for value loss (default increased from 0.1)
 
         if batch_size is None:
             batch_size = 1024 if self.device.type == 'cuda' else 256
@@ -230,6 +233,8 @@ class CurriculumTrainerV3:
 
         print(f"Batch size: {self.batch_size}")
         print(f"Base LR: {self.base_lr}")
+        print(f"LR decay: {self.lr_decay} per 1000 games")
+        print(f"Value weight: {self.value_weight}")
         print(f"Reward mode: {self.reward_mode}")
         print(f"Target entropy: {self.target_entropy}")
         print(f"Base entropy coef: {self.entropy_coef}")
@@ -511,12 +516,12 @@ class CurriculumTrainerV3:
         # - policy_loss: minimize
         # - entropy: maximize (so subtract)
         # - entropy_penalty: smooth penalty for low entropy
-        # - value_loss: minimize
+        # - value_loss: minimize (increased weight for better critic learning)
         total_loss = (
             policy_loss
             - self.current_entropy_coef * total_entropy
             + 5.0 * entropy_penalty_tensor  # Smooth penalty (not 200x!)
-            + 0.1 * value_loss
+            + self.value_weight * value_loss  # Configurable value weight (default 0.5)
             + self.adaptive_kl_coef * torch.clamp(kl_div - self.max_kl, min=0.0)
         )
 
@@ -664,9 +669,16 @@ class CurriculumTrainerV3:
                 # Save checkpoint
                 self.save(f"{save_path}_phase{current_phase}.pt")
 
-            # Periodic saves
+            # Periodic saves and LR decay
             if game_num % 1000 == 0:
                 self.save(f"{save_path}_game{game_num}.pt")
+                # Apply LR decay
+                if self.lr_decay < 1.0:
+                    for pg in self.optimizer.param_groups:
+                        old_lr = pg['lr']
+                        pg['lr'] = max(1e-5, pg['lr'] * self.lr_decay)
+                        if pg['lr'] != old_lr:
+                            print(f"    LR decay: {old_lr:.2e} → {pg['lr']:.2e}")
 
         self.save(f"{save_path}_final.pt")
 
@@ -705,13 +717,19 @@ if __name__ == "__main__":
     parser.add_argument('--reward-mode', type=str, default='vp_only',
                         choices=['sparse', 'vp_only', 'simplified', 'pbrs_fixed'],
                         help='Reward mode: sparse, vp_only (default), simplified, or pbrs_fixed')
+    parser.add_argument('--lr-decay', type=float, default=1.0,
+                        help='Learning rate decay multiplier per 1000 games (default: 1.0 = no decay, try 0.9 for fine-tuning)')
+    parser.add_argument('--value-weight', type=float, default=0.5,
+                        help='Weight for value loss (default: 0.5, increased from 0.1 for better critic learning)')
     args = parser.parse_args()
 
     trainer = CurriculumTrainerV3(
         model_path=args.model,
         batch_size=args.batch_size,
         learning_rate=args.learning_rate,
-        reward_mode=args.reward_mode
+        reward_mode=args.reward_mode,
+        lr_decay=args.lr_decay,
+        value_weight=args.value_weight
     )
     trainer.train(
         total_games=args.total_games,
