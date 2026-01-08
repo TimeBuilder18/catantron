@@ -546,28 +546,31 @@ class CurriculumTrainerV3:
         recent_wr = np.mean(list(self.phase_wins)[-50:])
         recent_vp = np.mean(list(self.phase_vps)[-50:])
 
-        # Advancement criteria based on difficulty (lowered thresholds for gradual progression)
+        # Advancement criteria based on difficulty
+        # Early phases: OR logic (easier to advance, build confidence)
+        # Later phases: AND logic (must demonstrate real competence)
         if current_random_prob >= 0.85:
-            # Very easy (100-90% random): need >10% WR or >3.5 VP
+            # Very easy (100-90% random): OR logic - just need to show some progress
             return recent_wr > 0.10 or recent_vp > 3.5
         elif current_random_prob >= 0.65:
-            # Easy (80-70% random): need >8% WR or >3.2 VP
+            # Easy (80-70% random): OR logic
             return recent_wr > 0.08 or recent_vp > 3.2
         elif current_random_prob >= 0.45:
-            # Medium random (60-50%): need >6% WR or >3.0 VP
-            return recent_wr > 0.06 or recent_vp > 3.0
+            # Medium random (60-50%): AND logic - must show both WR and VP
+            return recent_wr > 0.05 and recent_vp > 3.0
         elif current_random_prob >= 0.25:
-            # Low random (40-25%): need >5% WR or >2.8 VP
-            return recent_wr > 0.05 or recent_vp > 2.8
+            # Low random (40-25%): AND logic - stricter
+            return recent_wr > 0.05 and recent_vp > 3.2
         elif ai_difficulty == 'medium':
-            # 100% Medium AI: need >4% WR or >2.5 VP to advance to Strong
-            return recent_wr > 0.04 or recent_vp > 2.5
+            # 100% Medium AI: AND logic - must prove competence before facing Strong
+            # Raised threshold: need >5% WR AND >3.5 VP to advance to Strong
+            return recent_wr > 0.05 and recent_vp > 3.5
         else:
             # Strong AI: never auto-advance (final phase)
             return False
 
     def train(self, total_games=10000, save_path='models/curriculum_v3_stable',
-              train_frequency=5, train_steps=15, min_games_per_phase=500):
+              train_frequency=5, train_steps=15, min_games_per_phase=1000):
         """Curriculum training with adaptive phase transitions"""
         os.makedirs('models', exist_ok=True)
 
@@ -711,7 +714,7 @@ if __name__ == "__main__":
     parser.add_argument('--learning-rate', type=float, default=5e-4)
     parser.add_argument('--train-frequency', type=int, default=5)
     parser.add_argument('--train-steps', type=int, default=15)
-    parser.add_argument('--min-games-per-phase', type=int, default=500,
+    parser.add_argument('--min-games-per-phase', type=int, default=1000,
                         help='Minimum games before curriculum can advance')
     parser.add_argument('--model', type=str, default=None,
                         help='Path to existing model to continue training')
