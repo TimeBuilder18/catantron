@@ -288,12 +288,13 @@ class CurriculumTrainerV3:
             self.current_grad_norm = 0.9 * self.current_grad_norm + 0.1 * self.base_grad_norm
 
         # LEARNING RATE ADAPTATION based on policy loss stability
+        # Only reduce LR for instability; don't increase if using lr_decay (fine-tuning mode)
         if avg_policy_loss > 5.0:
             # Training unstable, reduce LR
             for pg in self.optimizer.param_groups:
                 pg['lr'] = max(1e-5, pg['lr'] * 0.8)
-        elif avg_policy_loss < 0.5 and avg_entropy > 1.4:
-            # Training stable and healthy, can increase LR
+        elif avg_policy_loss < 0.5 and avg_entropy > 1.4 and self.lr_decay >= 1.0:
+            # Training stable and healthy, can increase LR (only if not in fine-tuning mode)
             for pg in self.optimizer.param_groups:
                 pg['lr'] = min(self.base_lr * 2, pg['lr'] * 1.02)
 
