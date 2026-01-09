@@ -608,32 +608,52 @@ class CurriculumTrainerV3:
         # Phases: (mix_prob, primary_ai, secondary_ai, phase_name)
         # mix_prob = probability of primary_ai, (1-mix_prob) = probability of secondary_ai
         # secondary_ai=None means random opponents
-        # GRADUAL curriculum with very_weak AI as bridge between random and weak
+        # GRADUAL curriculum with 10% increments for smooth transitions
         phases = [
-            # Phase 1-6: Random to Very Weak AI transition
+            # Phase 1-11: Random to Very Weak AI transition (10% increments)
             (1.0, 'random', None, "100% Random"),
+            (0.90, 'random', 'very_weak', "90% Random + 10% Very Weak AI"),
             (0.80, 'random', 'very_weak', "80% Random + 20% Very Weak AI"),
+            (0.70, 'random', 'very_weak', "70% Random + 30% Very Weak AI"),
             (0.60, 'random', 'very_weak', "60% Random + 40% Very Weak AI"),
+            (0.50, 'random', 'very_weak', "50% Random + 50% Very Weak AI"),
             (0.40, 'random', 'very_weak', "40% Random + 60% Very Weak AI"),
+            (0.30, 'random', 'very_weak', "30% Random + 70% Very Weak AI"),
             (0.20, 'random', 'very_weak', "20% Random + 80% Very Weak AI"),
+            (0.10, 'random', 'very_weak', "10% Random + 90% Very Weak AI"),
             (0.0, 'random', 'very_weak', "100% Very Weak AI"),
-            # Phase 7-11: Very Weak to Weak AI transition
+            # Phase 12-21: Very Weak to Weak AI transition (10% increments)
+            (0.90, 'very_weak', 'weak', "90% Very Weak + 10% Weak AI"),
             (0.80, 'very_weak', 'weak', "80% Very Weak + 20% Weak AI"),
+            (0.70, 'very_weak', 'weak', "70% Very Weak + 30% Weak AI"),
             (0.60, 'very_weak', 'weak', "60% Very Weak + 40% Weak AI"),
+            (0.50, 'very_weak', 'weak', "50% Very Weak + 50% Weak AI"),
             (0.40, 'very_weak', 'weak', "40% Very Weak + 60% Weak AI"),
+            (0.30, 'very_weak', 'weak', "30% Very Weak + 70% Weak AI"),
             (0.20, 'very_weak', 'weak', "20% Very Weak + 80% Weak AI"),
+            (0.10, 'very_weak', 'weak', "10% Very Weak + 90% Weak AI"),
             (0.0, 'very_weak', 'weak', "100% Weak AI"),
-            # Phase 12-16: Weak to Medium AI transition
+            # Phase 22-31: Weak to Medium AI transition (10% increments)
+            (0.90, 'weak', 'medium', "90% Weak + 10% Medium AI"),
             (0.80, 'weak', 'medium', "80% Weak + 20% Medium AI"),
+            (0.70, 'weak', 'medium', "70% Weak + 30% Medium AI"),
             (0.60, 'weak', 'medium', "60% Weak + 40% Medium AI"),
+            (0.50, 'weak', 'medium', "50% Weak + 50% Medium AI"),
             (0.40, 'weak', 'medium', "40% Weak + 60% Medium AI"),
+            (0.30, 'weak', 'medium', "30% Weak + 70% Medium AI"),
             (0.20, 'weak', 'medium', "20% Weak + 80% Medium AI"),
+            (0.10, 'weak', 'medium', "10% Weak + 90% Medium AI"),
             (0.0, 'weak', 'medium', "100% Medium AI"),
-            # Phase 17-21: Medium to Strong AI transition
+            # Phase 32-41: Medium to Strong AI transition (10% increments)
+            (0.90, 'medium', 'strong', "90% Medium + 10% Strong AI"),
             (0.80, 'medium', 'strong', "80% Medium + 20% Strong AI"),
+            (0.70, 'medium', 'strong', "70% Medium + 30% Strong AI"),
             (0.60, 'medium', 'strong', "60% Medium + 40% Strong AI"),
+            (0.50, 'medium', 'strong', "50% Medium + 50% Strong AI"),
             (0.40, 'medium', 'strong', "40% Medium + 60% Strong AI"),
+            (0.30, 'medium', 'strong', "30% Medium + 70% Strong AI"),
             (0.20, 'medium', 'strong', "20% Medium + 80% Strong AI"),
+            (0.10, 'medium', 'strong', "10% Medium + 90% Strong AI"),
             (0.0, 'medium', 'strong', "100% Strong AI"),
         ]
 
