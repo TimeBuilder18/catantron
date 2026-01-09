@@ -310,18 +310,19 @@ class CurriculumTrainerV3:
             for pg in self.optimizer.param_groups:
                 pg['lr'] = min(self.base_lr * 2, pg['lr'] * 1.02)
 
-    def play_game(self, mix_prob=1.0, primary_ai='random', secondary_ai=None):
+    def play_game(self, mix_prob=1.0, primary_ai='random', secondary_ai=None, victory_points_to_win=10):
         """Play game and collect experiences
 
         Args:
             mix_prob: Probability of primary_ai (0.0-1.0)
             primary_ai: Primary AI difficulty ('random', 'very_weak', 'weak', 'medium', 'strong')
             secondary_ai: Secondary AI difficulty (if None, uses random for non-primary)
+            victory_points_to_win: VP needed to win (default 10)
         """
         if self.reward_mode == 'pbrs_fixed':
-            env = PBRSFixedRewardWrapper(player_id=0)
+            env = PBRSFixedRewardWrapper(player_id=0, victory_points_to_win=victory_points_to_win)
         else:
-            env = SimplifiedRewardWrapper(player_id=0, reward_mode=self.reward_mode)
+            env = SimplifiedRewardWrapper(player_id=0, reward_mode=self.reward_mode, victory_points_to_win=victory_points_to_win)
         obs, _ = env.reset()
 
         episode_rewards = []
@@ -551,90 +552,68 @@ class CurriculumTrainerV3:
             'kl': kl_div.item()
         }
 
-    def should_advance_curriculum(self, mix_prob, primary_ai, secondary_ai):
-        """Check if agent has mastered current difficulty level"""
+    def should_advance_curriculum(self, mix_prob, primary_ai, secondary_ai, vp_threshold):
+        """Check if agent has mastered current difficulty level based on VP threshold"""
         if len(self.phase_wins) < 50:
             return False
 
-        recent_wr = np.mean(list(self.phase_wins)[-50:])
         recent_vp = np.mean(list(self.phase_vps)[-50:])
 
-        # Determine the "harder" AI in current phase
-        harder_ai = secondary_ai if secondary_ai else primary_ai
-
-        # Advancement criteria based on opponent difficulty
-        # Phases with lots of easier opponents: OR logic (easier to advance)
-        # Phases with mostly harder AI: AND logic (must demonstrate competence)
-
-        if primary_ai == 'random' and mix_prob >= 0.50:
-            # Mostly random (100-50%): OR logic - just show progress
-            return recent_wr > 0.10 or recent_vp > 3.5
-        elif primary_ai == 'random':
-            # More AI than random: slightly harder OR
-            return recent_wr > 0.08 or recent_vp > 3.3
-        elif harder_ai == 'very_weak':
-            # Transitioning through Very Weak AI: AND logic
-            if mix_prob >= 0.50:
-                return recent_wr > 0.06 or recent_vp > 3.2
-            else:
-                return recent_wr > 0.05 and recent_vp > 3.2
-        elif harder_ai == 'weak':
-            # Transitioning through Weak AI: AND logic
-            if mix_prob >= 0.50:
-                return recent_wr > 0.05 or recent_vp > 3.3
-            else:
-                return recent_wr > 0.05 and recent_vp > 3.3
-        elif harder_ai == 'medium':
-            # Transitioning through Medium AI: AND logic, harder
-            if mix_prob >= 0.50:
-                return recent_wr > 0.05 or recent_vp > 3.4
-            else:
-                return recent_wr > 0.05 and recent_vp > 3.5
-        elif harder_ai == 'strong':
-            # Transitioning to/through Strong AI: AND logic, hardest
-            if mix_prob >= 0.50:
-                return recent_wr > 0.04 and recent_vp > 3.5
-            else:
-                # 100% Strong: never auto-advance (final phase)
-                return False
-        else:
-            return False
+        # Simple VP-based advancement: must reach the VP threshold
+        return recent_vp >= vp_threshold
 
     def train(self, total_games=10000, save_path='models/curriculum_v3_stable',
               train_frequency=5, train_steps=15, min_games_per_phase=1000):
         """Curriculum training with adaptive phase transitions"""
         os.makedirs('models', exist_ok=True)
 
-        # Phases: (mix_prob, primary_ai, secondary_ai, phase_name)
-        # mix_prob = probability of primary_ai, (1-mix_prob) = probability of secondary_ai
-        # secondary_ai=None means random opponents
-        # GRADUAL curriculum with very_weak AI as bridge between random and weak
+        # Phases: (ai_difficulty, vp_to_win, vp_threshold, phase_name)
+        # VP-based curriculum:
+        # - vp_to_win: How many VP needed to win the game (easier = less VP needed)
+        # - vp_threshold: Average VP model must achieve to advance
+        # Each difficulty goes through ALL VP levels (4→10) for smooth progression
         phases = [
-            # Phase 1-6: Random to Very Weak AI transition
-            (1.0, 'random', None, "100% Random"),
-            (0.80, 'random', 'very_weak', "80% Random + 20% Very Weak AI"),
-            (0.60, 'random', 'very_weak', "60% Random + 40% Very Weak AI"),
-            (0.40, 'random', 'very_weak', "40% Random + 60% Very Weak AI"),
-            (0.20, 'random', 'very_weak', "20% Random + 80% Very Weak AI"),
-            (0.0, 'random', 'very_weak', "100% Very Weak AI"),
-            # Phase 7-11: Very Weak to Weak AI transition
-            (0.80, 'very_weak', 'weak', "80% Very Weak + 20% Weak AI"),
-            (0.60, 'very_weak', 'weak', "60% Very Weak + 40% Weak AI"),
-            (0.40, 'very_weak', 'weak', "40% Very Weak + 60% Weak AI"),
-            (0.20, 'very_weak', 'weak', "20% Very Weak + 80% Weak AI"),
-            (0.0, 'very_weak', 'weak', "100% Weak AI"),
-            # Phase 12-16: Weak to Medium AI transition
-            (0.80, 'weak', 'medium', "80% Weak + 20% Medium AI"),
-            (0.60, 'weak', 'medium', "60% Weak + 40% Medium AI"),
-            (0.40, 'weak', 'medium', "40% Weak + 60% Medium AI"),
-            (0.20, 'weak', 'medium', "20% Weak + 80% Medium AI"),
-            (0.0, 'weak', 'medium', "100% Medium AI"),
-            # Phase 17-21: Medium to Strong AI transition
-            (0.80, 'medium', 'strong', "80% Medium + 20% Strong AI"),
-            (0.60, 'medium', 'strong', "60% Medium + 40% Strong AI"),
-            (0.40, 'medium', 'strong', "40% Medium + 60% Strong AI"),
-            (0.20, 'medium', 'strong', "20% Medium + 80% Strong AI"),
-            (0.0, 'medium', 'strong', "100% Strong AI"),
+            # === RANDOM: VP 4→10 ===
+            ('random', 4, 3.5, "Random 4VP"),
+            ('random', 5, 4.0, "Random 5VP"),
+            ('random', 6, 4.5, "Random 6VP"),
+            ('random', 7, 5.0, "Random 7VP"),
+            ('random', 8, 5.5, "Random 8VP"),
+            ('random', 9, 6.0, "Random 9VP"),
+            ('random', 10, 6.5, "Random 10VP"),
+            # === VERY WEAK: VP 4→10 ===
+            ('very_weak', 4, 3.5, "VeryWeak 4VP"),
+            ('very_weak', 5, 4.0, "VeryWeak 5VP"),
+            ('very_weak', 6, 4.5, "VeryWeak 6VP"),
+            ('very_weak', 7, 5.0, "VeryWeak 7VP"),
+            ('very_weak', 8, 5.5, "VeryWeak 8VP"),
+            ('very_weak', 9, 6.0, "VeryWeak 9VP"),
+            ('very_weak', 10, 6.5, "VeryWeak 10VP"),
+            # === WEAK: VP 4→10 ===
+            ('weak', 4, 3.5, "Weak 4VP"),
+            ('weak', 5, 4.0, "Weak 5VP"),
+            ('weak', 6, 4.5, "Weak 6VP"),
+            ('weak', 7, 5.0, "Weak 7VP"),
+            ('weak', 8, 5.5, "Weak 8VP"),
+            ('weak', 9, 6.0, "Weak 9VP"),
+            ('weak', 10, 6.5, "Weak 10VP"),
+            # === MEDIUM: VP 4→10 ===
+            ('medium', 4, 3.5, "Medium 4VP"),
+            ('medium', 5, 4.0, "Medium 5VP"),
+            ('medium', 6, 4.5, "Medium 6VP"),
+            ('medium', 7, 5.0, "Medium 7VP"),
+            ('medium', 8, 5.5, "Medium 8VP"),
+            ('medium', 9, 6.0, "Medium 9VP"),
+            ('medium', 10, 6.5, "Medium 10VP"),
+            # === STRONG: VP 4→10 ===
+            ('strong', 4, 3.5, "Strong 4VP"),
+            ('strong', 5, 4.0, "Strong 5VP"),
+            ('strong', 6, 4.5, "Strong 6VP"),
+            ('strong', 7, 5.0, "Strong 7VP"),
+            ('strong', 8, 5.5, "Strong 8VP"),
+            ('strong', 9, 6.0, "Strong 9VP"),
+            ('strong', 10, 7.0, "Strong 10VP"),
+            ('strong', 10, 999, "Strong 10VP FINAL"),  # Never auto-advance
         ]
 
         print("\n" + "=" * 70)
@@ -659,10 +638,15 @@ class CurriculumTrainerV3:
         start_time = time.time()
 
         for game_num in range(1, total_games + 1):
-            mix_prob, primary_ai, secondary_ai, phase_name = phases[current_phase]
+            ai_difficulty, vp_to_win, vp_threshold, phase_name = phases[current_phase]
 
-            # Play game
-            winner_id, vp, total_reward = self.play_game(mix_prob, primary_ai, secondary_ai)
+            # Play game with the specified AI difficulty and VP to win
+            winner_id, vp, total_reward = self.play_game(
+                mix_prob=1.0,  # Always use the specified AI
+                primary_ai=ai_difficulty,
+                secondary_ai=None,
+                victory_points_to_win=vp_to_win
+            )
             phase_game_count += 1
 
             if winner_id == 0:
@@ -700,7 +684,7 @@ class CurriculumTrainerV3:
             # Check for curriculum advancement
             if (phase_game_count >= min_games_per_phase and
                 current_phase < len(phases) - 1 and
-                self.should_advance_curriculum(mix_prob, primary_ai, secondary_ai)):
+                self.should_advance_curriculum(1.0, ai_difficulty, None, vp_threshold)):
 
                 print(f"\n  ★ ADVANCING from {phase_name} to {phases[current_phase + 1][3]}")
                 print(f"    Games in phase: {phase_game_count}")
@@ -745,7 +729,7 @@ class CurriculumTrainerV3:
         print("TRAINING COMPLETE")
         print(f"Total games: {total_games}")
         print(f"Overall win rate: {total_wins/total_games*100:.1f}%")
-        print(f"Final phase: {phases[current_phase][2]}")
+        print(f"Final phase: {phases[current_phase][3]}")
         print(f"Time: {total_time/60:.1f} min")
         print("=" * 70)
 

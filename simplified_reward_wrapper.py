@@ -18,16 +18,18 @@ from catan_env_pytorch import CatanEnv
 class SimplifiedRewardWrapper:
     """Wraps CatanEnv with simplified rewards for better learning"""
 
-    def __init__(self, player_id=0, reward_mode='vp_only'):
+    def __init__(self, player_id=0, reward_mode='vp_only', victory_points_to_win=10):
         """
         Args:
             player_id: Which player is the AI (0-3)
             reward_mode: 'sparse', 'vp_only', or 'simplified'
+            victory_points_to_win: VP needed to win (default 10)
         """
-        self.env = CatanEnv(player_id=player_id)
+        self.env = CatanEnv(player_id=player_id, victory_points_to_win=victory_points_to_win)
         self.reward_mode = reward_mode
         self.player_id = player_id
         self.last_vp = 0
+        self.victory_points_to_win = victory_points_to_win
 
     def reset(self):
         """Reset environment"""
