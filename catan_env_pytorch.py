@@ -28,15 +28,17 @@ class CatanEnv(gym.Env):
 
     metadata = {'render_modes': ['human'], 'render_fps': 4}
 
-    def __init__(self, player_id=0):
+    def __init__(self, player_id=0, victory_points_to_win=10):
         """
         Args:
             player_id: Which player this environment controls (0-3)
+            victory_points_to_win: VP needed to win (default 10, can be lowered for easier games)
         """
         super().__init__()
 
         self.player_id = player_id
-        self.game_env = AIGameEnvironment()
+        self.victory_points_to_win = victory_points_to_win
+        self.game_env = AIGameEnvironment(victory_points_to_win=victory_points_to_win)
         self._episode_count = 0  # Track episodes for debug output
         self.gamma = 0.99 # Discount factor for PBRS
 
@@ -85,7 +87,7 @@ class CatanEnv(gym.Env):
         if seed is not None:
             np.random.seed(seed)
 
-        self.game_env = AIGameEnvironment()
+        self.game_env = AIGameEnvironment(victory_points_to_win=self.victory_points_to_win)
         self._episode_count += 1
 
         # Reset game state tracking

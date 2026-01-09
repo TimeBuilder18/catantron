@@ -17,12 +17,13 @@ from catan_env_pytorch import CatanEnv
 class PBRSFixedRewardWrapper:
     """PBRS with correct scaling - shaping helps but doesn't dominate"""
 
-    def __init__(self, player_id=0):
-        self.env = CatanEnv(player_id=player_id)
+    def __init__(self, player_id=0, victory_points_to_win=10):
+        self.env = CatanEnv(player_id=player_id, victory_points_to_win=victory_points_to_win)
         self.player_id = player_id
         self.last_potential = 0.0
         self.last_vp = 0
         self.gamma = 0.99
+        self.victory_points_to_win = victory_points_to_win
 
     def reset(self):
         obs, info = self.env.reset()

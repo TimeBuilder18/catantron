@@ -805,9 +805,10 @@ class DiceRoller:
 class GameSystem:
     """Main game system that manages all game state and actions"""
 
-    def __init__(self, game_board, players):
+    def __init__(self, game_board, players, victory_points_to_win=10):
         self.game_board = game_board
         self.players = players
+        self.victory_points_to_win = victory_points_to_win  # Customizable VP threshold
         self.current_player_index = 0
         self.game_phase = "INITIAL_PLACEMENT_1"  # INITIAL_PLACEMENT_1, INITIAL_PLACEMENT_2, NORMAL_PLAY
 
@@ -1251,7 +1252,7 @@ class GameSystem:
     def check_victory_conditions(self):
         """Check if any player has won and return the winner"""
         for player in self.players:
-            if player.calculate_victory_points() >= GameConstants.VICTORY_POINTS_TO_WIN:
+            if player.calculate_victory_points() >= self.victory_points_to_win:
                 return player
         return None
 

@@ -59,8 +59,14 @@ class AIGameEnvironment:
     Manages 4 AI agents playing Catan
     """
 
-    def __init__(self):
-        """Initialize game for 4 AI agents"""
+    def __init__(self, victory_points_to_win=10):
+        """Initialize game for 4 AI agents
+
+        Args:
+            victory_points_to_win: VP needed to win (default 10, can be lowered for easier games)
+        """
+        self.victory_points_to_win = victory_points_to_win
+
         # Create board
         tile_size = 50
         tiles = create_hexagonal_board(tile_size, radius=2)
@@ -81,7 +87,7 @@ class AIGameEnvironment:
             Player("AI Agent 4", (255, 255, 255))
         ]
 
-        self.game = GameSystem(game_board, players)
+        self.game = GameSystem(game_board, players, victory_points_to_win=victory_points_to_win)
 
         # Create rule-based AIs for players 1-3
         self.ai_players = [None, RuleBasedAI(), RuleBasedAI(), RuleBasedAI()]
