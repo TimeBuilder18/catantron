@@ -86,9 +86,10 @@ class RuleBasedAI:
     Rule-based AI with configurable difficulty levels.
 
     Difficulty levels:
+    - 'very_weak': Picks from top 5 spots with randomness (bridge between random and weak)
     - 'weak': Random placement, basic build priorities
-    - 'medium': Smart settlement placement (pip scoring)
-    - 'strong': Smart placement + resource diversity + strategic roads
+    - 'medium': Smart settlement placement (pip scoring), picks from top 3
+    - 'strong': Smart placement + resource diversity + strategic roads, picks best
     """
 
     def __init__(self, difficulty='medium'):
@@ -96,7 +97,7 @@ class RuleBasedAI:
         Initialize the AI with a difficulty level.
 
         Args:
-            difficulty: 'weak', 'medium', or 'strong'
+            difficulty: 'very_weak', 'weak', 'medium', or 'strong'
         """
         self.name = f"Rule-Based AI ({difficulty})"
         self.difficulty = difficulty
@@ -250,6 +251,13 @@ class RuleBasedAI:
         if self.difficulty == 'weak':
             # Weak: Random choice
             return random.choice(vertices)
+        elif self.difficulty == 'very_weak':
+            # Very Weak: Score by pip count, but pick randomly from top 5
+            # This is a bridge between random and weak - slightly smarter than random
+            scored = [(v, score_vertex(v, consider_diversity=False)) for v in vertices]
+            scored.sort(key=lambda x: x[1], reverse=True)
+            top_n = min(5, len(scored))
+            return random.choice([s[0] for s in scored[:top_n]])
         elif self.difficulty == 'medium':
             # Medium: Score by pip count only
             scored = [(v, score_vertex(v, consider_diversity=False)) for v in vertices]
@@ -269,6 +277,12 @@ class RuleBasedAI:
         if self.difficulty == 'weak':
             # Weak: Random choice
             return random.choice(edges)
+        elif self.difficulty == 'very_weak':
+            # Very Weak: Basic scoring, pick from top 5
+            scored = [(e, score_edge(e, player, game)) for e in edges]
+            scored.sort(key=lambda x: x[1], reverse=True)
+            top_n = min(5, len(scored))
+            return random.choice([s[0] for s in scored[:top_n]])
         elif self.difficulty == 'medium':
             # Medium: Basic expansion scoring
             scored = [(e, score_edge(e, player, game)) for e in edges]
@@ -378,7 +392,7 @@ def play_rule_based_turn(env, player_id, difficulty='medium'):
     Args:
         env: CatanEnv instance
         player_id: Which player (0-3)
-        difficulty: 'weak', 'medium', or 'strong'
+        difficulty: 'very_weak', 'weak', 'medium', or 'strong'
 
     Returns:
         bool: True if turn completed successfully

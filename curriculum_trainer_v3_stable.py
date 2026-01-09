@@ -105,23 +105,33 @@ def play_random_turn(game, player_id):
     return True
 
 
-def play_opponent_turn(game, player_id, random_prob, ai_difficulty='medium'):
-    """Play opponent with mix of random/rule-based AI
+def play_opponent_turn(game, player_id, mix_prob, primary_ai='medium', secondary_ai=None):
+    """Play opponent with mix of AI difficulties
 
     Args:
         game: The game instance
         player_id: Which player to play
-        random_prob: Probability of playing randomly (0.0-1.0)
-        ai_difficulty: 'weak', 'medium', or 'strong' for rule-based AI
+        mix_prob: Probability of primary AI (0.0-1.0)
+        primary_ai: Primary AI difficulty ('very_weak', 'weak', 'medium', 'strong', or 'random')
+        secondary_ai: Secondary AI difficulty (if None, uses primary_ai vs random)
     """
-    if random.random() < random_prob:
+    from rule_based_ai import play_rule_based_turn
+
+    class MinimalEnv:
+        def __init__(self, g):
+            self.game_env = type('obj', (object,), {'game': g})()
+
+    # Decide which AI to use based on mix_prob
+    if random.random() < mix_prob:
+        chosen_ai = primary_ai
+    else:
+        chosen_ai = secondary_ai if secondary_ai else 'random'
+
+    # Play with chosen AI
+    if chosen_ai == 'random':
         return play_random_turn(game, player_id)
     else:
-        from rule_based_ai import play_rule_based_turn
-        class MinimalEnv:
-            def __init__(self, g):
-                self.game_env = type('obj', (object,), {'game': g})()
-        return play_rule_based_turn(MinimalEnv(game), player_id, difficulty=ai_difficulty)
+        return play_rule_based_turn(MinimalEnv(game), player_id, difficulty=chosen_ai)
 
 
 class PrioritizedReplayBuffer:
@@ -183,11 +193,12 @@ class CurriculumTrainerV3:
     """Stable curriculum trainer with entropy collapse prevention"""
 
     def __init__(self, model_path=None, learning_rate=5e-4, batch_size=None, reward_mode='vp_only',
-                 lr_decay=1.0, value_weight=0.5):
+                 lr_decay=1.0, value_weight=0.5, entropy_decay=1.0):
         self.device = get_device()
         self.reward_mode = reward_mode
         self.lr_decay = lr_decay  # Learning rate decay per 1000 games
         self.value_weight = value_weight  # Weight for value loss (default increased from 0.1)
+        self.entropy_decay = entropy_decay  # Entropy coefficient decay per 1000 games
 
         if batch_size is None:
             batch_size = 1024 if self.device.type == 'cuda' else 256
@@ -238,6 +249,7 @@ class CurriculumTrainerV3:
         print(f"Reward mode: {self.reward_mode}")
         print(f"Target entropy: {self.target_entropy}")
         print(f"Base entropy coef: {self.entropy_coef}")
+        print(f"Entropy decay: {self.entropy_decay} per 1000 games")
         print(f"Max KL divergence: {self.max_kl}")
 
     def _compute_smooth_entropy_penalty(self, entropy):
@@ -298,12 +310,13 @@ class CurriculumTrainerV3:
             for pg in self.optimizer.param_groups:
                 pg['lr'] = min(self.base_lr * 2, pg['lr'] * 1.02)
 
-    def play_game(self, opponent_random_prob=1.0, ai_difficulty='medium'):
+    def play_game(self, mix_prob=1.0, primary_ai='random', secondary_ai=None):
         """Play game and collect experiences
 
         Args:
-            opponent_random_prob: Probability opponents play randomly
-            ai_difficulty: Difficulty of rule-based AI ('weak', 'medium', 'strong')
+            mix_prob: Probability of primary_ai (0.0-1.0)
+            primary_ai: Primary AI difficulty ('random', 'very_weak', 'weak', 'medium', 'strong')
+            secondary_ai: Secondary AI difficulty (if None, uses random for non-primary)
         """
         if self.reward_mode == 'pbrs_fixed':
             env = PBRSFixedRewardWrapper(player_id=0)
@@ -343,7 +356,7 @@ class CurriculumTrainerV3:
                 obs = next_obs
                 done = terminated or truncated
             else:
-                success = play_opponent_turn(game, current_id, opponent_random_prob, ai_difficulty)
+                success = play_opponent_turn(game, current_id, mix_prob, primary_ai, secondary_ai)
                 if not success and game.can_end_turn():
                     game.end_turn()
 
@@ -538,7 +551,7 @@ class CurriculumTrainerV3:
             'kl': kl_div.item()
         }
 
-    def should_advance_curriculum(self, current_random_prob, ai_difficulty='medium'):
+    def should_advance_curriculum(self, mix_prob, primary_ai, secondary_ai):
         """Check if agent has mastered current difficulty level"""
         if len(self.phase_wins) < 50:
             return False
@@ -546,27 +559,45 @@ class CurriculumTrainerV3:
         recent_wr = np.mean(list(self.phase_wins)[-50:])
         recent_vp = np.mean(list(self.phase_vps)[-50:])
 
-        # Advancement criteria based on difficulty
-        # Early phases: OR logic (easier to advance, build confidence)
-        # Later phases: AND logic (must demonstrate real competence)
-        if current_random_prob >= 0.85:
-            # Very easy (100-90% random): OR logic - just need to show some progress
+        # Determine the "harder" AI in current phase
+        harder_ai = secondary_ai if secondary_ai else primary_ai
+
+        # Advancement criteria based on opponent difficulty
+        # Phases with lots of easier opponents: OR logic (easier to advance)
+        # Phases with mostly harder AI: AND logic (must demonstrate competence)
+
+        if primary_ai == 'random' and mix_prob >= 0.50:
+            # Mostly random (100-50%): OR logic - just show progress
             return recent_wr > 0.10 or recent_vp > 3.5
-        elif current_random_prob >= 0.65:
-            # Easy (80-70% random): OR logic
-            return recent_wr > 0.08 or recent_vp > 3.2
-        elif current_random_prob >= 0.45:
-            # Medium random (60-50%): AND logic - must show both WR and VP
-            return recent_wr > 0.05 and recent_vp > 3.0
-        elif current_random_prob >= 0.25:
-            # Low random (40-25%): AND logic - stricter
-            return recent_wr > 0.05 and recent_vp > 3.2
-        elif ai_difficulty == 'medium':
-            # 100% Medium AI: AND logic - must prove competence before facing Strong
-            # Raised threshold: need >5% WR AND >3.5 VP to advance to Strong
-            return recent_wr > 0.05 and recent_vp > 3.5
+        elif primary_ai == 'random':
+            # More AI than random: slightly harder OR
+            return recent_wr > 0.08 or recent_vp > 3.3
+        elif harder_ai == 'very_weak':
+            # Transitioning through Very Weak AI: AND logic
+            if mix_prob >= 0.50:
+                return recent_wr > 0.06 or recent_vp > 3.2
+            else:
+                return recent_wr > 0.05 and recent_vp > 3.2
+        elif harder_ai == 'weak':
+            # Transitioning through Weak AI: AND logic
+            if mix_prob >= 0.50:
+                return recent_wr > 0.05 or recent_vp > 3.3
+            else:
+                return recent_wr > 0.05 and recent_vp > 3.3
+        elif harder_ai == 'medium':
+            # Transitioning through Medium AI: AND logic, harder
+            if mix_prob >= 0.50:
+                return recent_wr > 0.05 or recent_vp > 3.4
+            else:
+                return recent_wr > 0.05 and recent_vp > 3.5
+        elif harder_ai == 'strong':
+            # Transitioning to/through Strong AI: AND logic, hardest
+            if mix_prob >= 0.50:
+                return recent_wr > 0.04 and recent_vp > 3.5
+            else:
+                # 100% Strong: never auto-advance (final phase)
+                return False
         else:
-            # Strong AI: never auto-advance (final phase)
             return False
 
     def train(self, total_games=10000, save_path='models/curriculum_v3_stable',
@@ -574,21 +605,36 @@ class CurriculumTrainerV3:
         """Curriculum training with adaptive phase transitions"""
         os.makedirs('models', exist_ok=True)
 
-        # Phases: (random_prob, ai_difficulty, phase_name)
-        # GRADUAL curriculum: 10% increments to prevent distribution shift collapse
+        # Phases: (mix_prob, primary_ai, secondary_ai, phase_name)
+        # mix_prob = probability of primary_ai, (1-mix_prob) = probability of secondary_ai
+        # secondary_ai=None means random opponents
+        # GRADUAL curriculum with very_weak AI as bridge between random and weak
         phases = [
-            (1.0, 'weak', "100% Random"),
-            (0.90, 'weak', "90% Random + 10% Weak AI"),
-            (0.80, 'weak', "80% Random + 20% Weak AI"),
-            (0.70, 'weak', "70% Random + 30% Weak AI"),
-            (0.60, 'weak', "60% Random + 40% Weak AI"),
-            (0.50, 'weak', "50% Random + 50% Weak AI"),
-            (0.40, 'medium', "40% Random + 60% Medium AI"),
-            (0.30, 'medium', "30% Random + 70% Medium AI"),
-            (0.20, 'medium', "20% Random + 80% Medium AI"),
-            (0.10, 'medium', "10% Random + 90% Medium AI"),
-            (0.0, 'medium', "100% Medium AI"),
-            (0.0, 'strong', "100% Strong AI"),
+            # Phase 1-6: Random to Very Weak AI transition
+            (1.0, 'random', None, "100% Random"),
+            (0.80, 'random', 'very_weak', "80% Random + 20% Very Weak AI"),
+            (0.60, 'random', 'very_weak', "60% Random + 40% Very Weak AI"),
+            (0.40, 'random', 'very_weak', "40% Random + 60% Very Weak AI"),
+            (0.20, 'random', 'very_weak', "20% Random + 80% Very Weak AI"),
+            (0.0, 'random', 'very_weak', "100% Very Weak AI"),
+            # Phase 7-11: Very Weak to Weak AI transition
+            (0.80, 'very_weak', 'weak', "80% Very Weak + 20% Weak AI"),
+            (0.60, 'very_weak', 'weak', "60% Very Weak + 40% Weak AI"),
+            (0.40, 'very_weak', 'weak', "40% Very Weak + 60% Weak AI"),
+            (0.20, 'very_weak', 'weak', "20% Very Weak + 80% Weak AI"),
+            (0.0, 'very_weak', 'weak', "100% Weak AI"),
+            # Phase 12-16: Weak to Medium AI transition
+            (0.80, 'weak', 'medium', "80% Weak + 20% Medium AI"),
+            (0.60, 'weak', 'medium', "60% Weak + 40% Medium AI"),
+            (0.40, 'weak', 'medium', "40% Weak + 60% Medium AI"),
+            (0.20, 'weak', 'medium', "20% Weak + 80% Medium AI"),
+            (0.0, 'weak', 'medium', "100% Medium AI"),
+            # Phase 17-21: Medium to Strong AI transition
+            (0.80, 'medium', 'strong', "80% Medium + 20% Strong AI"),
+            (0.60, 'medium', 'strong', "60% Medium + 40% Strong AI"),
+            (0.40, 'medium', 'strong', "40% Medium + 60% Strong AI"),
+            (0.20, 'medium', 'strong', "20% Medium + 80% Strong AI"),
+            (0.0, 'medium', 'strong', "100% Strong AI"),
         ]
 
         print("\n" + "=" * 70)
@@ -613,10 +659,10 @@ class CurriculumTrainerV3:
         start_time = time.time()
 
         for game_num in range(1, total_games + 1):
-            random_prob, ai_difficulty, phase_name = phases[current_phase]
+            mix_prob, primary_ai, secondary_ai, phase_name = phases[current_phase]
 
             # Play game
-            winner_id, vp, total_reward = self.play_game(random_prob, ai_difficulty)
+            winner_id, vp, total_reward = self.play_game(mix_prob, primary_ai, secondary_ai)
             phase_game_count += 1
 
             if winner_id == 0:
@@ -654,9 +700,9 @@ class CurriculumTrainerV3:
             # Check for curriculum advancement
             if (phase_game_count >= min_games_per_phase and
                 current_phase < len(phases) - 1 and
-                self.should_advance_curriculum(random_prob, ai_difficulty)):
+                self.should_advance_curriculum(mix_prob, primary_ai, secondary_ai)):
 
-                print(f"\n  ★ ADVANCING from {phase_name} to {phases[current_phase + 1][2]}")
+                print(f"\n  ★ ADVANCING from {phase_name} to {phases[current_phase + 1][3]}")
                 print(f"    Games in phase: {phase_game_count}")
                 print(f"    Recent WR: {np.mean(list(self.phase_wins)[-50:])*100:.1f}%")
                 print(f"    Recent VP: {np.mean(list(self.phase_vps)[-50:]):.1f}\n")
@@ -673,7 +719,7 @@ class CurriculumTrainerV3:
                 # Save checkpoint
                 self.save(f"{save_path}_phase{current_phase}.pt")
 
-            # Periodic saves and LR decay
+            # Periodic saves, LR decay, and entropy decay
             if game_num % 1000 == 0:
                 self.save(f"{save_path}_game{game_num}.pt")
                 # Apply LR decay
@@ -683,6 +729,14 @@ class CurriculumTrainerV3:
                         pg['lr'] = max(1e-5, pg['lr'] * self.lr_decay)
                         if pg['lr'] != old_lr:
                             print(f"    LR decay: {old_lr:.2e} → {pg['lr']:.2e}")
+                # Apply entropy decay (reduce exploration over time)
+                if self.entropy_decay < 1.0:
+                    old_ec = self.current_entropy_coef
+                    # Decay entropy coef but keep above minimum
+                    self.current_entropy_coef = max(self.min_entropy_coef,
+                                                     self.current_entropy_coef * self.entropy_decay)
+                    if self.current_entropy_coef != old_ec:
+                        print(f"    Entropy decay: {old_ec:.3f} → {self.current_entropy_coef:.3f}")
 
         self.save(f"{save_path}_final.pt")
 
@@ -722,9 +776,11 @@ if __name__ == "__main__":
                         choices=['sparse', 'vp_only', 'simplified', 'pbrs_fixed'],
                         help='Reward mode: sparse, vp_only (default), simplified, or pbrs_fixed')
     parser.add_argument('--lr-decay', type=float, default=1.0,
-                        help='Learning rate decay multiplier per 1000 games (default: 1.0 = no decay, try 0.9 for fine-tuning)')
+                        help='Learning rate decay multiplier per 1000 games (default: 1.0 = no decay, try 0.95 for fine-tuning)')
     parser.add_argument('--value-weight', type=float, default=0.5,
                         help='Weight for value loss (default: 0.5, increased from 0.1 for better critic learning)')
+    parser.add_argument('--entropy-decay', type=float, default=1.0,
+                        help='Entropy coefficient decay per 1000 games (default: 1.0 = no decay, try 0.95 to reduce exploration over time)')
     args = parser.parse_args()
 
     trainer = CurriculumTrainerV3(
@@ -733,7 +789,8 @@ if __name__ == "__main__":
         learning_rate=args.learning_rate,
         reward_mode=args.reward_mode,
         lr_decay=args.lr_decay,
-        value_weight=args.value_weight
+        value_weight=args.value_weight,
+        entropy_decay=args.entropy_decay
     )
     trainer.train(
         total_games=args.total_games,
