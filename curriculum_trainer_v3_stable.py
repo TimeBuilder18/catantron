@@ -571,41 +571,49 @@ class CurriculumTrainerV3:
         # VP-based curriculum:
         # - vp_to_win: How many VP needed to win the game (easier = less VP needed)
         # - vp_threshold: Average VP model must achieve to advance
-        # Start with easy games (4 VP to win) and gradually increase to 10 VP
+        # Each difficulty goes through ALL VP levels (4→10) for smooth progression
         phases = [
-            # Random opponents, easy game (4 VP to win)
-            ('random', 4, 3.0, "Random (4VP game, target: 3.0)"),
-            ('random', 4, 3.5, "Random (4VP game, target: 3.5)"),
-            ('random', 5, 3.5, "Random (5VP game, target: 3.5)"),
-            ('random', 5, 4.0, "Random (5VP game, target: 4.0)"),
-            ('random', 6, 4.0, "Random (6VP game, target: 4.0)"),
-            ('random', 6, 4.5, "Random (6VP game, target: 4.5)"),
-            ('random', 7, 4.5, "Random (7VP game, target: 4.5)"),
-            ('random', 7, 5.0, "Random (7VP game, target: 5.0)"),
-            # Very Weak AI, increasing game length
-            ('very_weak', 6, 4.0, "Very Weak (6VP game, target: 4.0)"),
-            ('very_weak', 6, 4.5, "Very Weak (6VP game, target: 4.5)"),
-            ('very_weak', 7, 4.5, "Very Weak (7VP game, target: 4.5)"),
-            ('very_weak', 7, 5.0, "Very Weak (7VP game, target: 5.0)"),
-            ('very_weak', 8, 5.0, "Very Weak (8VP game, target: 5.0)"),
-            # Weak AI
-            ('weak', 7, 4.5, "Weak (7VP game, target: 4.5)"),
-            ('weak', 7, 5.0, "Weak (7VP game, target: 5.0)"),
-            ('weak', 8, 5.0, "Weak (8VP game, target: 5.0)"),
-            ('weak', 8, 5.5, "Weak (8VP game, target: 5.5)"),
-            ('weak', 9, 5.5, "Weak (9VP game, target: 5.5)"),
-            # Medium AI
-            ('medium', 8, 5.0, "Medium (8VP game, target: 5.0)"),
-            ('medium', 8, 5.5, "Medium (8VP game, target: 5.5)"),
-            ('medium', 9, 5.5, "Medium (9VP game, target: 5.5)"),
-            ('medium', 9, 6.0, "Medium (9VP game, target: 6.0)"),
-            ('medium', 10, 6.0, "Medium (10VP game, target: 6.0)"),
-            # Strong AI - full game
-            ('strong', 10, 5.5, "Strong (10VP game, target: 5.5)"),
-            ('strong', 10, 6.0, "Strong (10VP game, target: 6.0)"),
-            ('strong', 10, 6.5, "Strong (10VP game, target: 6.5)"),
-            ('strong', 10, 7.0, "Strong (10VP game, target: 7.0)"),
-            ('strong', 10, 999, "Strong (10VP game, final)"),  # Never auto-advance
+            # === RANDOM: VP 4→10 ===
+            ('random', 4, 3.5, "Random 4VP"),
+            ('random', 5, 4.0, "Random 5VP"),
+            ('random', 6, 4.5, "Random 6VP"),
+            ('random', 7, 5.0, "Random 7VP"),
+            ('random', 8, 5.5, "Random 8VP"),
+            ('random', 9, 6.0, "Random 9VP"),
+            ('random', 10, 6.5, "Random 10VP"),
+            # === VERY WEAK: VP 4→10 ===
+            ('very_weak', 4, 3.5, "VeryWeak 4VP"),
+            ('very_weak', 5, 4.0, "VeryWeak 5VP"),
+            ('very_weak', 6, 4.5, "VeryWeak 6VP"),
+            ('very_weak', 7, 5.0, "VeryWeak 7VP"),
+            ('very_weak', 8, 5.5, "VeryWeak 8VP"),
+            ('very_weak', 9, 6.0, "VeryWeak 9VP"),
+            ('very_weak', 10, 6.5, "VeryWeak 10VP"),
+            # === WEAK: VP 4→10 ===
+            ('weak', 4, 3.5, "Weak 4VP"),
+            ('weak', 5, 4.0, "Weak 5VP"),
+            ('weak', 6, 4.5, "Weak 6VP"),
+            ('weak', 7, 5.0, "Weak 7VP"),
+            ('weak', 8, 5.5, "Weak 8VP"),
+            ('weak', 9, 6.0, "Weak 9VP"),
+            ('weak', 10, 6.5, "Weak 10VP"),
+            # === MEDIUM: VP 4→10 ===
+            ('medium', 4, 3.5, "Medium 4VP"),
+            ('medium', 5, 4.0, "Medium 5VP"),
+            ('medium', 6, 4.5, "Medium 6VP"),
+            ('medium', 7, 5.0, "Medium 7VP"),
+            ('medium', 8, 5.5, "Medium 8VP"),
+            ('medium', 9, 6.0, "Medium 9VP"),
+            ('medium', 10, 6.5, "Medium 10VP"),
+            # === STRONG: VP 4→10 ===
+            ('strong', 4, 3.5, "Strong 4VP"),
+            ('strong', 5, 4.0, "Strong 5VP"),
+            ('strong', 6, 4.5, "Strong 6VP"),
+            ('strong', 7, 5.0, "Strong 7VP"),
+            ('strong', 8, 5.5, "Strong 8VP"),
+            ('strong', 9, 6.0, "Strong 9VP"),
+            ('strong', 10, 7.0, "Strong 10VP"),
+            ('strong', 10, 999, "Strong 10VP FINAL"),  # Never auto-advance
         ]
 
         print("\n" + "=" * 70)
