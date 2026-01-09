@@ -105,23 +105,33 @@ def play_random_turn(game, player_id):
     return True
 
 
-def play_opponent_turn(game, player_id, random_prob, ai_difficulty='medium'):
-    """Play opponent with mix of random/rule-based AI
+def play_opponent_turn(game, player_id, mix_prob, primary_ai='medium', secondary_ai=None):
+    """Play opponent with mix of AI difficulties
 
     Args:
         game: The game instance
         player_id: Which player to play
-        random_prob: Probability of playing randomly (0.0-1.0)
-        ai_difficulty: 'weak', 'medium', or 'strong' for rule-based AI
+        mix_prob: Probability of primary AI (0.0-1.0)
+        primary_ai: Primary AI difficulty ('very_weak', 'weak', 'medium', 'strong', or 'random')
+        secondary_ai: Secondary AI difficulty (if None, uses primary_ai vs random)
     """
-    if random.random() < random_prob:
+    from rule_based_ai import play_rule_based_turn
+
+    class MinimalEnv:
+        def __init__(self, g):
+            self.game_env = type('obj', (object,), {'game': g})()
+
+    # Decide which AI to use based on mix_prob
+    if random.random() < mix_prob:
+        chosen_ai = primary_ai
+    else:
+        chosen_ai = secondary_ai if secondary_ai else 'random'
+
+    # Play with chosen AI
+    if chosen_ai == 'random':
         return play_random_turn(game, player_id)
     else:
-        from rule_based_ai import play_rule_based_turn
-        class MinimalEnv:
-            def __init__(self, g):
-                self.game_env = type('obj', (object,), {'game': g})()
-        return play_rule_based_turn(MinimalEnv(game), player_id, difficulty=ai_difficulty)
+        return play_rule_based_turn(MinimalEnv(game), player_id, difficulty=chosen_ai)
 
 
 class PrioritizedReplayBuffer:
@@ -300,12 +310,13 @@ class CurriculumTrainerV3:
             for pg in self.optimizer.param_groups:
                 pg['lr'] = min(self.base_lr * 2, pg['lr'] * 1.02)
 
-    def play_game(self, opponent_random_prob=1.0, ai_difficulty='medium'):
+    def play_game(self, mix_prob=1.0, primary_ai='random', secondary_ai=None):
         """Play game and collect experiences
 
         Args:
-            opponent_random_prob: Probability opponents play randomly
-            ai_difficulty: Difficulty of rule-based AI ('weak', 'medium', 'strong')
+            mix_prob: Probability of primary_ai (0.0-1.0)
+            primary_ai: Primary AI difficulty ('random', 'very_weak', 'weak', 'medium', 'strong')
+            secondary_ai: Secondary AI difficulty (if None, uses random for non-primary)
         """
         if self.reward_mode == 'pbrs_fixed':
             env = PBRSFixedRewardWrapper(player_id=0)
@@ -345,7 +356,7 @@ class CurriculumTrainerV3:
                 obs = next_obs
                 done = terminated or truncated
             else:
-                success = play_opponent_turn(game, current_id, opponent_random_prob, ai_difficulty)
+                success = play_opponent_turn(game, current_id, mix_prob, primary_ai, secondary_ai)
                 if not success and game.can_end_turn():
                     game.end_turn()
 
@@ -540,7 +551,7 @@ class CurriculumTrainerV3:
             'kl': kl_div.item()
         }
 
-    def should_advance_curriculum(self, current_random_prob, ai_difficulty='medium'):
+    def should_advance_curriculum(self, mix_prob, primary_ai, secondary_ai):
         """Check if agent has mastered current difficulty level"""
         if len(self.phase_wins) < 50:
             return False
@@ -548,29 +559,45 @@ class CurriculumTrainerV3:
         recent_wr = np.mean(list(self.phase_wins)[-50:])
         recent_vp = np.mean(list(self.phase_vps)[-50:])
 
-        # Advancement criteria based on difficulty
-        # Early phases with random: OR logic (easier to advance)
-        # Pure AI phases: AND logic (must demonstrate real competence)
-        if current_random_prob >= 0.75:
-            # Mostly random (100-80%): OR logic - just need to show some progress
+        # Determine the "harder" AI in current phase
+        harder_ai = secondary_ai if secondary_ai else primary_ai
+
+        # Advancement criteria based on opponent difficulty
+        # Phases with lots of easier opponents: OR logic (easier to advance)
+        # Phases with mostly harder AI: AND logic (must demonstrate competence)
+
+        if primary_ai == 'random' and mix_prob >= 0.50:
+            # Mostly random (100-50%): OR logic - just show progress
             return recent_wr > 0.10 or recent_vp > 3.5
-        elif current_random_prob >= 0.50:
-            # Mixed (60-50% random): OR logic, slightly harder
-            return recent_wr > 0.08 or recent_vp > 3.2
-        elif current_random_prob >= 0.25:
-            # Low random (40-20%): AND logic - must show both WR and VP
-            return recent_wr > 0.05 and recent_vp > 3.0
-        elif ai_difficulty == 'very_weak':
-            # 100% Very Weak AI: AND logic, moderate threshold
-            return recent_wr > 0.06 and recent_vp > 3.2
-        elif ai_difficulty == 'weak':
-            # 100% Weak AI: AND logic, harder threshold
-            return recent_wr > 0.05 and recent_vp > 3.3
-        elif ai_difficulty == 'medium':
-            # 100% Medium AI: AND logic - must prove competence before facing Strong
-            return recent_wr > 0.05 and recent_vp > 3.5
+        elif primary_ai == 'random':
+            # More AI than random: slightly harder OR
+            return recent_wr > 0.08 or recent_vp > 3.3
+        elif harder_ai == 'very_weak':
+            # Transitioning through Very Weak AI: AND logic
+            if mix_prob >= 0.50:
+                return recent_wr > 0.06 or recent_vp > 3.2
+            else:
+                return recent_wr > 0.05 and recent_vp > 3.2
+        elif harder_ai == 'weak':
+            # Transitioning through Weak AI: AND logic
+            if mix_prob >= 0.50:
+                return recent_wr > 0.05 or recent_vp > 3.3
+            else:
+                return recent_wr > 0.05 and recent_vp > 3.3
+        elif harder_ai == 'medium':
+            # Transitioning through Medium AI: AND logic, harder
+            if mix_prob >= 0.50:
+                return recent_wr > 0.05 or recent_vp > 3.4
+            else:
+                return recent_wr > 0.05 and recent_vp > 3.5
+        elif harder_ai == 'strong':
+            # Transitioning to/through Strong AI: AND logic, hardest
+            if mix_prob >= 0.50:
+                return recent_wr > 0.04 and recent_vp > 3.5
+            else:
+                # 100% Strong: never auto-advance (final phase)
+                return False
         else:
-            # Strong AI: never auto-advance (final phase)
             return False
 
     def train(self, total_games=10000, save_path='models/curriculum_v3_stable',
@@ -578,22 +605,36 @@ class CurriculumTrainerV3:
         """Curriculum training with adaptive phase transitions"""
         os.makedirs('models', exist_ok=True)
 
-        # Phases: (random_prob, ai_difficulty, phase_name)
+        # Phases: (mix_prob, primary_ai, secondary_ai, phase_name)
+        # mix_prob = probability of primary_ai, (1-mix_prob) = probability of secondary_ai
+        # secondary_ai=None means random opponents
         # GRADUAL curriculum with very_weak AI as bridge between random and weak
         phases = [
-            # Phase 1-3: Random to Very Weak AI transition
-            (1.0, 'very_weak', "100% Random"),
-            (0.80, 'very_weak', "80% Random + 20% Very Weak AI"),
-            (0.60, 'very_weak', "60% Random + 40% Very Weak AI"),
-            (0.40, 'very_weak', "40% Random + 60% Very Weak AI"),
-            (0.20, 'very_weak', "20% Random + 80% Very Weak AI"),
-            (0.0, 'very_weak', "100% Very Weak AI"),
-            # Phase 7-10: Very Weak to Weak AI transition
-            (0.0, 'weak', "100% Weak AI"),
-            # Phase 11-14: Weak to Medium AI transition
-            (0.0, 'medium', "100% Medium AI"),
-            # Phase 15: Strong AI (final)
-            (0.0, 'strong', "100% Strong AI"),
+            # Phase 1-6: Random to Very Weak AI transition
+            (1.0, 'random', None, "100% Random"),
+            (0.80, 'random', 'very_weak', "80% Random + 20% Very Weak AI"),
+            (0.60, 'random', 'very_weak', "60% Random + 40% Very Weak AI"),
+            (0.40, 'random', 'very_weak', "40% Random + 60% Very Weak AI"),
+            (0.20, 'random', 'very_weak', "20% Random + 80% Very Weak AI"),
+            (0.0, 'random', 'very_weak', "100% Very Weak AI"),
+            # Phase 7-11: Very Weak to Weak AI transition
+            (0.80, 'very_weak', 'weak', "80% Very Weak + 20% Weak AI"),
+            (0.60, 'very_weak', 'weak', "60% Very Weak + 40% Weak AI"),
+            (0.40, 'very_weak', 'weak', "40% Very Weak + 60% Weak AI"),
+            (0.20, 'very_weak', 'weak', "20% Very Weak + 80% Weak AI"),
+            (0.0, 'very_weak', 'weak', "100% Weak AI"),
+            # Phase 12-16: Weak to Medium AI transition
+            (0.80, 'weak', 'medium', "80% Weak + 20% Medium AI"),
+            (0.60, 'weak', 'medium', "60% Weak + 40% Medium AI"),
+            (0.40, 'weak', 'medium', "40% Weak + 60% Medium AI"),
+            (0.20, 'weak', 'medium', "20% Weak + 80% Medium AI"),
+            (0.0, 'weak', 'medium', "100% Medium AI"),
+            # Phase 17-21: Medium to Strong AI transition
+            (0.80, 'medium', 'strong', "80% Medium + 20% Strong AI"),
+            (0.60, 'medium', 'strong', "60% Medium + 40% Strong AI"),
+            (0.40, 'medium', 'strong', "40% Medium + 60% Strong AI"),
+            (0.20, 'medium', 'strong', "20% Medium + 80% Strong AI"),
+            (0.0, 'medium', 'strong', "100% Strong AI"),
         ]
 
         print("\n" + "=" * 70)
@@ -618,10 +659,10 @@ class CurriculumTrainerV3:
         start_time = time.time()
 
         for game_num in range(1, total_games + 1):
-            random_prob, ai_difficulty, phase_name = phases[current_phase]
+            mix_prob, primary_ai, secondary_ai, phase_name = phases[current_phase]
 
             # Play game
-            winner_id, vp, total_reward = self.play_game(random_prob, ai_difficulty)
+            winner_id, vp, total_reward = self.play_game(mix_prob, primary_ai, secondary_ai)
             phase_game_count += 1
 
             if winner_id == 0:
@@ -659,9 +700,9 @@ class CurriculumTrainerV3:
             # Check for curriculum advancement
             if (phase_game_count >= min_games_per_phase and
                 current_phase < len(phases) - 1 and
-                self.should_advance_curriculum(random_prob, ai_difficulty)):
+                self.should_advance_curriculum(mix_prob, primary_ai, secondary_ai)):
 
-                print(f"\n  ★ ADVANCING from {phase_name} to {phases[current_phase + 1][2]}")
+                print(f"\n  ★ ADVANCING from {phase_name} to {phases[current_phase + 1][3]}")
                 print(f"    Games in phase: {phase_game_count}")
                 print(f"    Recent WR: {np.mean(list(self.phase_wins)[-50:])*100:.1f}%")
                 print(f"    Recent VP: {np.mean(list(self.phase_vps)[-50:]):.1f}\n")
