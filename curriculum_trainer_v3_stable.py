@@ -142,10 +142,15 @@ class PrioritizedReplayBuffer:
         self.buffer = deque(maxlen=max_size)
         self.recency_bias = recency_bias  # Probability of sampling from recent half
 
-    def add(self, obs, action_probs, reward, old_log_prob=None):
+    def add(self, obs, action_probs, vertex_probs, edge_probs, reward, old_log_prob=None,
+            vertex_idx=None, edge_idx=None):
         self.buffer.append({
             'obs': obs,
             'probs': action_probs,
+            'vertex_probs': vertex_probs,
+            'edge_probs': edge_probs,
+            'vertex_idx': vertex_idx,
+            'edge_idx': edge_idx,
             'reward': reward,
             'old_log_prob': old_log_prob
         })
@@ -175,6 +180,10 @@ class PrioritizedReplayBuffer:
         return {
             'observations': np.array([self.buffer[i]['obs'] for i in indices]),
             'action_probs': np.array([self.buffer[i]['probs'] for i in indices]),
+            'vertex_probs': np.array([self.buffer[i]['vertex_probs'] for i in indices]),
+            'edge_probs': np.array([self.buffer[i]['edge_probs'] for i in indices]),
+            'vertex_idx': np.array([self.buffer[i]['vertex_idx'] for i in indices]),
+            'edge_idx': np.array([self.buffer[i]['edge_idx'] for i in indices]),
             'rewards': np.array([self.buffer[i]['reward'] for i in indices]),
             'old_log_probs': np.array([self.buffer[i].get('old_log_prob', 0.0) for i in indices])
         }
@@ -327,7 +336,11 @@ class CurriculumTrainerV3:
 
         episode_rewards = []
         episode_obs = []
-        episode_probs = []
+        episode_action_probs = []
+        episode_vertex_probs = []
+        episode_edge_probs = []
+        episode_vertex_idx = []
+        episode_edge_idx = []
         episode_log_probs = []
 
         done = False
@@ -341,11 +354,15 @@ class CurriculumTrainerV3:
 
             if current_id == 0:
                 moves += 1
-                action, probs, log_prob = self._get_action(obs)
+                action, action_probs, vertex_probs, edge_probs, log_prob = self._get_action(obs)
                 action_id, vertex_id, edge_id = action
 
                 episode_obs.append(obs['observation'].copy())
-                episode_probs.append(probs)
+                episode_action_probs.append(action_probs)
+                episode_vertex_probs.append(vertex_probs)
+                episode_edge_probs.append(edge_probs)
+                episode_vertex_idx.append(vertex_id)
+                episode_edge_idx.append(edge_id)
                 episode_log_probs.append(log_prob)
 
                 next_obs, reward, terminated, truncated, info = env.step(
@@ -376,9 +393,18 @@ class CurriculumTrainerV3:
         returns = np.array(returns)
         returns = np.clip(returns, -200, 200)
 
-        # Add to buffer with log probs
-        for obs_t, probs_t, ret_t, log_p in zip(episode_obs, episode_probs, returns, episode_log_probs):
-            self.replay_buffer.add(obs_t, probs_t, ret_t, log_p)
+        # Add to buffer with all probs (action, vertex, edge)
+        for i in range(len(episode_obs)):
+            self.replay_buffer.add(
+                episode_obs[i],
+                episode_action_probs[i],
+                episode_vertex_probs[i],
+                episode_edge_probs[i],
+                returns[i],
+                episode_log_probs[i],
+                episode_vertex_idx[i],
+                episode_edge_idx[i]
+            )
 
         self.games_played += 1
 
@@ -393,7 +419,15 @@ class CurriculumTrainerV3:
         return winner_id, my_vp, sum(episode_rewards)
 
     def _get_action(self, obs):
-        """Get action from network with entropy-aware exploration"""
+        """Get action from network with entropy-aware exploration
+
+        Returns:
+            action: (action_id, vertex_id, edge_id)
+            action_probs: probability distribution over actions
+            vertex_probs: probability distribution over vertices
+            edge_probs: probability distribution over edges
+            log_prob: log probability of chosen action
+        """
         with torch.no_grad():
             observation = torch.FloatTensor(obs['observation']).unsqueeze(0).to(self.device)
             action_mask = torch.FloatTensor(obs['action_mask']).unsqueeze(0).to(self.device)
@@ -428,6 +462,10 @@ class CurriculumTrainerV3:
                 temperature = 1.5
                 ap = np.power(ap, 1/temperature)
                 ap = ap / ap.sum()
+                vp = np.power(vp, 1/temperature)
+                vp = vp / vp.sum()
+                ep = np.power(ep, 1/temperature)
+                ep = ep / ep.sum()
 
         action_id = np.random.choice(len(ap), p=ap)
         vertex_id = np.random.choice(len(vp), p=vp)
@@ -435,17 +473,21 @@ class CurriculumTrainerV3:
 
         log_prob = np.log(ap[action_id] + 1e-8)
 
-        return (action_id, vertex_id, edge_id), ap, log_prob
+        return (action_id, vertex_id, edge_id), ap, vp, ep, log_prob
 
     def train_step(self):
-        """Single training step with entropy stability"""
+        """Single training step with entropy stability - NOW TRAINS ALL HEADS!"""
         if len(self.replay_buffer) < self.batch_size:
             return None
 
         batch = self.replay_buffer.sample(self.batch_size)
 
         obs = torch.FloatTensor(batch['observations']).to(self.device)
-        target_probs = torch.FloatTensor(batch['action_probs']).to(self.device)
+        target_action_probs = torch.FloatTensor(batch['action_probs']).to(self.device)
+        target_vertex_probs = torch.FloatTensor(batch['vertex_probs']).to(self.device)
+        target_edge_probs = torch.FloatTensor(batch['edge_probs']).to(self.device)
+        vertex_idx = torch.LongTensor(batch['vertex_idx']).to(self.device)
+        edge_idx = torch.LongTensor(batch['edge_idx']).to(self.device)
         returns = torch.FloatTensor(batch['rewards']).to(self.device)
         old_log_probs = torch.FloatTensor(batch['old_log_probs']).to(self.device)
 
@@ -453,9 +495,15 @@ class CurriculumTrainerV3:
 
         if self.use_amp:
             with torch.amp.autocast('cuda'):
-                loss_dict = self._compute_loss(obs, target_probs, returns, old_log_probs)
+                loss_dict = self._compute_loss(
+                    obs, target_action_probs, target_vertex_probs, target_edge_probs,
+                    vertex_idx, edge_idx, returns, old_log_probs
+                )
         else:
-            loss_dict = self._compute_loss(obs, target_probs, returns, old_log_probs)
+            loss_dict = self._compute_loss(
+                obs, target_action_probs, target_vertex_probs, target_edge_probs,
+                vertex_idx, edge_idx, returns, old_log_probs
+            )
 
         loss = loss_dict['total_loss']
 
@@ -477,6 +525,8 @@ class CurriculumTrainerV3:
 
         return {
             'policy': loss_dict['policy_loss'],
+            'vertex_policy': loss_dict['vertex_policy_loss'],
+            'edge_policy': loss_dict['edge_policy_loss'],
             'value': loss_dict['value_loss'],
             'entropy': loss_dict['entropy'],
             'entropy_penalty': loss_dict['entropy_penalty'],
@@ -486,63 +536,82 @@ class CurriculumTrainerV3:
             'lr': self.optimizer.param_groups[0]['lr']
         }
 
-    def _compute_loss(self, obs, target_probs, returns, old_log_probs):
-        """Compute loss with all entropy stability measures"""
+    def _compute_loss(self, obs, target_action_probs, target_vertex_probs, target_edge_probs,
+                       vertex_idx, edge_idx, returns, old_log_probs):
+        """Compute loss with all entropy stability measures - NOW TRAINS ALL HEADS!
+
+        This is the CRITICAL fix: we now compute policy losses for vertex and edge heads,
+        not just the action head. This allows the model to learn WHERE to place things,
+        not just WHAT to do.
+        """
         action_probs, vertex_probs, edge_probs, _, _, value = self.network.forward(obs)
         value = value.squeeze()
 
-        # Policy loss with PPO-style clipping
-        log_probs = torch.log(action_probs + 1e-8)
-        action_log_probs = (log_probs * target_probs).sum(dim=1)
-
-        # Compute advantages
+        # Compute advantages (shared across all policy heads)
         advantages = returns - value.detach()
         # Normalize advantages
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
-        # PPO clipping
+        # ========== ACTION POLICY LOSS (PPO-style) ==========
+        action_log_probs_all = torch.log(action_probs + 1e-8)
+        action_log_probs = (action_log_probs_all * target_action_probs).sum(dim=1)
+
+        # PPO clipping for action head
         ratio = torch.exp(action_log_probs - old_log_probs)
         clip_ratio = 0.2
         surr1 = ratio * advantages
         surr2 = torch.clamp(ratio, 1 - clip_ratio, 1 + clip_ratio) * advantages
-        policy_loss = -torch.min(surr1, surr2).mean()
+        action_policy_loss = -torch.min(surr1, surr2).mean()
 
-        # Compute entropy for ALL heads (not just action)
-        action_entropy = -(action_probs * log_probs).sum(dim=1).mean()
-        vertex_log_probs = torch.log(vertex_probs + 1e-8)
-        vertex_entropy = -(vertex_probs * vertex_log_probs).sum(dim=1).mean()
-        edge_log_probs = torch.log(edge_probs + 1e-8)
-        edge_entropy = -(edge_probs * edge_log_probs).sum(dim=1).mean()
+        # ========== VERTEX POLICY LOSS (NEW!) ==========
+        # Use the chosen vertex index to get log prob of that action
+        vertex_log_probs_all = torch.log(vertex_probs + 1e-8)
+        # Get log prob of the vertex that was actually chosen
+        vertex_chosen_log_probs = vertex_log_probs_all.gather(1, vertex_idx.unsqueeze(1)).squeeze(1)
+        # Policy gradient: -log_prob * advantage
+        vertex_policy_loss = -(vertex_chosen_log_probs * advantages).mean()
+
+        # ========== EDGE POLICY LOSS (NEW!) ==========
+        edge_log_probs_all = torch.log(edge_probs + 1e-8)
+        edge_chosen_log_probs = edge_log_probs_all.gather(1, edge_idx.unsqueeze(1)).squeeze(1)
+        edge_policy_loss = -(edge_chosen_log_probs * advantages).mean()
+
+        # ========== ENTROPY (for all heads) ==========
+        action_entropy = -(action_probs * action_log_probs_all).sum(dim=1).mean()
+        vertex_entropy = -(vertex_probs * vertex_log_probs_all).sum(dim=1).mean()
+        edge_entropy = -(edge_probs * edge_log_probs_all).sum(dim=1).mean()
 
         # Combined entropy (weighted average)
-        total_entropy = 0.6 * action_entropy + 0.2 * vertex_entropy + 0.2 * edge_entropy
+        total_entropy = 0.5 * action_entropy + 0.25 * vertex_entropy + 0.25 * edge_entropy
 
         # Smooth entropy penalty
         entropy_penalty = self._compute_smooth_entropy_penalty(total_entropy.item())
         entropy_penalty_tensor = torch.tensor(entropy_penalty, device=self.device)
 
-        # Value loss (reduced weight)
+        # Value loss
         value_loss = F.mse_loss(value, returns)
 
-        # Approximate KL divergence for monitoring
+        # Approximate KL divergence for monitoring (action head only)
         kl_div = 0.5 * ((ratio - 1) ** 2).mean()
 
-        # Combined loss
-        # - policy_loss: minimize
-        # - entropy: maximize (so subtract)
-        # - entropy_penalty: smooth penalty for low entropy
-        # - value_loss: minimize (increased weight for better critic learning)
+        # ========== COMBINED LOSS ==========
+        # Now includes vertex and edge policy losses!
+        # Weight: action=1.0, vertex=0.5, edge=0.3 (action is most important)
         total_loss = (
-            policy_loss
+            action_policy_loss
+            + 0.5 * vertex_policy_loss  # NEW: Train vertex selection!
+            + 0.3 * edge_policy_loss    # NEW: Train edge selection!
             - self.current_entropy_coef * total_entropy
-            + 5.0 * entropy_penalty_tensor  # Smooth penalty (not 200x!)
-            + self.value_weight * value_loss  # Configurable value weight (default 0.5)
+            + 5.0 * entropy_penalty_tensor
+            + self.value_weight * value_loss
             + self.adaptive_kl_coef * torch.clamp(kl_div - self.max_kl, min=0.0)
         )
 
         return {
             'total_loss': total_loss,
-            'policy_loss': policy_loss.item(),
+            'policy_loss': action_policy_loss.item(),
+            'vertex_policy_loss': vertex_policy_loss.item(),
+            'edge_policy_loss': edge_policy_loss.item(),
             'value_loss': value_loss.item(),
             'entropy': total_entropy.item(),
             'action_entropy': action_entropy.item(),
