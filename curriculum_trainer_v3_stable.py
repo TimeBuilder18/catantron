@@ -19,6 +19,8 @@ from collections import deque
 import os
 import time
 import random
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from catan_env_pytorch import CatanEnv
 from simplified_reward_wrapper import SimplifiedRewardWrapper
@@ -135,79 +137,91 @@ def play_opponent_turn(game, player_id, mix_prob, primary_ai='medium', secondary
 
 
 class PrioritizedReplayBuffer:
-    """Replay buffer with recency bias and priority sampling"""
+    """Replay buffer with recency bias and priority sampling (thread-safe)"""
 
     def __init__(self, max_size=300000, recency_bias=0.7):
         self.max_size = max_size
         self.buffer = deque(maxlen=max_size)
         self.recency_bias = recency_bias  # Probability of sampling from recent half
+        self._lock = threading.Lock()  # Thread safety for parallel game execution
 
     def add(self, obs, action_probs, vertex_probs, edge_probs, reward, old_log_prob=None,
             vertex_idx=None, edge_idx=None):
-        self.buffer.append({
-            'obs': obs,
-            'probs': action_probs,
-            'vertex_probs': vertex_probs,
-            'edge_probs': edge_probs,
-            'vertex_idx': vertex_idx,
-            'edge_idx': edge_idx,
-            'reward': reward,
-            'old_log_prob': old_log_prob
-        })
+        with self._lock:
+            self.buffer.append({
+                'obs': obs,
+                'probs': action_probs,
+                'vertex_probs': vertex_probs,
+                'edge_probs': edge_probs,
+                'vertex_idx': vertex_idx,
+                'edge_idx': edge_idx,
+                'reward': reward,
+                'old_log_prob': old_log_prob
+            })
 
     def sample(self, batch_size):
-        n = len(self.buffer)
-        if n < batch_size:
-            indices = np.arange(n)
-        else:
-            # Sample with recency bias
-            recent_size = min(n // 2, batch_size * 2)
-            recent_count = int(batch_size * self.recency_bias)
-            old_count = batch_size - recent_count
+        with self._lock:
+            n = len(self.buffer)
+            if n < batch_size:
+                indices = np.arange(n)
+            else:
+                # Sample with recency bias
+                recent_size = min(n // 2, batch_size * 2)
+                recent_count = int(batch_size * self.recency_bias)
+                old_count = batch_size - recent_count
 
-            recent_indices = np.random.choice(
-                range(n - recent_size, n),
-                min(recent_count, recent_size),
-                replace=False
-            )
-            old_indices = np.random.choice(
-                range(max(0, n - recent_size)),
-                min(old_count, max(1, n - recent_size)),
-                replace=False
-            )
-            indices = np.concatenate([recent_indices, old_indices])
+                recent_indices = np.random.choice(
+                    range(n - recent_size, n),
+                    min(recent_count, recent_size),
+                    replace=False
+                )
+                old_indices = np.random.choice(
+                    range(max(0, n - recent_size)),
+                    min(old_count, max(1, n - recent_size)),
+                    replace=False
+                )
+                indices = np.concatenate([recent_indices, old_indices])
 
-        return {
-            'observations': np.array([self.buffer[i]['obs'] for i in indices]),
-            'action_probs': np.array([self.buffer[i]['probs'] for i in indices]),
-            'vertex_probs': np.array([self.buffer[i]['vertex_probs'] for i in indices]),
-            'edge_probs': np.array([self.buffer[i]['edge_probs'] for i in indices]),
-            'vertex_idx': np.array([self.buffer[i]['vertex_idx'] for i in indices]),
-            'edge_idx': np.array([self.buffer[i]['edge_idx'] for i in indices]),
-            'rewards': np.array([self.buffer[i]['reward'] for i in indices]),
-            'old_log_probs': np.array([self.buffer[i].get('old_log_prob', 0.0) for i in indices])
-        }
+            return {
+                'observations': np.array([self.buffer[i]['obs'] for i in indices]),
+                'action_probs': np.array([self.buffer[i]['probs'] for i in indices]),
+                'vertex_probs': np.array([self.buffer[i]['vertex_probs'] for i in indices]),
+                'edge_probs': np.array([self.buffer[i]['edge_probs'] for i in indices]),
+                'vertex_idx': np.array([self.buffer[i]['vertex_idx'] for i in indices]),
+                'edge_idx': np.array([self.buffer[i]['edge_idx'] for i in indices]),
+                'rewards': np.array([self.buffer[i]['reward'] for i in indices]),
+                'old_log_probs': np.array([self.buffer[i].get('old_log_prob', 0.0) for i in indices])
+            }
+
+    def add_batch(self, experiences):
+        """Add multiple experiences at once (more efficient for parallel games)"""
+        with self._lock:
+            for exp in experiences:
+                self.buffer.append(exp)
 
     def clear_old(self, keep_fraction=0.3):
         """Clear old experiences, keeping recent fraction"""
-        keep_count = int(len(self.buffer) * keep_fraction)
-        while len(self.buffer) > keep_count:
-            self.buffer.popleft()
+        with self._lock:
+            keep_count = int(len(self.buffer) * keep_fraction)
+            while len(self.buffer) > keep_count:
+                self.buffer.popleft()
 
     def __len__(self):
-        return len(self.buffer)
+        with self._lock:
+            return len(self.buffer)
 
 
 class CurriculumTrainerV3:
     """Stable curriculum trainer with entropy collapse prevention"""
 
     def __init__(self, model_path=None, learning_rate=5e-4, batch_size=None, reward_mode='vp_only',
-                 lr_decay=1.0, value_weight=0.5, entropy_decay=1.0):
+                 lr_decay=1.0, value_weight=0.5, entropy_decay=1.0, num_parallel_games=8):
         self.device = get_device()
         self.reward_mode = reward_mode
         self.lr_decay = lr_decay  # Learning rate decay per 1000 games
         self.value_weight = value_weight  # Weight for value loss (default increased from 0.1)
         self.entropy_decay = entropy_decay  # Entropy coefficient decay per 1000 games
+        self.num_parallel_games = num_parallel_games  # Number of games to run in parallel
 
         if batch_size is None:
             batch_size = 1024 if self.device.type == 'cuda' else 256
@@ -227,6 +241,7 @@ class CurriculumTrainerV3:
             self.scaler = torch.amp.GradScaler('cuda')
 
         self.games_played = 0
+        self._games_lock = threading.Lock()  # Thread safety for games_played counter
 
         # ENTROPY STABILITY PARAMETERS
         self.target_entropy = 1.8  # Target entropy (healthy range: 1.5-2.2)
@@ -247,11 +262,13 @@ class CurriculumTrainerV3:
         self.base_grad_norm = 0.5
         self.current_grad_norm = 0.5
 
-        # Curriculum tracking
+        # Curriculum tracking (thread-safe)
         self.phase_wins = deque(maxlen=100)
         self.phase_vps = deque(maxlen=100)
+        self._phase_lock = threading.Lock()
 
         print(f"Batch size: {self.batch_size}")
+        print(f"Parallel games: {self.num_parallel_games}")
         print(f"Base LR: {self.base_lr}")
         print(f"LR decay: {self.lr_decay} per 1000 games")
         print(f"Value weight: {self.value_weight}")
@@ -393,30 +410,64 @@ class CurriculumTrainerV3:
         returns = np.array(returns)
         returns = np.clip(returns, -200, 200)
 
-        # Add to buffer with all probs (action, vertex, edge)
+        # Collect experiences as list of dicts
+        experiences = []
         for i in range(len(episode_obs)):
-            self.replay_buffer.add(
-                episode_obs[i],
-                episode_action_probs[i],
-                episode_vertex_probs[i],
-                episode_edge_probs[i],
-                returns[i],
-                episode_log_probs[i],
-                episode_vertex_idx[i],
-                episode_edge_idx[i]
-            )
+            experiences.append({
+                'obs': episode_obs[i],
+                'probs': episode_action_probs[i],
+                'vertex_probs': episode_vertex_probs[i],
+                'edge_probs': episode_edge_probs[i],
+                'vertex_idx': episode_vertex_idx[i],
+                'edge_idx': episode_edge_idx[i],
+                'reward': returns[i],
+                'old_log_prob': episode_log_probs[i]
+            })
 
-        self.games_played += 1
+        # Add to buffer (thread-safe)
+        self.replay_buffer.add_batch(experiences)
+
+        # Thread-safe counter update
+        with self._games_lock:
+            self.games_played += 1
 
         my_vp = env.game_env.game.players[0].calculate_victory_points()
         winner = env.game_env.game.check_victory_conditions()
         winner_id = game.players.index(winner) if winner else None
 
-        # Track for curriculum
-        self.phase_wins.append(1 if winner_id == 0 else 0)
-        self.phase_vps.append(my_vp)
+        # Thread-safe curriculum tracking
+        with self._phase_lock:
+            self.phase_wins.append(1 if winner_id == 0 else 0)
+            self.phase_vps.append(my_vp)
 
         return winner_id, my_vp, sum(episode_rewards)
+
+    def play_games_parallel(self, num_games, mix_prob=1.0, primary_ai='random',
+                            secondary_ai=None, victory_points_to_win=10):
+        """Play multiple games in parallel using ThreadPoolExecutor.
+
+        Returns:
+            List of (winner_id, vp, total_reward) tuples
+        """
+        results = []
+
+        with ThreadPoolExecutor(max_workers=num_games) as executor:
+            futures = [
+                executor.submit(
+                    self.play_game, mix_prob, primary_ai, secondary_ai, victory_points_to_win
+                )
+                for _ in range(num_games)
+            ]
+
+            for future in as_completed(futures):
+                try:
+                    result = future.result()
+                    results.append(result)
+                except Exception as e:
+                    print(f"  Warning: Game failed with error: {e}")
+                    results.append((None, 0, 0))
+
+        return results
 
     def _get_action(self, obs):
         """Get action from network with entropy-aware exploration
@@ -687,11 +738,12 @@ class CurriculumTrainerV3:
         ]
 
         print("\n" + "=" * 70)
-        print("CURRICULUM TRAINING V3 - STABLE VERSION")
+        print("CURRICULUM TRAINING V3 - STABLE VERSION (PARALLEL)")
         print("=" * 70)
         print(f"Device: {self.device}")
         print(f"Total games: {total_games}")
         print(f"Batch size: {self.batch_size}")
+        print(f"Parallel games: {self.num_parallel_games}")
         print("STABILITY FEATURES:")
         print("  1. Smooth quadratic entropy penalty (not 200x step!)")
         print("  2. Adaptive entropy coefficient (0.05-0.5)")
@@ -700,46 +752,62 @@ class CurriculumTrainerV3:
         print("  5. Multi-head entropy tracking (action+vertex+edge)")
         print("  6. Performance-based curriculum advancement")
         print("  7. Recency-biased experience replay")
+        print("  8. PARALLEL game execution for speed")
         print("=" * 70 + "\n")
 
         current_phase = 0
         phase_game_count = 0
         total_wins = 0
         start_time = time.time()
+        game_num = 0
+        last_log_game = 0
+        last_save_game = 0
 
-        for game_num in range(1, total_games + 1):
+        while game_num < total_games:
             ai_difficulty, vp_to_win, vp_threshold, phase_name = phases[current_phase]
 
-            # Play game with the specified AI difficulty and VP to win
-            winner_id, vp, total_reward = self.play_game(
-                mix_prob=1.0,  # Always use the specified AI
+            # Determine how many games to play in this batch
+            games_remaining = total_games - game_num
+            batch_size = min(self.num_parallel_games, games_remaining)
+
+            # Play games in parallel
+            results = self.play_games_parallel(
+                num_games=batch_size,
+                mix_prob=1.0,
                 primary_ai=ai_difficulty,
                 secondary_ai=None,
                 victory_points_to_win=vp_to_win
             )
-            phase_game_count += 1
 
-            if winner_id == 0:
-                total_wins += 1
+            # Process results
+            batch_wins = sum(1 for winner_id, _, _ in results if winner_id == 0)
+            total_wins += batch_wins
+            game_num += batch_size
+            phase_game_count += batch_size
 
-            # Train
-            if game_num % train_frequency == 0 and len(self.replay_buffer) >= self.batch_size:
-                losses = [self.train_step() for _ in range(train_steps)]
+            # Train after each batch
+            if len(self.replay_buffer) >= self.batch_size:
+                # Scale train steps with batch size for consistent updates
+                effective_train_steps = max(1, train_steps * batch_size // train_frequency)
+                losses = [self.train_step() for _ in range(effective_train_steps)]
                 losses = [l for l in losses if l]
 
-                if losses and game_num % 10 == 0:
+                # Log every 10 games worth of progress
+                if losses and game_num - last_log_game >= 10:
+                    last_log_game = game_num
                     avg_p = np.mean([l['policy'] for l in losses])
                     avg_v = np.mean([l['value'] for l in losses])
                     avg_e = np.mean([l['entropy'] for l in losses])
-                    avg_ep = np.mean([l['entropy_penalty'] for l in losses])
                     curr_ec = losses[-1]['entropy_coef']
                     curr_gn = losses[-1]['grad_norm']
                     curr_lr = losses[-1]['lr']
 
                     elapsed = time.time() - start_time
                     speed = game_num / elapsed * 60
-                    recent_wr = np.mean(list(self.phase_wins)[-50:]) * 100 if len(self.phase_wins) >= 10 else 0
-                    recent_vp = np.mean(list(self.phase_vps)[-50:]) if len(self.phase_vps) >= 10 else 0
+
+                    with self._phase_lock:
+                        recent_wr = np.mean(list(self.phase_wins)[-50:]) * 100 if len(self.phase_wins) >= 10 else 0
+                        recent_vp = np.mean(list(self.phase_vps)[-50:]) if len(self.phase_vps) >= 10 else 0
 
                     # Status indicators
                     entropy_status = "✓" if 1.4 <= avg_e <= 2.2 else "⚠️" if avg_e < 1.0 else "↑"
@@ -756,25 +824,27 @@ class CurriculumTrainerV3:
                 current_phase < len(phases) - 1 and
                 self.should_advance_curriculum(1.0, ai_difficulty, None, vp_threshold)):
 
-                print(f"\n  ★ ADVANCING from {phase_name} to {phases[current_phase + 1][3]}")
-                print(f"    Games in phase: {phase_game_count}")
-                print(f"    Recent WR: {np.mean(list(self.phase_wins)[-50:])*100:.1f}%")
-                print(f"    Recent VP: {np.mean(list(self.phase_vps)[-50:]):.1f}\n")
+                with self._phase_lock:
+                    print(f"\n  ★ ADVANCING from {phase_name} to {phases[current_phase + 1][3]}")
+                    print(f"    Games in phase: {phase_game_count}")
+                    print(f"    Recent WR: {np.mean(list(self.phase_wins)[-50:])*100:.1f}%")
+                    print(f"    Recent VP: {np.mean(list(self.phase_vps)[-50:]):.1f}\n")
 
                 # Clear most old experiences to reduce distribution mismatch
-                # Keep only 25% to allow faster adaptation to new opponent mix
                 self.replay_buffer.clear_old(keep_fraction=0.25)
 
                 current_phase += 1
                 phase_game_count = 0
-                self.phase_wins.clear()
-                self.phase_vps.clear()
+                with self._phase_lock:
+                    self.phase_wins.clear()
+                    self.phase_vps.clear()
 
                 # Save checkpoint
                 self.save(f"{save_path}_phase{current_phase}.pt")
 
-            # Periodic saves, LR decay, and entropy decay
-            if game_num % 1000 == 0:
+            # Periodic saves, LR decay, and entropy decay (every 1000 games)
+            if game_num // 1000 > last_save_game // 1000:
+                last_save_game = game_num
                 self.save(f"{save_path}_game{game_num}.pt")
                 # Apply LR decay
                 if self.lr_decay < 1.0:
@@ -835,6 +905,8 @@ if __name__ == "__main__":
                         help='Weight for value loss (default: 0.5, increased from 0.1 for better critic learning)')
     parser.add_argument('--entropy-decay', type=float, default=1.0,
                         help='Entropy coefficient decay per 1000 games (default: 1.0 = no decay, try 0.95 to reduce exploration over time)')
+    parser.add_argument('--parallel-games', type=int, default=8,
+                        help='Number of games to run in parallel (default: 8)')
     args = parser.parse_args()
 
     trainer = CurriculumTrainerV3(
@@ -844,7 +916,8 @@ if __name__ == "__main__":
         reward_mode=args.reward_mode,
         lr_decay=args.lr_decay,
         value_weight=args.value_weight,
-        entropy_decay=args.entropy_decay
+        entropy_decay=args.entropy_decay,
+        num_parallel_games=args.parallel_games
     )
     trainer.train(
         total_games=args.total_games,
