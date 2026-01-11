@@ -683,8 +683,12 @@ class CurriculumTrainerV3:
         return recent_vp >= vp_threshold
 
     def train(self, total_games=10000, save_path='models/curriculum_v3_stable',
-              train_frequency=5, train_steps=15, min_games_per_phase=1000):
-        """Curriculum training with adaptive phase transitions"""
+              train_frequency=5, train_steps=15, min_games_per_phase=1000, start_phase=0):
+        """Curriculum training with adaptive phase transitions
+
+        Args:
+            start_phase: Phase index to start from (use --list-phases to see all phases)
+        """
         os.makedirs('models', exist_ok=True)
 
         # Phases: (ai_difficulty, vp_to_win, vp_threshold, phase_name)
@@ -755,7 +759,14 @@ class CurriculumTrainerV3:
         print("  8. PARALLEL game execution for speed")
         print("=" * 70 + "\n")
 
-        current_phase = 0
+        # Validate and set starting phase
+        if start_phase < 0 or start_phase >= len(phases):
+            print(f"Warning: start_phase {start_phase} out of range, using 0")
+            start_phase = 0
+        if start_phase > 0:
+            print(f"  ► Starting from phase {start_phase}: {phases[start_phase][3]}")
+
+        current_phase = start_phase
         phase_game_count = 0
         total_wins = 0
         start_time = time.time()
@@ -907,7 +918,59 @@ if __name__ == "__main__":
                         help='Entropy coefficient decay per 1000 games (default: 1.0 = no decay, try 0.95 to reduce exploration over time)')
     parser.add_argument('--parallel-games', type=int, default=8,
                         help='Number of games to run in parallel (default: 8)')
+    parser.add_argument('--start-phase', type=int, default=0,
+                        help='Phase index to start from (default: 0). Use --list-phases to see all phases.')
+    parser.add_argument('--list-phases', action='store_true',
+                        help='List all curriculum phases and exit')
     args = parser.parse_args()
+
+    # List phases if requested
+    if args.list_phases:
+        phases = [
+            ('random', 4, 2.8, "Random 4VP"),
+            ('random', 5, 3.2, "Random 5VP"),
+            ('random', 6, 3.6, "Random 6VP"),
+            ('random', 7, 4.0, "Random 7VP"),
+            ('random', 8, 4.4, "Random 8VP"),
+            ('random', 9, 4.8, "Random 9VP"),
+            ('random', 10, 5.2, "Random 10VP"),
+            ('very_weak', 4, 2.8, "VeryWeak 4VP"),
+            ('very_weak', 5, 3.2, "VeryWeak 5VP"),
+            ('very_weak', 6, 3.6, "VeryWeak 6VP"),
+            ('very_weak', 7, 4.0, "VeryWeak 7VP"),
+            ('very_weak', 8, 4.4, "VeryWeak 8VP"),
+            ('very_weak', 9, 4.8, "VeryWeak 9VP"),
+            ('very_weak', 10, 5.2, "VeryWeak 10VP"),
+            ('weak', 4, 2.8, "Weak 4VP"),
+            ('weak', 5, 3.2, "Weak 5VP"),
+            ('weak', 6, 3.6, "Weak 6VP"),
+            ('weak', 7, 4.0, "Weak 7VP"),
+            ('weak', 8, 4.4, "Weak 8VP"),
+            ('weak', 9, 4.8, "Weak 9VP"),
+            ('weak', 10, 5.2, "Weak 10VP"),
+            ('medium', 4, 2.8, "Medium 4VP"),
+            ('medium', 5, 3.2, "Medium 5VP"),
+            ('medium', 6, 3.6, "Medium 6VP"),
+            ('medium', 7, 4.0, "Medium 7VP"),
+            ('medium', 8, 4.4, "Medium 8VP"),
+            ('medium', 9, 4.8, "Medium 9VP"),
+            ('medium', 10, 5.2, "Medium 10VP"),
+            ('strong', 4, 2.8, "Strong 4VP"),
+            ('strong', 5, 3.2, "Strong 5VP"),
+            ('strong', 6, 3.6, "Strong 6VP"),
+            ('strong', 7, 4.0, "Strong 7VP"),
+            ('strong', 8, 4.4, "Strong 8VP"),
+            ('strong', 9, 4.8, "Strong 9VP"),
+            ('strong', 10, 5.5, "Strong 10VP"),
+            ('strong', 10, 999, "Strong 10VP FINAL"),
+        ]
+        print("\nCurriculum Phases:")
+        print("-" * 50)
+        for i, (ai, vp_win, vp_thresh, name) in enumerate(phases):
+            print(f"  {i:2d}: {name:20s} (VP to win: {vp_win}, threshold: {vp_thresh})")
+        print("-" * 50)
+        print("\nUse --start-phase N to start from phase N")
+        exit(0)
 
     trainer = CurriculumTrainerV3(
         model_path=args.model,
@@ -923,5 +986,6 @@ if __name__ == "__main__":
         total_games=args.total_games,
         train_frequency=args.train_frequency,
         train_steps=args.train_steps,
-        min_games_per_phase=args.min_games_per_phase
+        min_games_per_phase=args.min_games_per_phase,
+        start_phase=args.start_phase
     )
