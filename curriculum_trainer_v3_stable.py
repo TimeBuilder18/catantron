@@ -215,13 +215,15 @@ class CurriculumTrainerV3:
     """Stable curriculum trainer with entropy collapse prevention"""
 
     def __init__(self, model_path=None, learning_rate=5e-4, batch_size=None, reward_mode='vp_only',
-                 lr_decay=1.0, value_weight=0.5, entropy_decay=1.0, num_parallel_games=8):
+                 lr_decay=1.0, value_weight=0.5, entropy_decay=1.0, num_parallel_games=8,
+                 buffer_size=200000):
         self.device = get_device()
         self.reward_mode = reward_mode
         self.lr_decay = lr_decay  # Learning rate decay per 1000 games
         self.value_weight = value_weight  # Weight for value loss (default increased from 0.1)
         self.entropy_decay = entropy_decay  # Entropy coefficient decay per 1000 games
         self.num_parallel_games = num_parallel_games  # Number of games to run in parallel
+        self.buffer_size = buffer_size
 
         if batch_size is None:
             batch_size = 1024 if self.device.type == 'cuda' else 256
@@ -233,8 +235,8 @@ class CurriculumTrainerV3:
         self.base_lr = learning_rate
         self.optimizer = torch.optim.Adam(self.network.parameters(), lr=learning_rate)
 
-        # Smaller buffer with recency bias
-        self.replay_buffer = PrioritizedReplayBuffer(max_size=200000, recency_bias=0.7)
+        # Replay buffer with recency bias (size configurable for large batch training)
+        self.replay_buffer = PrioritizedReplayBuffer(max_size=buffer_size, recency_bias=0.7)
 
         self.use_amp = (self.device.type == 'cuda')
         if self.use_amp:
@@ -268,6 +270,8 @@ class CurriculumTrainerV3:
         self._phase_lock = threading.Lock()
 
         print(f"Batch size: {self.batch_size}")
+        print(f"Buffer size: {self.buffer_size}")
+        print(f"Batch/Buffer ratio: {self.batch_size/self.buffer_size*100:.1f}%")
         print(f"Parallel games: {self.num_parallel_games}")
         print(f"Base LR: {self.base_lr}")
         print(f"LR decay: {self.lr_decay} per 1000 games")
@@ -683,8 +687,12 @@ class CurriculumTrainerV3:
         return recent_vp >= vp_threshold
 
     def train(self, total_games=10000, save_path='models/curriculum_v3_stable',
-              train_frequency=5, train_steps=15, min_games_per_phase=1000):
-        """Curriculum training with adaptive phase transitions"""
+              train_frequency=5, train_steps=15, min_games_per_phase=1000, start_phase=0):
+        """Curriculum training with adaptive phase transitions
+
+        Args:
+            start_phase: Phase index to start from (use --list-phases to see all phases)
+        """
         os.makedirs('models', exist_ok=True)
 
         # Phases: (ai_difficulty, vp_to_win, vp_threshold, phase_name)
@@ -755,7 +763,14 @@ class CurriculumTrainerV3:
         print("  8. PARALLEL game execution for speed")
         print("=" * 70 + "\n")
 
-        current_phase = 0
+        # Validate and set starting phase
+        if start_phase < 0 or start_phase >= len(phases):
+            print(f"Warning: start_phase {start_phase} out of range, using 0")
+            start_phase = 0
+        if start_phase > 0:
+            print(f"  ► Starting from phase {start_phase}: {phases[start_phase][3]}")
+
+        current_phase = start_phase
         phase_game_count = 0
         total_wins = 0
         start_time = time.time()
@@ -907,7 +922,61 @@ if __name__ == "__main__":
                         help='Entropy coefficient decay per 1000 games (default: 1.0 = no decay, try 0.95 to reduce exploration over time)')
     parser.add_argument('--parallel-games', type=int, default=8,
                         help='Number of games to run in parallel (default: 8)')
+    parser.add_argument('--buffer-size', type=int, default=200000,
+                        help='Replay buffer size (default: 200000). Increase for large batch sizes.')
+    parser.add_argument('--start-phase', type=int, default=0,
+                        help='Phase index to start from (default: 0). Use --list-phases to see all phases.')
+    parser.add_argument('--list-phases', action='store_true',
+                        help='List all curriculum phases and exit')
     args = parser.parse_args()
+
+    # List phases if requested
+    if args.list_phases:
+        phases = [
+            ('random', 4, 2.8, "Random 4VP"),
+            ('random', 5, 3.2, "Random 5VP"),
+            ('random', 6, 3.6, "Random 6VP"),
+            ('random', 7, 4.0, "Random 7VP"),
+            ('random', 8, 4.4, "Random 8VP"),
+            ('random', 9, 4.8, "Random 9VP"),
+            ('random', 10, 5.2, "Random 10VP"),
+            ('very_weak', 4, 2.8, "VeryWeak 4VP"),
+            ('very_weak', 5, 3.2, "VeryWeak 5VP"),
+            ('very_weak', 6, 3.6, "VeryWeak 6VP"),
+            ('very_weak', 7, 4.0, "VeryWeak 7VP"),
+            ('very_weak', 8, 4.4, "VeryWeak 8VP"),
+            ('very_weak', 9, 4.8, "VeryWeak 9VP"),
+            ('very_weak', 10, 5.2, "VeryWeak 10VP"),
+            ('weak', 4, 2.8, "Weak 4VP"),
+            ('weak', 5, 3.2, "Weak 5VP"),
+            ('weak', 6, 3.6, "Weak 6VP"),
+            ('weak', 7, 4.0, "Weak 7VP"),
+            ('weak', 8, 4.4, "Weak 8VP"),
+            ('weak', 9, 4.8, "Weak 9VP"),
+            ('weak', 10, 5.2, "Weak 10VP"),
+            ('medium', 4, 2.8, "Medium 4VP"),
+            ('medium', 5, 3.2, "Medium 5VP"),
+            ('medium', 6, 3.6, "Medium 6VP"),
+            ('medium', 7, 4.0, "Medium 7VP"),
+            ('medium', 8, 4.4, "Medium 8VP"),
+            ('medium', 9, 4.8, "Medium 9VP"),
+            ('medium', 10, 5.2, "Medium 10VP"),
+            ('strong', 4, 2.8, "Strong 4VP"),
+            ('strong', 5, 3.2, "Strong 5VP"),
+            ('strong', 6, 3.6, "Strong 6VP"),
+            ('strong', 7, 4.0, "Strong 7VP"),
+            ('strong', 8, 4.4, "Strong 8VP"),
+            ('strong', 9, 4.8, "Strong 9VP"),
+            ('strong', 10, 5.5, "Strong 10VP"),
+            ('strong', 10, 999, "Strong 10VP FINAL"),
+        ]
+        print("\nCurriculum Phases:")
+        print("-" * 50)
+        for i, (ai, vp_win, vp_thresh, name) in enumerate(phases):
+            print(f"  {i:2d}: {name:20s} (VP to win: {vp_win}, threshold: {vp_thresh})")
+        print("-" * 50)
+        print("\nUse --start-phase N to start from phase N")
+        exit(0)
 
     trainer = CurriculumTrainerV3(
         model_path=args.model,
@@ -917,11 +986,13 @@ if __name__ == "__main__":
         lr_decay=args.lr_decay,
         value_weight=args.value_weight,
         entropy_decay=args.entropy_decay,
-        num_parallel_games=args.parallel_games
+        num_parallel_games=args.parallel_games,
+        buffer_size=args.buffer_size
     )
     trainer.train(
         total_games=args.total_games,
         train_frequency=args.train_frequency,
         train_steps=args.train_steps,
-        min_games_per_phase=args.min_games_per_phase
+        min_games_per_phase=args.min_games_per_phase,
+        start_phase=args.start_phase
     )
