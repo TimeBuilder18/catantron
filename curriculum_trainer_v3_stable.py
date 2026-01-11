@@ -215,13 +215,15 @@ class CurriculumTrainerV3:
     """Stable curriculum trainer with entropy collapse prevention"""
 
     def __init__(self, model_path=None, learning_rate=5e-4, batch_size=None, reward_mode='vp_only',
-                 lr_decay=1.0, value_weight=0.5, entropy_decay=1.0, num_parallel_games=8):
+                 lr_decay=1.0, value_weight=0.5, entropy_decay=1.0, num_parallel_games=8,
+                 buffer_size=200000):
         self.device = get_device()
         self.reward_mode = reward_mode
         self.lr_decay = lr_decay  # Learning rate decay per 1000 games
         self.value_weight = value_weight  # Weight for value loss (default increased from 0.1)
         self.entropy_decay = entropy_decay  # Entropy coefficient decay per 1000 games
         self.num_parallel_games = num_parallel_games  # Number of games to run in parallel
+        self.buffer_size = buffer_size
 
         if batch_size is None:
             batch_size = 1024 if self.device.type == 'cuda' else 256
@@ -233,8 +235,8 @@ class CurriculumTrainerV3:
         self.base_lr = learning_rate
         self.optimizer = torch.optim.Adam(self.network.parameters(), lr=learning_rate)
 
-        # Smaller buffer with recency bias
-        self.replay_buffer = PrioritizedReplayBuffer(max_size=200000, recency_bias=0.7)
+        # Replay buffer with recency bias (size configurable for large batch training)
+        self.replay_buffer = PrioritizedReplayBuffer(max_size=buffer_size, recency_bias=0.7)
 
         self.use_amp = (self.device.type == 'cuda')
         if self.use_amp:
@@ -268,6 +270,8 @@ class CurriculumTrainerV3:
         self._phase_lock = threading.Lock()
 
         print(f"Batch size: {self.batch_size}")
+        print(f"Buffer size: {self.buffer_size}")
+        print(f"Batch/Buffer ratio: {self.batch_size/self.buffer_size*100:.1f}%")
         print(f"Parallel games: {self.num_parallel_games}")
         print(f"Base LR: {self.base_lr}")
         print(f"LR decay: {self.lr_decay} per 1000 games")
@@ -918,6 +922,8 @@ if __name__ == "__main__":
                         help='Entropy coefficient decay per 1000 games (default: 1.0 = no decay, try 0.95 to reduce exploration over time)')
     parser.add_argument('--parallel-games', type=int, default=8,
                         help='Number of games to run in parallel (default: 8)')
+    parser.add_argument('--buffer-size', type=int, default=200000,
+                        help='Replay buffer size (default: 200000). Increase for large batch sizes.')
     parser.add_argument('--start-phase', type=int, default=0,
                         help='Phase index to start from (default: 0). Use --list-phases to see all phases.')
     parser.add_argument('--list-phases', action='store_true',
@@ -980,7 +986,8 @@ if __name__ == "__main__":
         lr_decay=args.lr_decay,
         value_weight=args.value_weight,
         entropy_decay=args.entropy_decay,
-        num_parallel_games=args.parallel_games
+        num_parallel_games=args.parallel_games,
+        buffer_size=args.buffer_size
     )
     trainer.train(
         total_games=args.total_games,
