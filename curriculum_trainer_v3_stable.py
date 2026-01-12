@@ -696,13 +696,12 @@ class CurriculumTrainerV3:
         os.makedirs('models', exist_ok=True)
 
         # Phases: (ai_difficulty, vp_to_win, vp_threshold, phase_name)
-        # VP-based curriculum:
-        # - vp_to_win: How many VP needed to win the game (easier = less VP needed)
-        # - vp_threshold: Average VP model must achieve to advance
-        # Each difficulty goes through ALL VP levels (4→10) for smooth progression
-        # Thresholds: 2 + (vp_to_win - 2) * 0.4 = 40% of remaining VP beyond starting 2
+        # IMPROVED CURRICULUM: VP progression only once, then increase opponent difficulty
+        # This prevents the model from "forgetting" long-game strategies when facing harder opponents
+        # - First: learn to play games of increasing length (4VP → 10VP) against Random
+        # - Then: keep VP at 10 and face progressively harder opponents
         phases = [
-            # === RANDOM: VP 4→10 ===
+            # === PHASE 1: Learn game length progression vs Random ===
             ('random', 4, 2.8, "Random 4VP"),
             ('random', 5, 3.2, "Random 5VP"),
             ('random', 6, 3.6, "Random 6VP"),
@@ -710,38 +709,11 @@ class CurriculumTrainerV3:
             ('random', 8, 4.4, "Random 8VP"),
             ('random', 9, 4.8, "Random 9VP"),
             ('random', 10, 5.2, "Random 10VP"),
-            # === VERY WEAK: VP 4→10 ===
-            ('very_weak', 4, 2.8, "VeryWeak 4VP"),
-            ('very_weak', 5, 3.2, "VeryWeak 5VP"),
-            ('very_weak', 6, 3.6, "VeryWeak 6VP"),
-            ('very_weak', 7, 4.0, "VeryWeak 7VP"),
-            ('very_weak', 8, 4.4, "VeryWeak 8VP"),
-            ('very_weak', 9, 4.8, "VeryWeak 9VP"),
+            # === PHASE 2: Full games (10VP) vs increasingly harder opponents ===
             ('very_weak', 10, 5.2, "VeryWeak 10VP"),
-            # === WEAK: VP 4→10 ===
-            ('weak', 4, 2.8, "Weak 4VP"),
-            ('weak', 5, 3.2, "Weak 5VP"),
-            ('weak', 6, 3.6, "Weak 6VP"),
-            ('weak', 7, 4.0, "Weak 7VP"),
-            ('weak', 8, 4.4, "Weak 8VP"),
-            ('weak', 9, 4.8, "Weak 9VP"),
-            ('weak', 10, 5.2, "Weak 10VP"),
-            # === MEDIUM: VP 4→10 ===
-            ('medium', 4, 2.8, "Medium 4VP"),
-            ('medium', 5, 3.2, "Medium 5VP"),
-            ('medium', 6, 3.6, "Medium 6VP"),
-            ('medium', 7, 4.0, "Medium 7VP"),
-            ('medium', 8, 4.4, "Medium 8VP"),
-            ('medium', 9, 4.8, "Medium 9VP"),
-            ('medium', 10, 5.2, "Medium 10VP"),
-            # === STRONG: VP 4→10 ===
-            ('strong', 4, 2.8, "Strong 4VP"),
-            ('strong', 5, 3.2, "Strong 5VP"),
-            ('strong', 6, 3.6, "Strong 6VP"),
-            ('strong', 7, 4.0, "Strong 7VP"),
-            ('strong', 8, 4.4, "Strong 8VP"),
-            ('strong', 9, 4.8, "Strong 9VP"),
-            ('strong', 10, 5.5, "Strong 10VP"),
+            ('weak', 10, 5.5, "Weak 10VP"),
+            ('medium', 10, 5.8, "Medium 10VP"),
+            ('strong', 10, 6.0, "Strong 10VP"),
             ('strong', 10, 999, "Strong 10VP FINAL"),  # Never auto-advance
         ]
 
@@ -933,6 +905,7 @@ if __name__ == "__main__":
     # List phases if requested
     if args.list_phases:
         phases = [
+            # Phase 1: Learn game length progression vs Random
             ('random', 4, 2.8, "Random 4VP"),
             ('random', 5, 3.2, "Random 5VP"),
             ('random', 6, 3.6, "Random 6VP"),
@@ -940,41 +913,21 @@ if __name__ == "__main__":
             ('random', 8, 4.4, "Random 8VP"),
             ('random', 9, 4.8, "Random 9VP"),
             ('random', 10, 5.2, "Random 10VP"),
-            ('very_weak', 4, 2.8, "VeryWeak 4VP"),
-            ('very_weak', 5, 3.2, "VeryWeak 5VP"),
-            ('very_weak', 6, 3.6, "VeryWeak 6VP"),
-            ('very_weak', 7, 4.0, "VeryWeak 7VP"),
-            ('very_weak', 8, 4.4, "VeryWeak 8VP"),
-            ('very_weak', 9, 4.8, "VeryWeak 9VP"),
+            # Phase 2: Full games (10VP) vs increasingly harder opponents
             ('very_weak', 10, 5.2, "VeryWeak 10VP"),
-            ('weak', 4, 2.8, "Weak 4VP"),
-            ('weak', 5, 3.2, "Weak 5VP"),
-            ('weak', 6, 3.6, "Weak 6VP"),
-            ('weak', 7, 4.0, "Weak 7VP"),
-            ('weak', 8, 4.4, "Weak 8VP"),
-            ('weak', 9, 4.8, "Weak 9VP"),
-            ('weak', 10, 5.2, "Weak 10VP"),
-            ('medium', 4, 2.8, "Medium 4VP"),
-            ('medium', 5, 3.2, "Medium 5VP"),
-            ('medium', 6, 3.6, "Medium 6VP"),
-            ('medium', 7, 4.0, "Medium 7VP"),
-            ('medium', 8, 4.4, "Medium 8VP"),
-            ('medium', 9, 4.8, "Medium 9VP"),
-            ('medium', 10, 5.2, "Medium 10VP"),
-            ('strong', 4, 2.8, "Strong 4VP"),
-            ('strong', 5, 3.2, "Strong 5VP"),
-            ('strong', 6, 3.6, "Strong 6VP"),
-            ('strong', 7, 4.0, "Strong 7VP"),
-            ('strong', 8, 4.4, "Strong 8VP"),
-            ('strong', 9, 4.8, "Strong 9VP"),
-            ('strong', 10, 5.5, "Strong 10VP"),
+            ('weak', 10, 5.5, "Weak 10VP"),
+            ('medium', 10, 5.8, "Medium 10VP"),
+            ('strong', 10, 6.0, "Strong 10VP"),
             ('strong', 10, 999, "Strong 10VP FINAL"),
         ]
-        print("\nCurriculum Phases:")
-        print("-" * 50)
+        print("\nCurriculum Phases (IMPROVED - no VP reset):")
+        print("-" * 55)
+        print("  Phase 1: Learn game length (4VP → 10VP) vs Random")
+        print("  Phase 2: Full 10VP games vs harder opponents")
+        print("-" * 55)
         for i, (ai, vp_win, vp_thresh, name) in enumerate(phases):
             print(f"  {i:2d}: {name:20s} (VP to win: {vp_win}, threshold: {vp_thresh})")
-        print("-" * 50)
+        print("-" * 55)
         print("\nUse --start-phase N to start from phase N")
         exit(0)
 
