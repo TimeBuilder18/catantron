@@ -720,8 +720,7 @@ class CurriculumTrainerV3:
             ('medium', 'weak', 0.5, 10, 2.8, "Medium/Weak Mix"),
             ('medium', None, 1.0, 10, 2.5, "Medium 10VP"),
             ('strong', 'medium', 0.5, 10, 2.5, "Strong/Medium Mix"),
-            ('strong', None, 1.0, 10, 2.3, "Strong 10VP"),
-            ('strong', None, 1.0, 10, 999, "Strong 10VP FINAL"),
+            ('strong', 'medium', 0.5, 10, 999, "Strong/Medium FINAL"),  # Keep mix for learning signal
         ]
 
         print("\n" + "=" * 70)
@@ -933,8 +932,7 @@ if __name__ == "__main__":
             ('medium', 'weak', 0.5, 10, 2.8, "Medium/Weak Mix"),
             ('medium', None, 1.0, 10, 2.5, "Medium 10VP"),
             ('strong', 'medium', 0.5, 10, 2.5, "Strong/Medium Mix"),
-            ('strong', None, 1.0, 10, 2.3, "Strong 10VP"),
-            ('strong', None, 1.0, 10, 999, "Strong 10VP FINAL"),
+            ('strong', 'medium', 0.5, 10, 999, "Strong/Medium FINAL"),  # Keep mix for learning signal
         ]
         print("\nCurriculum Phases (WITH OPPONENT MIXING):")
         print("-" * 70)
