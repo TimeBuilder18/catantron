@@ -677,14 +677,25 @@ class CurriculumTrainerV3:
         }
 
     def should_advance_curriculum(self, mix_prob, primary_ai, secondary_ai, vp_threshold):
-        """Check if agent has mastered current difficulty level based on VP threshold"""
+        """Check if agent has mastered current difficulty level based on VP AND win rate"""
         if len(self.phase_wins) < 50:
             return False
 
         recent_vp = np.mean(list(self.phase_vps)[-50:])
+        recent_wr = np.mean(list(self.phase_wins)[-50:])
 
-        # Simple VP-based advancement: must reach the VP threshold
-        return recent_vp >= vp_threshold
+        # Minimum win rate required by difficulty (must actually win, not just get VP)
+        min_wr_by_difficulty = {
+            'random': 0.30,      # 30% WR vs Random
+            'very_weak': 0.20,  # 20% WR vs VeryWeak
+            'weak': 0.10,       # 10% WR vs Weak
+            'medium': 0.05,     # 5% WR vs Medium
+            'strong': 0.02,     # 2% WR vs Strong
+        }
+        min_wr = min_wr_by_difficulty.get(primary_ai, 0.05)
+
+        # Must meet BOTH VP threshold AND minimum win rate
+        return recent_vp >= vp_threshold and recent_wr >= min_wr
 
     def train(self, total_games=10000, save_path='models/curriculum_v3_stable',
               train_frequency=5, train_steps=15, min_games_per_phase=1000, start_phase=0):
