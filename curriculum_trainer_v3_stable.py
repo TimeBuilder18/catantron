@@ -710,11 +710,12 @@ class CurriculumTrainerV3:
             ('random', 9, 4.8, "Random 9VP"),
             ('random', 10, 5.2, "Random 10VP"),
             # === PHASE 2: Full games (10VP) vs increasingly harder opponents ===
-            ('very_weak', 10, 5.2, "VeryWeak 10VP"),
-            ('weak', 10, 5.5, "Weak 10VP"),
-            ('medium', 10, 5.8, "Medium 10VP"),
-            ('strong', 10, 6.0, "Strong 10VP"),
-            ('strong', 10, 999, "Strong 10VP FINAL"),  # Never auto-advance
+            # NOTE: Lower thresholds for harder opponents (they compete for VP too!)
+            ('very_weak', 10, 3.5, "VeryWeak 10VP"),  # Lowered from 5.2
+            ('weak', 10, 3.8, "Weak 10VP"),           # Lowered from 5.5
+            ('medium', 10, 4.0, "Medium 10VP"),       # Lowered from 5.8
+            ('strong', 10, 4.2, "Strong 10VP"),       # Lowered from 6.0
+            ('strong', 10, 999, "Strong 10VP FINAL"), # Never auto-advance
         ]
 
         print("\n" + "=" * 70)
@@ -914,10 +915,11 @@ if __name__ == "__main__":
             ('random', 9, 4.8, "Random 9VP"),
             ('random', 10, 5.2, "Random 10VP"),
             # Phase 2: Full games (10VP) vs increasingly harder opponents
-            ('very_weak', 10, 5.2, "VeryWeak 10VP"),
-            ('weak', 10, 5.5, "Weak 10VP"),
-            ('medium', 10, 5.8, "Medium 10VP"),
-            ('strong', 10, 6.0, "Strong 10VP"),
+            # NOTE: Lower thresholds for harder opponents (they compete for VP too!)
+            ('very_weak', 10, 3.5, "VeryWeak 10VP"),
+            ('weak', 10, 3.8, "Weak 10VP"),
+            ('medium', 10, 4.0, "Medium 10VP"),
+            ('strong', 10, 4.2, "Strong 10VP"),
             ('strong', 10, 999, "Strong 10VP FINAL"),
         ]
         print("\nCurriculum Phases (IMPROVED - no VP reset):")
