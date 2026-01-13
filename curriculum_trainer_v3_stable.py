@@ -710,11 +710,13 @@ class CurriculumTrainerV3:
             ('random', 9, 4.8, "Random 9VP"),
             ('random', 10, 5.2, "Random 10VP"),
             # === PHASE 2: Full games (10VP) vs increasingly harder opponents ===
-            ('very_weak', 10, 5.2, "VeryWeak 10VP"),
-            ('weak', 10, 5.5, "Weak 10VP"),
-            ('medium', 10, 5.8, "Medium 10VP"),
-            ('strong', 10, 6.0, "Strong 10VP"),
-            ('strong', 10, 999, "Strong 10VP FINAL"),  # Never auto-advance
+            # NOTE: Much lower thresholds - harder opponents actively compete for VP!
+            # Agent needs to learn new strategies, not just exploit random play
+            ('very_weak', 10, 2.8, "VeryWeak 10VP"),  # Was 3.5, agent stuck at 2.5
+            ('weak', 10, 3.2, "Weak 10VP"),           # Gradual increase
+            ('medium', 10, 3.5, "Medium 10VP"),       #
+            ('strong', 10, 3.8, "Strong 10VP"),       # Challenging but achievable
+            ('strong', 10, 999, "Strong 10VP FINAL"), # Never auto-advance
         ]
 
         print("\n" + "=" * 70)
@@ -818,7 +820,13 @@ class CurriculumTrainerV3:
                     print(f"    Recent VP: {np.mean(list(self.phase_vps)[-50:]):.1f}\n")
 
                 # Clear most old experiences to reduce distribution mismatch
-                self.replay_buffer.clear_old(keep_fraction=0.25)
+                # IMPORTANT: Use very aggressive clearing (0.05) to avoid buffer contamination
+                # Old experiences from easier opponents create conflicting training signals
+                self.replay_buffer.clear_old(keep_fraction=0.05)
+
+                # Reset entropy to encourage exploration with new opponent
+                self.current_entropy_coef = self.entropy_coef
+                self.entropy_history.clear()
 
                 current_phase += 1
                 phase_game_count = 0
@@ -914,10 +922,11 @@ if __name__ == "__main__":
             ('random', 9, 4.8, "Random 9VP"),
             ('random', 10, 5.2, "Random 10VP"),
             # Phase 2: Full games (10VP) vs increasingly harder opponents
-            ('very_weak', 10, 5.2, "VeryWeak 10VP"),
-            ('weak', 10, 5.5, "Weak 10VP"),
-            ('medium', 10, 5.8, "Medium 10VP"),
-            ('strong', 10, 6.0, "Strong 10VP"),
+            # NOTE: Much lower thresholds - harder opponents actively compete for VP!
+            ('very_weak', 10, 2.8, "VeryWeak 10VP"),
+            ('weak', 10, 3.2, "Weak 10VP"),
+            ('medium', 10, 3.5, "Medium 10VP"),
+            ('strong', 10, 3.8, "Strong 10VP"),
             ('strong', 10, 999, "Strong 10VP FINAL"),
         ]
         print("\nCurriculum Phases (IMPROVED - no VP reset):")
