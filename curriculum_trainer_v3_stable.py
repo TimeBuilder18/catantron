@@ -695,28 +695,33 @@ class CurriculumTrainerV3:
         """
         os.makedirs('models', exist_ok=True)
 
-        # Phases: (ai_difficulty, vp_to_win, vp_threshold, phase_name)
-        # IMPROVED CURRICULUM: VP progression only once, then increase opponent difficulty
-        # This prevents the model from "forgetting" long-game strategies when facing harder opponents
-        # - First: learn to play games of increasing length (4VP → 10VP) against Random
-        # - Then: keep VP at 10 and face progressively harder opponents
+        # Phases: (primary_ai, secondary_ai, mix_prob, vp_to_win, vp_threshold, phase_name)
+        # mix_prob = probability of primary_ai (1.0 = always primary, 0.5 = 50/50 mix)
+        #
+        # IMPROVED CURRICULUM with GRADUAL OPPONENT MIXING:
+        # - Pure difficulty jumps cause 0% win rate = no learning signal
+        # - Mix in harder opponents gradually so agent still wins sometimes
+        # - Each opponent independently rolls primary vs secondary AI
         phases = [
             # === PHASE 1: Learn game length progression vs Random ===
-            ('random', 4, 2.8, "Random 4VP"),
-            ('random', 5, 3.2, "Random 5VP"),
-            ('random', 6, 3.6, "Random 6VP"),
-            ('random', 7, 4.0, "Random 7VP"),
-            ('random', 8, 4.4, "Random 8VP"),
-            ('random', 9, 4.8, "Random 9VP"),
-            ('random', 10, 5.2, "Random 10VP"),
-            # === PHASE 2: Full games (10VP) vs increasingly harder opponents ===
-            # NOTE: Much lower thresholds - harder opponents actively compete for VP!
-            # Agent needs to learn new strategies, not just exploit random play
-            ('very_weak', 10, 2.8, "VeryWeak 10VP"),  # Was 3.5, agent stuck at 2.5
-            ('weak', 10, 3.2, "Weak 10VP"),           # Gradual increase
-            ('medium', 10, 3.5, "Medium 10VP"),       #
-            ('strong', 10, 3.8, "Strong 10VP"),       # Challenging but achievable
-            ('strong', 10, 999, "Strong 10VP FINAL"), # Never auto-advance
+            ('random', None, 1.0, 4, 2.8, "Random 4VP"),
+            ('random', None, 1.0, 5, 3.2, "Random 5VP"),
+            ('random', None, 1.0, 6, 3.6, "Random 6VP"),
+            ('random', None, 1.0, 7, 4.0, "Random 7VP"),
+            ('random', None, 1.0, 8, 4.4, "Random 8VP"),
+            ('random', None, 1.0, 9, 4.8, "Random 9VP"),
+            ('random', None, 1.0, 10, 5.2, "Random 10VP"),
+            # === PHASE 2: Gradual introduction of harder opponents ===
+            # Mix opponents so agent still wins some games (learning signal!)
+            ('very_weak', 'random', 0.5, 10, 3.5, "VeryWeak/Random Mix"),
+            ('very_weak', None, 1.0, 10, 3.0, "VeryWeak 10VP"),
+            ('weak', 'very_weak', 0.5, 10, 3.0, "Weak/VeryWeak Mix"),
+            ('weak', None, 1.0, 10, 2.8, "Weak 10VP"),
+            ('medium', 'weak', 0.5, 10, 2.8, "Medium/Weak Mix"),
+            ('medium', None, 1.0, 10, 2.5, "Medium 10VP"),
+            ('strong', 'medium', 0.5, 10, 2.5, "Strong/Medium Mix"),
+            ('strong', None, 1.0, 10, 2.3, "Strong 10VP"),
+            ('strong', None, 1.0, 10, 999, "Strong 10VP FINAL"),
         ]
 
         print("\n" + "=" * 70)
@@ -753,7 +758,7 @@ class CurriculumTrainerV3:
         last_save_game = 0
 
         while game_num < total_games:
-            ai_difficulty, vp_to_win, vp_threshold, phase_name = phases[current_phase]
+            primary_ai, secondary_ai, mix_prob, vp_to_win, vp_threshold, phase_name = phases[current_phase]
 
             # Determine how many games to play in this batch
             games_remaining = total_games - game_num
@@ -762,9 +767,9 @@ class CurriculumTrainerV3:
             # Play games in parallel
             results = self.play_games_parallel(
                 num_games=batch_size,
-                mix_prob=1.0,
-                primary_ai=ai_difficulty,
-                secondary_ai=None,
+                mix_prob=mix_prob,
+                primary_ai=primary_ai,
+                secondary_ai=secondary_ai,
                 victory_points_to_win=vp_to_win
             )
 
@@ -811,10 +816,10 @@ class CurriculumTrainerV3:
             # Check for curriculum advancement
             if (phase_game_count >= min_games_per_phase and
                 current_phase < len(phases) - 1 and
-                self.should_advance_curriculum(1.0, ai_difficulty, None, vp_threshold)):
+                self.should_advance_curriculum(mix_prob, primary_ai, secondary_ai, vp_threshold)):
 
                 with self._phase_lock:
-                    print(f"\n  ★ ADVANCING from {phase_name} to {phases[current_phase + 1][3]}")
+                    print(f"\n  ★ ADVANCING from {phase_name} to {phases[current_phase + 1][5]}")
                     print(f"    Games in phase: {phase_game_count}")
                     print(f"    Recent WR: {np.mean(list(self.phase_wins)[-50:])*100:.1f}%")
                     print(f"    Recent VP: {np.mean(list(self.phase_vps)[-50:]):.1f}\n")
@@ -912,31 +917,34 @@ if __name__ == "__main__":
 
     # List phases if requested
     if args.list_phases:
+        # Format: (primary_ai, secondary_ai, mix_prob, vp_to_win, vp_threshold, name)
         phases = [
-            # Phase 1: Learn game length progression vs Random
-            ('random', 4, 2.8, "Random 4VP"),
-            ('random', 5, 3.2, "Random 5VP"),
-            ('random', 6, 3.6, "Random 6VP"),
-            ('random', 7, 4.0, "Random 7VP"),
-            ('random', 8, 4.4, "Random 8VP"),
-            ('random', 9, 4.8, "Random 9VP"),
-            ('random', 10, 5.2, "Random 10VP"),
-            # Phase 2: Full games (10VP) vs increasingly harder opponents
-            # NOTE: Much lower thresholds - harder opponents actively compete for VP!
-            ('very_weak', 10, 2.8, "VeryWeak 10VP"),
-            ('weak', 10, 3.2, "Weak 10VP"),
-            ('medium', 10, 3.5, "Medium 10VP"),
-            ('strong', 10, 3.8, "Strong 10VP"),
-            ('strong', 10, 999, "Strong 10VP FINAL"),
+            ('random', None, 1.0, 4, 2.8, "Random 4VP"),
+            ('random', None, 1.0, 5, 3.2, "Random 5VP"),
+            ('random', None, 1.0, 6, 3.6, "Random 6VP"),
+            ('random', None, 1.0, 7, 4.0, "Random 7VP"),
+            ('random', None, 1.0, 8, 4.4, "Random 8VP"),
+            ('random', None, 1.0, 9, 4.8, "Random 9VP"),
+            ('random', None, 1.0, 10, 5.2, "Random 10VP"),
+            ('very_weak', 'random', 0.5, 10, 3.5, "VeryWeak/Random Mix"),
+            ('very_weak', None, 1.0, 10, 3.0, "VeryWeak 10VP"),
+            ('weak', 'very_weak', 0.5, 10, 3.0, "Weak/VeryWeak Mix"),
+            ('weak', None, 1.0, 10, 2.8, "Weak 10VP"),
+            ('medium', 'weak', 0.5, 10, 2.8, "Medium/Weak Mix"),
+            ('medium', None, 1.0, 10, 2.5, "Medium 10VP"),
+            ('strong', 'medium', 0.5, 10, 2.5, "Strong/Medium Mix"),
+            ('strong', None, 1.0, 10, 2.3, "Strong 10VP"),
+            ('strong', None, 1.0, 10, 999, "Strong 10VP FINAL"),
         ]
-        print("\nCurriculum Phases (IMPROVED - no VP reset):")
-        print("-" * 55)
+        print("\nCurriculum Phases (WITH OPPONENT MIXING):")
+        print("-" * 70)
         print("  Phase 1: Learn game length (4VP → 10VP) vs Random")
-        print("  Phase 2: Full 10VP games vs harder opponents")
-        print("-" * 55)
-        for i, (ai, vp_win, vp_thresh, name) in enumerate(phases):
-            print(f"  {i:2d}: {name:20s} (VP to win: {vp_win}, threshold: {vp_thresh})")
-        print("-" * 55)
+        print("  Phase 2: Gradual opponent mixing (still win some games = learning signal)")
+        print("-" * 70)
+        for i, (primary, secondary, mix, vp_win, vp_thresh, name) in enumerate(phases):
+            mix_str = f"{int(mix*100)}% {primary}" if secondary is None else f"{int(mix*100)}% {primary} / {int((1-mix)*100)}% {secondary}"
+            print(f"  {i:2d}: {name:22s} VP:{vp_win:2d} thresh:{vp_thresh:4.1f} ({mix_str})")
+        print("-" * 70)
         print("\nUse --start-phase N to start from phase N")
         exit(0)
 
