@@ -662,6 +662,17 @@ def main():
         visual_env = VisualAIEnvironment(screen, offset, font, small_font)
         visual_env.game = game_env.game_env.game
 
+        # Update player names to show AI types
+        if network:
+            visual_env.game.players[0].name = "🧠 Neural Net (RED)"
+        else:
+            visual_env.game.players[0].name = "🎲 Random (RED)"
+
+        ai_type = args.ai_difficulty.capitalize() if args.ai_difficulty != 'random' else 'Random'
+        visual_env.game.players[1].name = f"🤖 {ai_type} (BLUE)"
+        visual_env.game.players[2].name = f"🤖 {ai_type} (YELLOW)"
+        visual_env.game.players[3].name = f"🤖 {ai_type} (WHITE)"
+
         print("🎮 Game started! Player 0 is " + ("Neural Network" if network else "Random AI"))
 
         running = True
