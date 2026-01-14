@@ -789,8 +789,9 @@ def main():
                     if not success and game.can_end_turn():
                         game.end_turn()
 
-                    # Update observation after opponent turn
-                    obs = game_env.game_env.get_observation(player_index=0)
+                    # Update observation for player 0 after opponent turn
+                    # game_env.env is CatanEnv, which has _get_obs() method
+                    obs = game_env.env._get_obs()
 
                     winner = game.check_victory_conditions()
                     if winner:
