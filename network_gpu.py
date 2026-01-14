@@ -57,8 +57,16 @@ class CatanPolicy(nn.Module):
             if len(action_mask.shape) == 1:
                 action_mask = action_mask.unsqueeze(0)
             action_mask = action_mask.to(self.device)
-            action_logits = action_logits.masked_fill(action_mask == 0, float('-inf'))
-        action_probs = F.softmax(action_logits, dim=-1)
+
+            # Check if mask is all zeros (would cause NaN in softmax)
+            if action_mask.sum() == 0:
+                # All actions masked - use uniform distribution as fallback
+                action_probs = torch.ones_like(action_logits) / action_logits.shape[-1]
+            else:
+                action_logits = action_logits.masked_fill(action_mask == 0, float('-inf'))
+                action_probs = F.softmax(action_logits, dim=-1)
+        else:
+            action_probs = F.softmax(action_logits, dim=-1)
 
         vertex_logits = self.location_head_vertex(x)
         if vertex_mask is not None:
@@ -67,8 +75,16 @@ class CatanPolicy(nn.Module):
             if len(vertex_mask.shape) == 1:
                 vertex_mask = vertex_mask.unsqueeze(0)
             vertex_mask = vertex_mask.to(self.device)
-            vertex_logits = vertex_logits.masked_fill(vertex_mask == 0, float('-inf'))
-        vertex_probs = F.softmax(vertex_logits, dim=-1)
+
+            # Check if mask is all zeros (would cause NaN in softmax)
+            if vertex_mask.sum() == 0:
+                # All vertices masked - use uniform distribution as fallback
+                vertex_probs = torch.ones_like(vertex_logits) / vertex_logits.shape[-1]
+            else:
+                vertex_logits = vertex_logits.masked_fill(vertex_mask == 0, float('-inf'))
+                vertex_probs = F.softmax(vertex_logits, dim=-1)
+        else:
+            vertex_probs = F.softmax(vertex_logits, dim=-1)
 
         edge_logits = self.location_head_edge(x)
         if edge_mask is not None:
@@ -77,8 +93,16 @@ class CatanPolicy(nn.Module):
             if len(edge_mask.shape) == 1:
                 edge_mask = edge_mask.unsqueeze(0)
             edge_mask = edge_mask.to(self.device)
-            edge_logits = edge_logits.masked_fill(edge_mask == 0, float('-inf'))
-        edge_probs = F.softmax(edge_logits, dim=-1)
+
+            # Check if mask is all zeros (would cause NaN in softmax)
+            if edge_mask.sum() == 0:
+                # All edges masked - use uniform distribution as fallback
+                edge_probs = torch.ones_like(edge_logits) / edge_logits.shape[-1]
+            else:
+                edge_logits = edge_logits.masked_fill(edge_mask == 0, float('-inf'))
+                edge_probs = F.softmax(edge_logits, dim=-1)
+        else:
+            edge_probs = F.softmax(edge_logits, dim=-1)
 
         trade_give_logits = self.trade_give_head(x)
         trade_give_probs = F.softmax(trade_give_logits, dim=-1)
