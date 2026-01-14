@@ -647,29 +647,34 @@ def main():
         print("Press ESC to quit")
         print("="*60 + "\n")
 
+        # Create environment wrapper for proper observations (needed for model testing)
+        game_env = SimplifiedRewardWrapper(player_id=0, victory_points_to_win=10)
+        obs, _ = game_env.reset()
+
         # Load model if provided
         network = None
         if args.model:
-            # Try CPU first to avoid MPS/CUDA numerical issues
-            device = 'cpu'
-            print(f"Loading model on CPU to avoid numerical stability issues...")
+            # Use GPU if available for better performance
+            if torch.cuda.is_available():
+                device = 'cuda'
+            elif torch.backends.mps.is_available():
+                device = 'mps'
+            else:
+                device = 'cpu'
+
+            print(f"Loading model on {device}...")
             try:
                 network = NetworkWrapper(model_path=args.model, device=device)
                 print(f"✅ Model loaded on {device}")
 
-                # Test the model with a dummy observation
+                # Test the model with actual observation
                 print("Testing model output...")
-                test_obs = obs['observation']
-                test_action_mask = obs['action_mask']
-                test_vertex_mask = obs['vertex_mask']
-                test_edge_mask = obs['edge_mask']
-
                 with torch.no_grad():
                     test_out = network.policy.forward(
-                        torch.FloatTensor(test_obs).unsqueeze(0),
-                        torch.FloatTensor(test_action_mask).unsqueeze(0),
-                        torch.FloatTensor(test_vertex_mask).unsqueeze(0),
-                        torch.FloatTensor(test_edge_mask).unsqueeze(0)
+                        torch.FloatTensor(obs['observation']).unsqueeze(0),
+                        torch.FloatTensor(obs['action_mask']).unsqueeze(0),
+                        torch.FloatTensor(obs['vertex_mask']).unsqueeze(0),
+                        torch.FloatTensor(obs['edge_mask']).unsqueeze(0)
                     )
 
                     # Check for NaN
@@ -681,12 +686,10 @@ def main():
                         print("✅ Model test passed - outputs are valid")
             except Exception as e:
                 print(f"❌ Error loading model: {e}")
+                import traceback
+                traceback.print_exc()
                 print("Falling back to random AI for Player 0")
                 network = None
-
-        # Create environment wrapper for proper observations
-        game_env = SimplifiedRewardWrapper(player_id=0, victory_points_to_win=10)
-        obs, _ = game_env.reset()
 
         # Create visual environment with the same game instance
         visual_env = VisualAIEnvironment(screen, offset, font, small_font)
