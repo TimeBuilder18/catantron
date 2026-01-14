@@ -8,19 +8,28 @@ Combines:
 
 USAGE:
 ------
-python visual_ai_game.py
+# Watch AI play with trained model
+python visual_ai_game.py --model models/curriculum_v3_stable_phase5.pt --ai-difficulty medium
 
-Then implement your AI agents to control the 4 players.
-You can watch them play in the pygame window!
+# Watch random agents
+python visual_ai_game.py --ai-difficulty random
+
+# Manual control mode
+python visual_ai_game.py --manual
 """
 
 import pygame
 import sys
 import random
 import math
+import argparse
+import torch
+import numpy as np
 from tile import Tile
 from game_system import (Player, Robber, GameBoard, GameSystem, ResourceType,
                          Settlement, City, Road, DevelopmentCardType, GameConstants)
+from network_wrapper import NetworkWrapper
+from simplified_reward_wrapper import SimplifiedRewardWrapper
 
 # Standard Catan setup
 NUMBER_TOKENS = [5, 2, 6, 3, 8, 10, 9, 12, 11, 4, 8, 10, 9, 4, 5, 6, 3, 11]
@@ -425,8 +434,100 @@ class VisualAIEnvironment:
         return actions
 
 
+def play_random_turn(game, player_id):
+    """Random AI opponent"""
+    player = game.players[player_id]
+
+    if game.is_initial_placement_phase():
+        if game.waiting_for_road:
+            if game.last_settlement_vertex:
+                edges = game.game_board.edges
+                valid = [e for e in edges
+                        if e.structure is None and
+                        (e.vertex1 == game.last_settlement_vertex or
+                         e.vertex2 == game.last_settlement_vertex)]
+                if valid:
+                    game.try_place_initial_road(random.choice(valid), player)
+        else:
+            vertices = game.game_board.vertices
+            valid = [v for v in vertices if v.structure is None and
+                    not any(adj.structure for adj in v.adjacent_vertices)]
+            if valid:
+                game.try_place_initial_settlement(random.choice(valid), player)
+        return True
+
+    if game.can_roll_dice():
+        game.roll_dice()
+        return True
+
+    if game.can_trade_or_build():
+        actions = []
+        res = player.resources
+
+        if (res[ResourceType.WOOD] >= 1 and res[ResourceType.BRICK] >= 1 and
+            res[ResourceType.WHEAT] >= 1 and res[ResourceType.SHEEP] >= 1):
+            v = game.get_buildable_vertices_for_settlements()
+            if v: actions.append(('sett', v))
+
+        if res[ResourceType.WHEAT] >= 2 and res[ResourceType.ORE] >= 3:
+            v = game.get_buildable_vertices_for_cities()
+            if v: actions.append(('city', v))
+
+        if res[ResourceType.WOOD] >= 1 and res[ResourceType.BRICK] >= 1:
+            e = game.get_buildable_edges()
+            if e: actions.append(('road', e))
+
+        if (res[ResourceType.WHEAT] >= 1 and res[ResourceType.SHEEP] >= 1 and
+            res[ResourceType.ORE] >= 1 and not game.dev_deck.is_empty()):
+            actions.append(('dev', None))
+
+        if actions and random.random() < 0.85:
+            action_type, locs = random.choice(actions)
+            if action_type == 'sett':
+                player.try_build_settlement(random.choice(locs))
+            elif action_type == 'city':
+                player.try_build_city(random.choice(locs))
+            elif action_type == 'road':
+                player.try_build_road(random.choice(locs))
+            elif action_type == 'dev':
+                player.try_buy_development_card(game.dev_deck)
+            return True
+
+    if game.can_end_turn():
+        game.end_turn()
+        return True
+
+    return False
+
+
+def play_opponent_turn(game, player_id, ai_difficulty='random'):
+    """Play opponent turn with specified AI difficulty"""
+    if ai_difficulty == 'random':
+        return play_random_turn(game, player_id)
+    else:
+        try:
+            from rule_based_ai import play_rule_based_turn
+            class MinimalEnv:
+                def __init__(self, g):
+                    self.game_env = type('obj', (object,), {'game': g})()
+            return play_rule_based_turn(MinimalEnv(game), player_id, difficulty=ai_difficulty)
+        except ImportError:
+            print(f"Warning: rule_based_ai not found, using random AI instead")
+            return play_random_turn(game, player_id)
+
+
 def main():
-    """Main game loop with manual controls (for testing)"""
+    """Main game loop"""
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(description='Visual Catan AI Game')
+    parser.add_argument('--model', type=str, default=None, help='Path to trained model')
+    parser.add_argument('--ai-difficulty', type=str, default='random',
+                       choices=['random', 'very_weak', 'weak', 'medium', 'strong'],
+                       help='AI difficulty for opponents')
+    parser.add_argument('--manual', action='store_true', help='Manual control mode')
+    parser.add_argument('--speed', type=float, default=0.5, help='Game speed (seconds per move)')
+    args = parser.parse_args()
+
     pygame.init()
     pygame.font.init()
 
@@ -441,28 +542,21 @@ def main():
     # Center the board on left side
     offset = (400, SCREEN_H / 2)
 
-    # Create environment
-    env = VisualAIEnvironment(screen, offset, font, small_font)
+    if args.manual:
+        # Original manual control mode
+        env = VisualAIEnvironment(screen, offset, font, small_font)
+        build_mode = "SETTLEMENT"
+        print("\n" + "="*60)
+        print("MANUAL CONTROL MODE")
+        print("="*60)
+        print("Controls: D (dice), T (end turn), 1/2/3 (build mode), X (dev card), Click (build)")
+        print("="*60 + "\n")
 
-    # Manual control mode
-    build_mode = "SETTLEMENT"
-
-    #print("\n" + "="*60)
-    #print("VISUAL AI TRAINING ENVIRONMENT")
-    #print("="*60)
-    #print("Manual controls for testing:")
-    #print("  D - Roll dice")
-    #print("  T - End turn")
-    #print("  1/2/3 - Switch build mode")
-    #print("  X - Buy dev card")
-    #print("  Mouse - Build")
-    #print("="*60 + "\n")
-
-    running = True
-    while running:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
+        running = True
+        while running:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    running = False
 
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_d:
@@ -537,9 +631,116 @@ def main():
                                     success, msg = current_player.try_build_road(edge)
                                     print(msg)
 
-        # Draw everything
-        env.draw()
-        clock.tick(60)
+            # Draw everything
+            env.draw()
+            clock.tick(60)
+
+    else:
+        # AI mode - watch agents play
+        print("\n" + "="*60)
+        print("AI VISUALIZATION MODE")
+        print("="*60)
+        if args.model:
+            print(f"Loading model: {args.model}")
+        print(f"Opponent AI: {args.ai_difficulty}")
+        print(f"Game speed: {args.speed}s per move")
+        print("Press ESC to quit")
+        print("="*60 + "\n")
+
+        # Load model if provided
+        network = None
+        if args.model:
+            device = 'cuda' if torch.cuda.is_available() else 'cpu'
+            network = NetworkWrapper(model_path=args.model, device=device)
+            print(f"✅ Model loaded on {device}")
+
+        # Create environment wrapper for proper observations
+        game_env = SimplifiedRewardWrapper(player_id=0, victory_points_to_win=10)
+        obs, _ = game_env.reset()
+
+        # Create visual environment with the same game instance
+        visual_env = VisualAIEnvironment(screen, offset, font, small_font)
+        visual_env.game = game_env.game_env.game
+
+        print("🎮 Game started! Player 0 is " + ("Neural Network" if network else "Random AI"))
+
+        running = True
+        moves = 0
+        max_moves = 500
+        last_move_time = pygame.time.get_ticks()
+
+        while running and moves < max_moves:
+            # Handle pygame events
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    running = False
+                elif event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_ESCAPE:
+                        running = False
+
+            # AI turn logic (throttled by speed setting)
+            current_time = pygame.time.get_ticks()
+            if current_time - last_move_time >= args.speed * 1000:
+                last_move_time = current_time
+
+                game = game_env.game_env.game
+                current_player = game.get_current_player()
+                current_id = game.players.index(current_player)
+
+                if current_id == 0 and network:
+                    # Neural network player
+                    moves += 1
+                    try:
+                        # Get action from network
+                        action_probs, vertex_probs, edge_probs, _, _, _ = network.policy.forward(
+                            torch.FloatTensor(obs['observation']).unsqueeze(0),
+                            torch.FloatTensor(obs['action_mask']).unsqueeze(0),
+                            torch.FloatTensor(obs['vertex_mask']).unsqueeze(0),
+                            torch.FloatTensor(obs['edge_mask']).unsqueeze(0)
+                        )
+
+                        # Sample actions
+                        action_dist = torch.distributions.Categorical(action_probs)
+                        action_id = action_dist.sample().item()
+
+                        vertex_dist = torch.distributions.Categorical(vertex_probs)
+                        vertex_id = vertex_dist.sample().item()
+
+                        edge_dist = torch.distributions.Categorical(edge_probs)
+                        edge_id = edge_dist.sample().item()
+
+                        # Step environment
+                        next_obs, reward, terminated, truncated, info = game_env.step(
+                            action_id, vertex_id, edge_id, 0, 0
+                        )
+                        obs = next_obs
+
+                        if terminated or truncated:
+                            winner = game.check_victory_conditions()
+                            if winner:
+                                print(f"\n🏆 {winner.name} WINS with {winner.victory_points} points!")
+                            running = False
+                    except Exception as e:
+                        print(f"Error in neural network turn: {e}")
+                        # Fallback to random
+                        play_random_turn(game, current_id)
+                else:
+                    # Opponent AI (random or rule-based)
+                    success = play_opponent_turn(game, current_id, args.ai_difficulty)
+                    if not success and game.can_end_turn():
+                        game.end_turn()
+
+                    winner = game.check_victory_conditions()
+                    if winner:
+                        print(f"\n🏆 {winner.name} WINS with {winner.victory_points} points!")
+                        running = False
+
+            # Draw everything
+            visual_env.draw()
+            clock.tick(60)
+
+        if moves >= max_moves:
+            print(f"\n⏱️  Game ended after {max_moves} moves (max limit reached)")
 
     pygame.quit()
     sys.exit()
