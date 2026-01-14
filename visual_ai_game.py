@@ -558,78 +558,78 @@ def main():
                 if event.type == pygame.QUIT:
                     running = False
 
-            elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_d:
-                    if env.game.can_roll_dice():
-                        result = env.game.roll_dice()
-                        if result:
-                            #print(f"🎲 Rolled: {result[2]} ({result[0]}+{result[1]})")
-                            pass
+                elif event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_d:
+                        if env.game.can_roll_dice():
+                            result = env.game.roll_dice()
+                            if result:
+                                #print(f"🎲 Rolled: {result[2]} ({result[0]}+{result[1]})")
+                                pass
 
-                elif event.key == pygame.K_t:
-                    success, msg = env.game.end_turn()
-                    if success:
-                        #print(f"✓ {msg}")
-                        # Check for winner
-                        winner = env.game.check_victory_conditions()
-                        if winner:
-                            #print(f"\n🏆 {winner.name} WINS with {winner.victory_points} points!")
-                            pass
+                    elif event.key == pygame.K_t:
+                        success, msg = env.game.end_turn()
+                        if success:
+                            #print(f"✓ {msg}")
+                            # Check for winner
+                            winner = env.game.check_victory_conditions()
+                            if winner:
+                                #print(f"\n🏆 {winner.name} WINS with {winner.victory_points} points!")
+                                pass
 
-                elif event.key == pygame.K_1:
-                    build_mode = "SETTLEMENT"
-                    #print("Mode: Settlement")
+                    elif event.key == pygame.K_1:
+                        build_mode = "SETTLEMENT"
+                        #print("Mode: Settlement")
 
-                elif event.key == pygame.K_2:
-                    build_mode = "CITY"
-                    #print("Mode: City")
+                    elif event.key == pygame.K_2:
+                        build_mode = "CITY"
+                        #print("Mode: City")
 
-                elif event.key == pygame.K_3:
-                    build_mode = "ROAD"
-                    #print("Mode: Road")
+                    elif event.key == pygame.K_3:
+                        build_mode = "ROAD"
+                        #print("Mode: Road")
 
-                elif event.key == pygame.K_x:
-                    if env.game.can_trade_or_build():
-                        success, msg = env.game.get_current_player().try_buy_development_card(env.game.dev_deck)
-                        print(msg)
-
-            elif event.type == pygame.MOUSEBUTTONDOWN:
-                mouse_pos = event.pos
-
-                # Only handle clicks in game area (left side)
-                if mouse_pos[0] < 800:
-                    if env.game.is_initial_placement_phase():
-                        if not env.game.waiting_for_road:
-                            vertex = find_closest_vertex(env.game.game_board, mouse_pos, offset)
-                            if vertex:
-                                success, msg = env.game.try_place_initial_settlement(vertex)
-                                print(msg)
-                        else:
-                            edge = find_closest_edge(env.game.game_board, mouse_pos, offset)
-                            if edge:
-                                success, msg = env.game.try_place_initial_road(edge)
-                                print(msg)
-                    else:
+                    elif event.key == pygame.K_x:
                         if env.game.can_trade_or_build():
-                            current_player = env.game.get_current_player()
+                            success, msg = env.game.get_current_player().try_buy_development_card(env.game.dev_deck)
+                            print(msg)
 
-                            if build_mode == "SETTLEMENT":
+                elif event.type == pygame.MOUSEBUTTONDOWN:
+                    mouse_pos = event.pos
+
+                    # Only handle clicks in game area (left side)
+                    if mouse_pos[0] < 800:
+                        if env.game.is_initial_placement_phase():
+                            if not env.game.waiting_for_road:
                                 vertex = find_closest_vertex(env.game.game_board, mouse_pos, offset)
                                 if vertex:
-                                    success, msg = current_player.try_build_settlement(vertex, False)
+                                    success, msg = env.game.try_place_initial_settlement(vertex)
                                     print(msg)
-
-                            elif build_mode == "CITY":
-                                vertex = find_closest_vertex(env.game.game_board, mouse_pos, offset)
-                                if vertex:
-                                    success, msg = current_player.try_build_city(vertex)
-                                    print(msg)
-
-                            elif build_mode == "ROAD":
+                            else:
                                 edge = find_closest_edge(env.game.game_board, mouse_pos, offset)
                                 if edge:
-                                    success, msg = current_player.try_build_road(edge)
+                                    success, msg = env.game.try_place_initial_road(edge)
                                     print(msg)
+                        else:
+                            if env.game.can_trade_or_build():
+                                current_player = env.game.get_current_player()
+
+                                if build_mode == "SETTLEMENT":
+                                    vertex = find_closest_vertex(env.game.game_board, mouse_pos, offset)
+                                    if vertex:
+                                        success, msg = current_player.try_build_settlement(vertex, False)
+                                        print(msg)
+
+                                elif build_mode == "CITY":
+                                    vertex = find_closest_vertex(env.game.game_board, mouse_pos, offset)
+                                    if vertex:
+                                        success, msg = current_player.try_build_city(vertex)
+                                        print(msg)
+
+                                elif build_mode == "ROAD":
+                                    edge = find_closest_edge(env.game.game_board, mouse_pos, offset)
+                                    if edge:
+                                        success, msg = current_player.try_build_road(edge)
+                                        print(msg)
 
             # Draw everything
             env.draw()
