@@ -685,12 +685,13 @@ class CurriculumTrainerV3:
         recent_wr = np.mean(list(self.phase_wins)[-50:])
 
         # Minimum win rate required by difficulty (must actually win, not just get VP)
+        # Note: In 4-player games, 25% WR is the baseline if all players are equal
         min_wr_by_difficulty = {
-            'random': 0.30,      # 30% WR vs Random
-            'very_weak': 0.20,  # 20% WR vs VeryWeak
-            'weak': 0.10,       # 10% WR vs Weak
-            'medium': 0.05,     # 5% WR vs Medium
-            'strong': 0.02,     # 2% WR vs Strong
+            'random': 0.15,      # 15% WR vs Random (was 30%, too high for 4-player)
+            'very_weak': 0.10,  # 10% WR vs VeryWeak
+            'weak': 0.05,       # 5% WR vs Weak
+            'medium': 0.02,     # 2% WR vs Medium
+            'strong': 0.01,     # 1% WR vs Strong
         }
         min_wr = min_wr_by_difficulty.get(primary_ai, 0.05)
 
