@@ -647,16 +647,49 @@ def main():
         print("Press ESC to quit")
         print("="*60 + "\n")
 
+        # Create environment wrapper for proper observations (needed for model testing)
+        game_env = SimplifiedRewardWrapper(player_id=0, victory_points_to_win=10)
+        obs, _ = game_env.reset()
+
         # Load model if provided
         network = None
         if args.model:
-            device = 'cuda' if torch.cuda.is_available() else 'cpu'
-            network = NetworkWrapper(model_path=args.model, device=device)
-            print(f"✅ Model loaded on {device}")
+            # Use GPU if available for better performance
+            if torch.cuda.is_available():
+                device = 'cuda'
+            elif torch.backends.mps.is_available():
+                device = 'mps'
+            else:
+                device = 'cpu'
 
-        # Create environment wrapper for proper observations
-        game_env = SimplifiedRewardWrapper(player_id=0, victory_points_to_win=10)
-        obs, _ = game_env.reset()
+            print(f"Loading model on {device}...")
+            try:
+                network = NetworkWrapper(model_path=args.model, device=device)
+                print(f"✅ Model loaded on {device}")
+
+                # Test the model with actual observation
+                print("Testing model output...")
+                with torch.no_grad():
+                    test_out = network.policy.forward(
+                        torch.FloatTensor(obs['observation']).unsqueeze(0),
+                        torch.FloatTensor(obs['action_mask']).unsqueeze(0),
+                        torch.FloatTensor(obs['vertex_mask']).unsqueeze(0),
+                        torch.FloatTensor(obs['edge_mask']).unsqueeze(0)
+                    )
+
+                    # Check for NaN
+                    if torch.isnan(test_out[0]).any():
+                        print("⚠️  WARNING: Model outputs NaN values! Model may be corrupted.")
+                        print("Falling back to random AI for Player 0")
+                        network = None
+                    else:
+                        print("✅ Model test passed - outputs are valid")
+            except Exception as e:
+                print(f"❌ Error loading model: {e}")
+                import traceback
+                traceback.print_exc()
+                print("Falling back to random AI for Player 0")
+                network = None
 
         # Create visual environment with the same game instance
         visual_env = VisualAIEnvironment(screen, offset, font, small_font)
