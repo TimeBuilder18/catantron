@@ -662,6 +662,17 @@ def main():
         visual_env = VisualAIEnvironment(screen, offset, font, small_font)
         visual_env.game = game_env.game_env.game
 
+        # Update player names to show AI types
+        if network:
+            visual_env.game.players[0].name = "🧠 Neural Net (RED)"
+        else:
+            visual_env.game.players[0].name = "🎲 Random (RED)"
+
+        ai_type = args.ai_difficulty.capitalize() if args.ai_difficulty != 'random' else 'Random'
+        visual_env.game.players[1].name = f"🤖 {ai_type} (BLUE)"
+        visual_env.game.players[2].name = f"🤖 {ai_type} (YELLOW)"
+        visual_env.game.players[3].name = f"🤖 {ai_type} (WHITE)"
+
         print("🎮 Game started! Player 0 is " + ("Neural Network" if network else "Random AI"))
 
         running = True
@@ -687,48 +698,57 @@ def main():
                 current_player = game.get_current_player()
                 current_id = game.players.index(current_player)
 
-                if current_id == 0 and network:
-                    # Neural network player
+                if current_id == 0:
+                    # Player 0 - Neural network or random
                     moves += 1
-                    try:
-                        # Get action from network
-                        action_probs, vertex_probs, edge_probs, _, _, _ = network.policy.forward(
-                            torch.FloatTensor(obs['observation']).unsqueeze(0),
-                            torch.FloatTensor(obs['action_mask']).unsqueeze(0),
-                            torch.FloatTensor(obs['vertex_mask']).unsqueeze(0),
-                            torch.FloatTensor(obs['edge_mask']).unsqueeze(0)
-                        )
+                    if network:
+                        try:
+                            # Get action from network
+                            action_probs, vertex_probs, edge_probs, _, _, _ = network.policy.forward(
+                                torch.FloatTensor(obs['observation']).unsqueeze(0),
+                                torch.FloatTensor(obs['action_mask']).unsqueeze(0),
+                                torch.FloatTensor(obs['vertex_mask']).unsqueeze(0),
+                                torch.FloatTensor(obs['edge_mask']).unsqueeze(0)
+                            )
 
-                        # Sample actions
-                        action_dist = torch.distributions.Categorical(action_probs)
-                        action_id = action_dist.sample().item()
+                            # Sample actions
+                            action_dist = torch.distributions.Categorical(action_probs)
+                            action_id = action_dist.sample().item()
 
-                        vertex_dist = torch.distributions.Categorical(vertex_probs)
-                        vertex_id = vertex_dist.sample().item()
+                            vertex_dist = torch.distributions.Categorical(vertex_probs)
+                            vertex_id = vertex_dist.sample().item()
 
-                        edge_dist = torch.distributions.Categorical(edge_probs)
-                        edge_id = edge_dist.sample().item()
+                            edge_dist = torch.distributions.Categorical(edge_probs)
+                            edge_id = edge_dist.sample().item()
 
-                        # Step environment
-                        next_obs, reward, terminated, truncated, info = game_env.step(
-                            action_id, vertex_id, edge_id, 0, 0
-                        )
-                        obs = next_obs
+                            # Step environment
+                            next_obs, reward, terminated, truncated, info = game_env.step(
+                                action_id, vertex_id, edge_id, 0, 0
+                            )
+                            obs = next_obs
 
-                        if terminated or truncated:
-                            winner = game.check_victory_conditions()
-                            if winner:
-                                print(f"\n🏆 {winner.name} WINS with {winner.victory_points} points!")
-                            running = False
-                    except Exception as e:
-                        print(f"Error in neural network turn: {e}")
-                        # Fallback to random
+                            if terminated or truncated:
+                                winner = game.check_victory_conditions()
+                                if winner:
+                                    print(f"\n🏆 {winner.name} WINS with {winner.victory_points} points!")
+                                running = False
+                        except Exception as e:
+                            print(f"Error in neural network turn: {e}")
+                            import traceback
+                            traceback.print_exc()
+                            # Fallback to random
+                            play_random_turn(game, current_id)
+                    else:
+                        # No model loaded, use random AI
                         play_random_turn(game, current_id)
                 else:
                     # Opponent AI (random or rule-based)
                     success = play_opponent_turn(game, current_id, args.ai_difficulty)
                     if not success and game.can_end_turn():
                         game.end_turn()
+
+                    # Update observation after opponent turn
+                    obs = game_env.game_env.get_observation()
 
                     winner = game.check_victory_conditions()
                     if winner:
