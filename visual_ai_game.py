@@ -670,17 +670,26 @@ def main():
                 # Test the model with actual observation
                 print("Testing model output...")
                 with torch.no_grad():
-                    test_out = network.policy.forward(
+                    action_probs, vertex_probs, edge_probs, _, _, value = network.policy.forward(
                         torch.FloatTensor(obs['observation']).unsqueeze(0),
                         torch.FloatTensor(obs['action_mask']).unsqueeze(0),
                         torch.FloatTensor(obs['vertex_mask']).unsqueeze(0),
                         torch.FloatTensor(obs['edge_mask']).unsqueeze(0)
                     )
 
-                    # Check for NaN
-                    if torch.isnan(test_out[0]).any():
-                        print("⚠️  WARNING: Model outputs NaN values! Model may be corrupted.")
-                        print("Falling back to random AI for Player 0")
+                    # Check for NaN in any output
+                    has_nan = (torch.isnan(action_probs).any() or
+                              torch.isnan(vertex_probs).any() or
+                              torch.isnan(edge_probs).any() or
+                              torch.isnan(value).any())
+
+                    if has_nan:
+                        print("⚠️  WARNING: Model outputs NaN values!")
+                        print(f"   Action probs NaN: {torch.isnan(action_probs).any()}")
+                        print(f"   Vertex probs NaN: {torch.isnan(vertex_probs).any()}")
+                        print(f"   Edge probs NaN: {torch.isnan(edge_probs).any()}")
+                        print(f"   Value NaN: {torch.isnan(value).any()}")
+                        print("   Model weights are corrupted - falling back to random AI")
                         network = None
                     else:
                         print("✅ Model test passed - outputs are valid")
@@ -781,7 +790,7 @@ def main():
                         game.end_turn()
 
                     # Update observation after opponent turn
-                    obs = game_env.game_env.get_observation()
+                    obs = game_env.game_env.get_observation(player_index=0)
 
                     winner = game.check_victory_conditions()
                     if winner:
