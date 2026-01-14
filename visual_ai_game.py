@@ -470,6 +470,7 @@ def main():
                         result = env.game.roll_dice()
                         if result:
                             #print(f"🎲 Rolled: {result[2]} ({result[0]}+{result[1]})")
+                            pass
 
                 elif event.key == pygame.K_t:
                     success, msg = env.game.end_turn()
@@ -479,6 +480,7 @@ def main():
                         winner = env.game.check_victory_conditions()
                         if winner:
                             #print(f"\n🏆 {winner.name} WINS with {winner.victory_points} points!")
+                            pass
 
                 elif event.key == pygame.K_1:
                     build_mode = "SETTLEMENT"
