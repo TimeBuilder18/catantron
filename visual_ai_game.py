@@ -96,7 +96,7 @@ def compute_center_offset(tiles, screen_w, screen_h):
 
 
 def draw_game_board(screen, game_board, offset):
-    """Draw the game board with tiles, vertices, and edges"""
+    """Draw the game board with tiles, vertices, edges, and ports"""
     # Draw tiles
     for tile in game_board.tiles:
         color = RESOURCE_COLORS.get(tile.resource, RESOURCE_COLORS["desert"])
@@ -112,6 +112,33 @@ def draw_game_board(screen, game_board, offset):
             pygame.draw.line(screen, player_color, (x1, y1), (x2, y2), 5)
         else:
             pygame.draw.line(screen, (150, 150, 150), (x1, y1), (x2, y2), 1)
+
+    # Draw ports
+    from game_system import PortType
+    PORT_COLORS = {
+        PortType.GENERIC: (200, 200, 200),    # White/gray for 3:1
+        PortType.WOOD: (34, 139, 34),         # Green
+        PortType.BRICK: (178, 34, 34),        # Red/brown
+        PortType.WHEAT: (218, 165, 32),       # Gold
+        PortType.SHEEP: (144, 238, 144),      # Light green
+        PortType.ORE: (169, 169, 169),        # Gray
+    }
+
+    for port in game_board.ports:
+        # Calculate midpoint of port edge
+        x1, y1 = port.vertex1.x + offset[0], port.vertex1.y + offset[1]
+        x2, y2 = port.vertex2.x + offset[0], port.vertex2.y + offset[1]
+        mid_x = (x1 + x2) / 2
+        mid_y = (y1 + y2) / 2
+
+        # Draw port marker (hexagon shape)
+        port_color = PORT_COLORS.get(port.port_type, (200, 200, 200))
+        pygame.draw.circle(screen, port_color, (int(mid_x), int(mid_y)), 8)
+        pygame.draw.circle(screen, (0, 0, 0), (int(mid_x), int(mid_y)), 8, 2)  # Black outline
+
+        # Draw port type indicator (smaller inner circle for 2:1)
+        if port.port_type != PortType.GENERIC:
+            pygame.draw.circle(screen, (255, 255, 255), (int(mid_x), int(mid_y)), 4)
 
     # Draw vertices (settlements/cities)
     for vertex in game_board.vertices:
