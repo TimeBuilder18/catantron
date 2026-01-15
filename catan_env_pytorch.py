@@ -147,7 +147,9 @@ class CatanEnv(gym.Env):
                 else:
                     valid_edges = []
             else:
-                return np.zeros(72, dtype=np.float32)
+                # Not waiting for road during initial placement - no valid edges
+                # Don't early return - let it flow through to the fallback logic
+                valid_edges = []
         else:
             player = self.game_env.game.players[self.player_id]
             current_player = self.game_env.game.get_current_player()
