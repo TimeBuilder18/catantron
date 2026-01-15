@@ -217,11 +217,15 @@ class PrioritizedReplayBuffer:
 
 
 class CurriculumTrainerV3:
-    """Stable curriculum trainer with entropy collapse prevention"""
+    """Stable curriculum trainer with entropy collapse prevention
+
+    Supports 1v1 training mode (num_players=2) for faster initial learning,
+    then transfer to 4-player mode.
+    """
 
     def __init__(self, model_path=None, learning_rate=5e-4, batch_size=None, reward_mode='vp_only',
                  lr_decay=1.0, value_weight=0.5, entropy_decay=1.0, num_parallel_games=8,
-                 buffer_size=200000):
+                 buffer_size=200000, num_players=4):
         self.device = get_device()
         self.reward_mode = reward_mode
         self.lr_decay = lr_decay  # Learning rate decay per 1000 games
@@ -229,6 +233,7 @@ class CurriculumTrainerV3:
         self.entropy_decay = entropy_decay  # Entropy coefficient decay per 1000 games
         self.num_parallel_games = num_parallel_games  # Number of games to run in parallel
         self.buffer_size = buffer_size
+        self.num_players = num_players  # 2 for 1v1, 4 for standard
 
         if batch_size is None:
             batch_size = 1024 if self.device.type == 'cuda' else 256
@@ -355,7 +360,7 @@ class CurriculumTrainerV3:
             victory_points_to_win: VP needed to win (default 10)
         """
         if self.reward_mode == 'pbrs_fixed':
-            env = PBRSFixedRewardWrapper(player_id=0, victory_points_to_win=victory_points_to_win)
+            env = PBRSFixedRewardWrapper(player_id=0, victory_points_to_win=victory_points_to_win, num_players=self.num_players)
         else:
             env = SimplifiedRewardWrapper(player_id=0, reward_mode=self.reward_mode, victory_points_to_win=victory_points_to_win)
         obs, _ = env.reset()
@@ -716,15 +721,25 @@ class CurriculumTrainerV3:
         recent_wr = np.mean(list(self.phase_wins)[-50:])
 
         # Minimum win rate required by difficulty (must actually win, not just get VP)
-        # Note: In 4-player games, 25% WR is the baseline if all players are equal
-        # Lowered again - model averaging 4-8% WR, occasionally hitting 10-14%
-        min_wr_by_difficulty = {
-            'random': 0.08,      # 8% WR vs Random (was 15%, still too high)
-            'very_weak': 0.05,   # 5% WR vs VeryWeak
-            'weak': 0.03,        # 3% WR vs Weak
-            'medium': 0.01,      # 1% WR vs Medium
-            'strong': 0.005,     # 0.5% WR vs Strong
-        }
+        # Different thresholds for 1v1 (50% baseline) vs 4-player (25% baseline)
+        if self.num_players == 2:
+            # 1v1 mode: 50% baseline, can have higher thresholds
+            min_wr_by_difficulty = {
+                'random': 0.55,      # 55% WR vs Random (must beat random consistently)
+                'very_weak': 0.50,   # 50% WR vs VeryWeak
+                'weak': 0.45,        # 45% WR vs Weak
+                'medium': 0.35,      # 35% WR vs Medium
+                'strong': 0.25,      # 25% WR vs Strong (hard!)
+            }
+        else:
+            # 4-player mode: 25% baseline, lower thresholds
+            min_wr_by_difficulty = {
+                'random': 0.08,      # 8% WR vs Random
+                'very_weak': 0.05,   # 5% WR vs VeryWeak
+                'weak': 0.03,        # 3% WR vs Weak
+                'medium': 0.01,      # 1% WR vs Medium
+                'strong': 0.005,     # 0.5% WR vs Strong
+            }
         min_wr = min_wr_by_difficulty.get(primary_ai, 0.05)
 
         # Must meet BOTH VP threshold AND minimum win rate
@@ -956,6 +971,8 @@ if __name__ == "__main__":
                         help='Phase index to start from (default: 0). Use --list-phases to see all phases.')
     parser.add_argument('--list-phases', action='store_true',
                         help='List all curriculum phases and exit')
+    parser.add_argument('--num-players', type=int, default=4, choices=[2, 3, 4],
+                        help='Number of players: 2 for 1v1 training, 4 for standard (default: 4)')
     args = parser.parse_args()
 
     # List phases if requested
@@ -990,6 +1007,17 @@ if __name__ == "__main__":
         print("\nUse --start-phase N to start from phase N")
         exit(0)
 
+    # Print training mode
+    if args.num_players == 2:
+        print("\n" + "=" * 60)
+        print("🎮 1v1 TRAINING MODE (Colonist-style)")
+        print("=" * 60)
+        print("  - 2 players (you vs 1 opponent)")
+        print("  - 50% baseline win rate")
+        print("  - Faster learning, clearer signal")
+        print("  - Transfer to 4-player after mastering 1v1")
+        print("=" * 60 + "\n")
+
     trainer = CurriculumTrainerV3(
         model_path=args.model,
         batch_size=args.batch_size,
@@ -999,7 +1027,8 @@ if __name__ == "__main__":
         value_weight=args.value_weight,
         entropy_decay=args.entropy_decay,
         num_parallel_games=args.parallel_games,
-        buffer_size=args.buffer_size
+        buffer_size=args.buffer_size,
+        num_players=args.num_players
     )
     trainer.train(
         total_games=args.total_games,
