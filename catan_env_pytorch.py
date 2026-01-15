@@ -89,7 +89,7 @@ class CatanEnv(gym.Env):
         if seed is not None:
             np.random.seed(seed)
 
-        self.game_env = AIGameEnvironment(victory_points_to_win=self.victory_points_to_win)
+        self.game_env = AIGameEnvironment(victory_points_to_win=self.victory_points_to_win, num_players=self.num_players)
         self._episode_count += 1
 
         # Reset game state tracking

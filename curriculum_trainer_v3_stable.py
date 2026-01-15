@@ -231,9 +231,20 @@ class CurriculumTrainerV3:
         self.lr_decay = lr_decay  # Learning rate decay per 1000 games
         self.value_weight = value_weight  # Weight for value loss (default increased from 0.1)
         self.entropy_decay = entropy_decay  # Entropy coefficient decay per 1000 games
-        self.num_parallel_games = num_parallel_games  # Number of games to run in parallel
-        self.buffer_size = buffer_size
         self.num_players = num_players  # 2 for 1v1, 4 for standard
+
+        # Auto-tune settings for 1v1 mode (faster games = can run more in parallel)
+        if self.num_players == 2:
+            # 1v1 games are ~2x faster, so we can run more in parallel
+            if num_parallel_games == 8:  # Only override if using default
+                num_parallel_games = 16  # Double parallelism for 1v1
+            # Smaller buffer is fine for 1v1 (games are shorter, less experience variety needed)
+            if buffer_size == 200000:  # Only override if using default
+                buffer_size = 100000  # Halve buffer for 1v1
+
+        # Store the (possibly auto-tuned) values
+        self.num_parallel_games = num_parallel_games
+        self.buffer_size = buffer_size
 
         if batch_size is None:
             batch_size = 1024 if self.device.type == 'cuda' else 256
@@ -763,26 +774,50 @@ class CurriculumTrainerV3:
         # - Pure difficulty jumps cause 0% win rate = no learning signal
         # - Mix in harder opponents gradually so agent still wins sometimes
         # - Each opponent independently rolls primary vs secondary AI
-        phases = [
-            # === PHASE 1: Learn game length progression vs Random ===
-            ('random', None, 1.0, 4, 2.8, "Random 4VP"),
-            ('random', None, 1.0, 5, 3.2, "Random 5VP"),
-            ('random', None, 1.0, 6, 3.6, "Random 6VP"),
-            ('random', None, 1.0, 7, 4.0, "Random 7VP"),
-            ('random', None, 1.0, 8, 4.4, "Random 8VP"),
-            ('random', None, 1.0, 9, 4.8, "Random 9VP"),
-            ('random', None, 1.0, 10, 5.2, "Random 10VP"),
-            # === PHASE 2: Gradual introduction of harder opponents ===
-            # Mix opponents so agent still wins some games (learning signal!)
-            ('very_weak', 'random', 0.5, 10, 3.5, "VeryWeak/Random Mix"),
-            ('very_weak', None, 1.0, 10, 3.0, "VeryWeak 10VP"),
-            ('weak', 'very_weak', 0.5, 10, 3.0, "Weak/VeryWeak Mix"),
-            ('weak', None, 1.0, 10, 2.8, "Weak 10VP"),
-            ('medium', 'weak', 0.5, 10, 2.8, "Medium/Weak Mix"),
-            ('medium', None, 1.0, 10, 2.5, "Medium 10VP"),
-            ('strong', 'medium', 0.5, 10, 2.5, "Strong/Medium Mix"),
-            ('strong', 'medium', 0.5, 10, 999, "Strong/Medium FINAL"),  # Keep mix for learning signal
-        ]
+
+        if self.num_players == 2:
+            # === 1v1 OPTIMIZED CURRICULUM ===
+            # 1v1 games are faster and simpler:
+            # - Skip early VP progression (less relevant in 1v1)
+            # - Focus on opponent difficulty progression
+            # - Fewer phases = faster curriculum completion
+            # - Lower VP thresholds (harder to reach high VP in 1v1)
+            phases = [
+                # Quick VP warmup (just 2 phases instead of 7)
+                ('random', None, 1.0, 6, 3.0, "1v1 Random 6VP"),
+                ('random', None, 1.0, 10, 4.0, "1v1 Random 10VP"),
+                # Opponent difficulty progression (main focus)
+                ('very_weak', 'random', 0.5, 10, 3.0, "1v1 VeryWeak/Random"),
+                ('very_weak', None, 1.0, 10, 2.5, "1v1 VeryWeak"),
+                ('weak', 'very_weak', 0.5, 10, 2.5, "1v1 Weak/VeryWeak"),
+                ('weak', None, 1.0, 10, 2.2, "1v1 Weak"),
+                ('medium', 'weak', 0.5, 10, 2.2, "1v1 Medium/Weak"),
+                ('medium', None, 1.0, 10, 2.0, "1v1 Medium"),
+                ('strong', 'medium', 0.5, 10, 2.0, "1v1 Strong/Medium"),
+                ('strong', None, 1.0, 10, 999, "1v1 Strong FINAL"),
+            ]
+        else:
+            # === STANDARD 4-PLAYER CURRICULUM ===
+            phases = [
+                # === PHASE 1: Learn game length progression vs Random ===
+                ('random', None, 1.0, 4, 2.8, "Random 4VP"),
+                ('random', None, 1.0, 5, 3.2, "Random 5VP"),
+                ('random', None, 1.0, 6, 3.6, "Random 6VP"),
+                ('random', None, 1.0, 7, 4.0, "Random 7VP"),
+                ('random', None, 1.0, 8, 4.4, "Random 8VP"),
+                ('random', None, 1.0, 9, 4.8, "Random 9VP"),
+                ('random', None, 1.0, 10, 5.2, "Random 10VP"),
+                # === PHASE 2: Gradual introduction of harder opponents ===
+                # Mix opponents so agent still wins some games (learning signal!)
+                ('very_weak', 'random', 0.5, 10, 3.5, "VeryWeak/Random Mix"),
+                ('very_weak', None, 1.0, 10, 3.0, "VeryWeak 10VP"),
+                ('weak', 'very_weak', 0.5, 10, 3.0, "Weak/VeryWeak Mix"),
+                ('weak', None, 1.0, 10, 2.8, "Weak 10VP"),
+                ('medium', 'weak', 0.5, 10, 2.8, "Medium/Weak Mix"),
+                ('medium', None, 1.0, 10, 2.5, "Medium 10VP"),
+                ('strong', 'medium', 0.5, 10, 2.5, "Strong/Medium Mix"),
+                ('strong', 'medium', 0.5, 10, 999, "Strong/Medium FINAL"),  # Keep mix for learning signal
+            ]
 
         print("\n" + "=" * 70)
         print("CURRICULUM TRAINING V3 - STABLE VERSION (PARALLEL)")
@@ -980,44 +1015,69 @@ if __name__ == "__main__":
     # List phases if requested
     if args.list_phases:
         # Format: (primary_ai, secondary_ai, mix_prob, vp_to_win, vp_threshold, name)
-        phases = [
-            ('random', None, 1.0, 4, 2.8, "Random 4VP"),
-            ('random', None, 1.0, 5, 3.2, "Random 5VP"),
-            ('random', None, 1.0, 6, 3.6, "Random 6VP"),
-            ('random', None, 1.0, 7, 4.0, "Random 7VP"),
-            ('random', None, 1.0, 8, 4.4, "Random 8VP"),
-            ('random', None, 1.0, 9, 4.8, "Random 9VP"),
-            ('random', None, 1.0, 10, 5.2, "Random 10VP"),
-            ('very_weak', 'random', 0.5, 10, 3.5, "VeryWeak/Random Mix"),
-            ('very_weak', None, 1.0, 10, 3.0, "VeryWeak 10VP"),
-            ('weak', 'very_weak', 0.5, 10, 3.0, "Weak/VeryWeak Mix"),
-            ('weak', None, 1.0, 10, 2.8, "Weak 10VP"),
-            ('medium', 'weak', 0.5, 10, 2.8, "Medium/Weak Mix"),
-            ('medium', None, 1.0, 10, 2.5, "Medium 10VP"),
-            ('strong', 'medium', 0.5, 10, 2.5, "Strong/Medium Mix"),
-            ('strong', 'medium', 0.5, 10, 999, "Strong/Medium FINAL"),  # Keep mix for learning signal
-        ]
-        print("\nCurriculum Phases (WITH OPPONENT MIXING):")
-        print("-" * 70)
-        print("  Phase 1: Learn game length (4VP → 10VP) vs Random")
-        print("  Phase 2: Gradual opponent mixing (still win some games = learning signal)")
-        print("-" * 70)
+        if args.num_players == 2:
+            phases = [
+                ('random', None, 1.0, 6, 3.0, "1v1 Random 6VP"),
+                ('random', None, 1.0, 10, 4.0, "1v1 Random 10VP"),
+                ('very_weak', 'random', 0.5, 10, 3.0, "1v1 VeryWeak/Random"),
+                ('very_weak', None, 1.0, 10, 2.5, "1v1 VeryWeak"),
+                ('weak', 'very_weak', 0.5, 10, 2.5, "1v1 Weak/VeryWeak"),
+                ('weak', None, 1.0, 10, 2.2, "1v1 Weak"),
+                ('medium', 'weak', 0.5, 10, 2.2, "1v1 Medium/Weak"),
+                ('medium', None, 1.0, 10, 2.0, "1v1 Medium"),
+                ('strong', 'medium', 0.5, 10, 2.0, "1v1 Strong/Medium"),
+                ('strong', None, 1.0, 10, 999, "1v1 Strong FINAL"),
+            ]
+            print("\n1v1 OPTIMIZED Curriculum Phases:")
+            print("-" * 70)
+            print("  Faster progression: 10 phases (vs 15 in 4-player)")
+            print("  Lower VP thresholds: Adjusted for 1v1 difficulty")
+            print("-" * 70)
+        else:
+            phases = [
+                ('random', None, 1.0, 4, 2.8, "Random 4VP"),
+                ('random', None, 1.0, 5, 3.2, "Random 5VP"),
+                ('random', None, 1.0, 6, 3.6, "Random 6VP"),
+                ('random', None, 1.0, 7, 4.0, "Random 7VP"),
+                ('random', None, 1.0, 8, 4.4, "Random 8VP"),
+                ('random', None, 1.0, 9, 4.8, "Random 9VP"),
+                ('random', None, 1.0, 10, 5.2, "Random 10VP"),
+                ('very_weak', 'random', 0.5, 10, 3.5, "VeryWeak/Random Mix"),
+                ('very_weak', None, 1.0, 10, 3.0, "VeryWeak 10VP"),
+                ('weak', 'very_weak', 0.5, 10, 3.0, "Weak/VeryWeak Mix"),
+                ('weak', None, 1.0, 10, 2.8, "Weak 10VP"),
+                ('medium', 'weak', 0.5, 10, 2.8, "Medium/Weak Mix"),
+                ('medium', None, 1.0, 10, 2.5, "Medium 10VP"),
+                ('strong', 'medium', 0.5, 10, 2.5, "Strong/Medium Mix"),
+                ('strong', 'medium', 0.5, 10, 999, "Strong/Medium FINAL"),
+            ]
+            print("\n4-Player Curriculum Phases (WITH OPPONENT MIXING):")
+            print("-" * 70)
+            print("  Phase 1: Learn game length (4VP -> 10VP) vs Random")
+            print("  Phase 2: Gradual opponent mixing (still win some games = learning signal)")
+            print("-" * 70)
         for i, (primary, secondary, mix, vp_win, vp_thresh, name) in enumerate(phases):
             mix_str = f"{int(mix*100)}% {primary}" if secondary is None else f"{int(mix*100)}% {primary} / {int((1-mix)*100)}% {secondary}"
             print(f"  {i:2d}: {name:22s} VP:{vp_win:2d} thresh:{vp_thresh:4.1f} ({mix_str})")
         print("-" * 70)
         print("\nUse --start-phase N to start from phase N")
+        print("Use --num-players 2 to see 1v1 phases")
         exit(0)
 
     # Print training mode
     if args.num_players == 2:
+        # Show auto-tuned values
+        auto_parallel = 16 if args.parallel_games == 8 else args.parallel_games
+        auto_buffer = 100000 if args.buffer_size == 200000 else args.buffer_size
         print("\n" + "=" * 60)
-        print("🎮 1v1 TRAINING MODE (Colonist-style)")
+        print("1v1 TRAINING MODE (Colonist-style)")
         print("=" * 60)
         print("  - 2 players (you vs 1 opponent)")
-        print("  - 50% baseline win rate")
-        print("  - Faster learning, clearer signal")
-        print("  - Transfer to 4-player after mastering 1v1")
+        print("  - Clearer learning signal than 4-player")
+        print("  - Optimized curriculum: 10 phases (vs 15 in 4-player)")
+        print("  AUTO-TUNED SETTINGS:")
+        print(f"    - Parallel games: {auto_parallel} (vs 8 default)")
+        print(f"    - Buffer size: {auto_buffer:,} (vs 200,000 default)")
         print("=" * 60 + "\n")
 
     trainer = CurriculumTrainerV3(
