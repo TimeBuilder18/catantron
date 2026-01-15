@@ -686,12 +686,13 @@ class CurriculumTrainerV3:
 
         # Minimum win rate required by difficulty (must actually win, not just get VP)
         # Note: In 4-player games, 25% WR is the baseline if all players are equal
+        # Lowered again - model averaging 4-8% WR, occasionally hitting 10-14%
         min_wr_by_difficulty = {
-            'random': 0.15,      # 15% WR vs Random (was 30%, too high for 4-player)
-            'very_weak': 0.10,  # 10% WR vs VeryWeak
-            'weak': 0.05,       # 5% WR vs Weak
-            'medium': 0.02,     # 2% WR vs Medium
-            'strong': 0.01,     # 1% WR vs Strong
+            'random': 0.08,      # 8% WR vs Random (was 15%, still too high)
+            'very_weak': 0.05,   # 5% WR vs VeryWeak
+            'weak': 0.03,        # 3% WR vs Weak
+            'medium': 0.01,      # 1% WR vs Medium
+            'strong': 0.005,     # 0.5% WR vs Strong
         }
         min_wr = min_wr_by_difficulty.get(primary_ai, 0.05)
 
