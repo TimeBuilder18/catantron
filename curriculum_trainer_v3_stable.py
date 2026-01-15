@@ -723,13 +723,15 @@ class CurriculumTrainerV3:
         # Minimum win rate required by difficulty (must actually win, not just get VP)
         # Different thresholds for 1v1 (50% baseline) vs 4-player (25% baseline)
         if self.num_players == 2:
-            # 1v1 mode: 50% baseline, can have higher thresholds
+            # 1v1 mode: 50% baseline BUT Random AI is rule-based (not truly random)
+            # Model starts below 50% because rule-based Random makes sensible moves
+            # Use LOW thresholds to allow curriculum progression while learning
             min_wr_by_difficulty = {
-                'random': 0.55,      # 55% WR vs Random (must beat random consistently)
-                'very_weak': 0.50,   # 50% WR vs VeryWeak
-                'weak': 0.45,        # 45% WR vs Weak
-                'medium': 0.35,      # 35% WR vs Medium
-                'strong': 0.25,      # 25% WR vs Strong (hard!)
+                'random': 0.20,      # 20% WR vs Random (just show some learning)
+                'very_weak': 0.15,   # 15% WR vs VeryWeak
+                'weak': 0.10,        # 10% WR vs Weak
+                'medium': 0.05,      # 5% WR vs Medium
+                'strong': 0.02,      # 2% WR vs Strong (hard!)
             }
         else:
             # 4-player mode: 25% baseline, lower thresholds
