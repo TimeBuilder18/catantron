@@ -23,22 +23,24 @@ class CatanEnv(gym.Env):
     - Flat observation vector for neural network
     - Action masking for invalid actions
     - Proper reward shaping
-    - Self-play ready (4 players)
+    - Supports 2-4 players (2 for 1v1 training, 4 for standard)
     """
 
     metadata = {'render_modes': ['human'], 'render_fps': 4}
 
-    def __init__(self, player_id=0, victory_points_to_win=10):
+    def __init__(self, player_id=0, victory_points_to_win=10, num_players=4):
         """
         Args:
-            player_id: Which player this environment controls (0-3)
+            player_id: Which player this environment controls (0 for learning agent)
             victory_points_to_win: VP needed to win (default 10, can be lowered for easier games)
+            num_players: Number of players (2 for 1v1, 4 for standard)
         """
         super().__init__()
 
         self.player_id = player_id
         self.victory_points_to_win = victory_points_to_win
-        self.game_env = AIGameEnvironment(victory_points_to_win=victory_points_to_win)
+        self.num_players = num_players
+        self.game_env = AIGameEnvironment(victory_points_to_win=victory_points_to_win, num_players=num_players)
         self._episode_count = 0  # Track episodes for debug output
         self.gamma = 0.99 # Discount factor for PBRS
 
