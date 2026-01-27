@@ -273,7 +273,12 @@ class CatanEnv(gym.Env):
         edge_mask = self._get_edge_mask()
         return {
             'observation': observation, 'action_mask': action_mask,
-            'vertex_mask': vertex_mask, 'edge_mask': edge_mask
+            'vertex_mask': vertex_mask, 'edge_mask': edge_mask,
+            'legal_actions': legal_actions,  # CRITICAL: Needed for inaction penalty!
+            'my_resources': raw_obs['my_resources'],  # For reward calculations
+            'my_victory_points': raw_obs['my_victory_points'],
+            'my_settlements': raw_obs['my_settlements'],
+            'my_roads': raw_obs['my_roads']
         }
 
     def _tile_has_robber(self, q, r):
