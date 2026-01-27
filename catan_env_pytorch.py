@@ -648,6 +648,27 @@ class CatanEnv(gym.Env):
             reward += settlement_bonus
             reward_breakdown['settlement_bonus'] = settlement_bonus
 
+        # ========== ROAD BUILDING BONUS (NEW - critical for learning!) ==========
+        # Roads don't give VP but are REQUIRED to build new settlements
+        # Without this reward, agent never learns to build roads → can't expand
+        if action_name == 'build_road' and step_info.get('success', False):
+            num_roads = new_obs.get('my_roads', 0)
+            # Base road bonus - roads enable expansion
+            road_bonus = 5.0
+            # Extra bonus for roads beyond starting 2 (shows expansion)
+            if num_roads > 2:
+                road_bonus += 2.0 * (num_roads - 2)
+            # Cap at reasonable amount
+            road_bonus = min(road_bonus, 15.0)
+            reward += road_bonus
+            reward_breakdown['road_bonus'] = road_bonus
+
+        # ========== DEV CARD PURCHASE BONUS ==========
+        # Buying dev cards is a valid strategy, give small reward
+        if action_name == 'buy_dev_card' and step_info.get('success', False):
+            reward += 3.0
+            reward_breakdown['dev_card_bonus'] = 3.0
+
         # ========== BANK TRADE PENALTY (BALANCED) ==========
         # Discourage excessive trading but allow strategic trades
         # Some trades are necessary, especially early game
