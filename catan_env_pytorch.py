@@ -499,11 +499,19 @@ class CatanEnv(gym.Env):
         potential += total_dev * 0.3
 
         # ========== OPPONENT THREAT POTENTIAL ==========
+        # In 1v1, opponent threat is MUCH more urgent (direct competition)
+        # In 4-player, threats are spread across multiple opponents
         for opp in self.game_env.game.players:
             if opp != player:
                 opp_vp = opp.calculate_victory_points()
                 if opp_vp >= 8:
-                    penalty = min((opp_vp - 7) * 2.0, 10.0)
+                    if self.num_players == 2:
+                        # 1v1: Opponent at 8+ VP is a CRITICAL threat
+                        # Scale penalty by 2.5x to reflect urgency
+                        penalty = min((opp_vp - 7) * 5.0, 25.0)
+                    else:
+                        # 4-player: Standard penalty
+                        penalty = min((opp_vp - 7) * 2.0, 10.0)
                     potential -= penalty
 
         # ========== EXCESSIVE TRADING PENALTY (PBRS) ==========
@@ -540,35 +548,43 @@ class CatanEnv(gym.Env):
         reward += vp_state_bonus
         reward_breakdown['vp_state_bonus'] = vp_state_bonus
 
-        # ========== CITY BUILDING BONUS (CRITICAL FIX v2) ==========
-        # MASSIVELY increased reward - cities are THE key to winning
+        # ========== CITY BUILDING BONUS (CRITICAL FIX v3 - 1v1 aware) ==========
+        # Cities are THE key to winning - even more so in 1v1
         if step_info.get('built_city') or (action_name == 'build_city' and vp_diff > 0):
             # Determine game phase for phase-aware bonus
             turn = self._turn_count
             if turn < 15:
-                # Early game: still reward cities (don't wait!)
                 phase_multiplier = 1.5
             elif turn < 40:
-                # Mid game: HUGE city bonus - this is when cities matter most!
                 phase_multiplier = 2.0
             else:
-                # Late game: still very valuable
                 phase_multiplier = 1.5
 
-            # Base city bonus TRIPLED: 15.0 instead of 5.0
-            city_bonus = 15.0 * phase_multiplier
+            # Base city bonus - higher in 1v1 (cities = direct VP swing)
+            if self.num_players == 2:
+                # 1v1: Each city = +2VP = ~20% swing in win probability
+                city_bonus = 20.0 * phase_multiplier
+            else:
+                # 4-player: Standard bonus
+                city_bonus = 15.0 * phase_multiplier
             reward += city_bonus
             reward_breakdown['city_bonus'] = city_bonus
 
-        # ========== SETTLEMENT BUILDING BONUS (NEW) ==========
+        # ========== SETTLEMENT BUILDING BONUS (1v1 aware) ==========
         # Settlements are critical - you need them to upgrade to cities!
         if step_info.get('built_settlement') or (action_name == 'build_settlement' and vp_diff > 0):
-            # Each new settlement expands your resource generation AND gives upgrade potential
             num_settlements = new_obs.get('my_settlements', 0)
-            # Higher bonus for 3rd, 4th, 5th settlement (beyond starting 2)
-            settlement_bonus = 8.0  # Strong base bonus
-            if num_settlements > 2:
-                settlement_bonus += 3.0 * (num_settlements - 2)  # Extra for expansion
+
+            if self.num_players == 2:
+                # 1v1: Settlements matter more (direct competition for land)
+                settlement_bonus = 12.0  # Higher base bonus
+                if num_settlements > 2:
+                    settlement_bonus += 4.0 * (num_settlements - 2)
+            else:
+                # 4-player: Standard bonus
+                settlement_bonus = 8.0
+                if num_settlements > 2:
+                    settlement_bonus += 3.0 * (num_settlements - 2)
             reward += settlement_bonus
             reward_breakdown['settlement_bonus'] = settlement_bonus
 
