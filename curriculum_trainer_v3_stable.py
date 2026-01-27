@@ -505,7 +505,7 @@ class CurriculumTrainerV3:
         if self.reward_mode == 'pbrs_fixed':
             env = PBRSFixedRewardWrapper(player_id=0, victory_points_to_win=victory_points_to_win, num_players=self.num_players)
         else:
-            env = SimplifiedRewardWrapper(player_id=0, reward_mode=self.reward_mode, victory_points_to_win=victory_points_to_win)
+            env = SimplifiedRewardWrapper(player_id=0, reward_mode=self.reward_mode, victory_points_to_win=victory_points_to_win, num_players=self.num_players)
         obs, _ = env.reset()
 
         episode_rewards = []
