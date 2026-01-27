@@ -42,8 +42,87 @@ def get_device():
     return device
 
 
+def play_truly_random_turn(game, player_id):
+    """Truly random opponent - picks random legal actions with low build probability.
+
+    This is much weaker than play_random_turn because:
+    - Only 30% chance to build when possible (vs 85%)
+    - Doesn't prioritize any action type
+    - Often just ends turn even when builds are available
+
+    Use this for 1v1 initial training to give learning agent a fighting chance.
+    """
+    player = game.players[player_id]
+
+    if game.is_initial_placement_phase():
+        if game.waiting_for_road:
+            if game.last_settlement_vertex:
+                edges = game.game_board.edges
+                valid = [e for e in edges
+                        if e.structure is None and
+                        (e.vertex1 == game.last_settlement_vertex or
+                         e.vertex2 == game.last_settlement_vertex)]
+                if valid:
+                    game.try_place_initial_road(random.choice(valid), player)
+        else:
+            vertices = game.game_board.vertices
+            valid = [v for v in vertices if v.structure is None and
+                    not any(adj.structure for adj in v.adjacent_vertices)]
+            if valid:
+                game.try_place_initial_settlement(random.choice(valid), player)
+        return True
+
+    if game.can_roll_dice():
+        game.roll_dice()
+        return True
+
+    # Only 30% chance to even try building (vs 85% in "random")
+    if game.can_trade_or_build() and random.random() < 0.30:
+        actions = []
+        res = player.resources
+
+        if (res[ResourceType.WOOD] >= 1 and res[ResourceType.BRICK] >= 1 and
+            res[ResourceType.WHEAT] >= 1 and res[ResourceType.SHEEP] >= 1):
+            v = game.get_buildable_vertices_for_settlements()
+            if v: actions.append(('sett', v))
+
+        if res[ResourceType.WHEAT] >= 2 and res[ResourceType.ORE] >= 3:
+            v = game.get_buildable_vertices_for_cities()
+            if v: actions.append(('city', v))
+
+        if res[ResourceType.WOOD] >= 1 and res[ResourceType.BRICK] >= 1:
+            e = game.get_buildable_edges()
+            if e: actions.append(('road', e))
+
+        if (res[ResourceType.WHEAT] >= 1 and res[ResourceType.SHEEP] >= 1 and
+            res[ResourceType.ORE] >= 1 and not game.dev_deck.is_empty()):
+            actions.append(('dev', None))
+
+        if actions:
+            action_type, locs = random.choice(actions)
+            if action_type == 'sett':
+                player.try_build_settlement(random.choice(locs))
+            elif action_type == 'city':
+                player.try_build_city(random.choice(locs))
+            elif action_type == 'road':
+                player.try_build_road(random.choice(locs))
+            elif action_type == 'dev':
+                game.try_buy_development_card(player)
+            return True
+
+    if game.can_end_turn():
+        game.end_turn()
+        return True
+    return True
+
+
 def play_random_turn(game, player_id):
-    """Random opponent"""
+    """Rule-based 'random' opponent - actually fairly intelligent.
+
+    Builds things 85% of the time when possible. Despite the name,
+    this is NOT truly random - it's a competent baseline AI.
+    Relabeled as 'baseline' in curriculum descriptions.
+    """
     player = game.players[player_id]
 
     if game.is_initial_placement_phase():
@@ -114,8 +193,16 @@ def play_opponent_turn(game, player_id, mix_prob, primary_ai='medium', secondary
         game: The game instance
         player_id: Which player to play
         mix_prob: Probability of primary AI (0.0-1.0)
-        primary_ai: Primary AI difficulty ('very_weak', 'weak', 'medium', 'strong', or 'random')
-        secondary_ai: Secondary AI difficulty (if None, uses primary_ai vs random)
+        primary_ai: Primary AI difficulty ('truly_random', 'random', 'very_weak', 'weak', 'medium', 'strong')
+        secondary_ai: Secondary AI difficulty (if None, uses primary_ai vs truly_random for 1v1)
+
+    AI Difficulty Scale (easiest to hardest):
+        truly_random: 30% build chance, no strategy (easiest, for 1v1 warmup)
+        random: 85% build chance, random choices (baseline)
+        very_weak: Rule-based, picks from top 5 positions
+        weak: Rule-based, picks from top 3 positions
+        medium: Rule-based, picks from top 3 with some strategy
+        strong: Rule-based, always picks best position
     """
     from rule_based_ai import play_rule_based_turn
 
@@ -127,10 +214,12 @@ def play_opponent_turn(game, player_id, mix_prob, primary_ai='medium', secondary
     if random.random() < mix_prob:
         chosen_ai = primary_ai
     else:
-        chosen_ai = secondary_ai if secondary_ai else 'random'
+        chosen_ai = secondary_ai if secondary_ai else 'truly_random'
 
     # Play with chosen AI
-    if chosen_ai == 'random':
+    if chosen_ai == 'truly_random':
+        return play_truly_random_turn(game, player_id)
+    elif chosen_ai == 'random':
         return play_random_turn(game, player_id)
     else:
         return play_rule_based_turn(MinimalEnv(game), player_id, difficulty=chosen_ai)
@@ -734,15 +823,17 @@ class CurriculumTrainerV3:
         # Minimum win rate required by difficulty (must actually win, not just get VP)
         # Different thresholds for 1v1 (50% baseline) vs 4-player (25% baseline)
         if self.num_players == 2:
-            # 1v1 mode: 50% baseline BUT Random AI is rule-based (not truly random)
-            # Model starts below 50% because rule-based Random makes sensible moves
-            # Use LOW thresholds to allow curriculum progression while learning
+            # 1v1 mode: 50% theoretical baseline
+            # Use HIGHER thresholds than before - agent should actually learn to win
+            # truly_random is very weak (30% build chance) - agent should dominate
+            # random is rule-based (85% build chance) - harder baseline
             min_wr_by_difficulty = {
-                'random': 0.20,      # 20% WR vs Random (just show some learning)
-                'very_weak': 0.15,   # 15% WR vs VeryWeak
-                'weak': 0.10,        # 10% WR vs Weak
-                'medium': 0.05,      # 5% WR vs Medium
-                'strong': 0.02,      # 2% WR vs Strong (hard!)
+                'truly_random': 0.55,  # 55% WR vs truly random (should dominate)
+                'random': 0.40,        # 40% WR vs rule-based "random" (fair fight)
+                'very_weak': 0.30,     # 30% WR vs VeryWeak
+                'weak': 0.20,          # 20% WR vs Weak
+                'medium': 0.12,        # 12% WR vs Medium
+                'strong': 0.05,        # 5% WR vs Strong (hard!)
             }
         else:
             # 4-player mode: 25% baseline, lower thresholds
@@ -776,21 +867,27 @@ class CurriculumTrainerV3:
         # - Each opponent independently rolls primary vs secondary AI
 
         if self.num_players == 2:
-            # === 1v1 OPTIMIZED CURRICULUM ===
-            # 1v1 games are faster and simpler:
-            # - Skip early VP progression (less relevant in 1v1)
-            # - Focus on opponent difficulty progression
-            # - Fewer phases = faster curriculum completion
-            # - Lower VP thresholds (harder to reach high VP in 1v1)
+            # === 1v1 OPTIMIZED CURRICULUM (v2) ===
+            # Key insights:
+            # - Start with truly_random (30% build chance) for easy wins and clear signal
+            # - Gradual VP progression to learn game length
+            # - Higher win rate thresholds - agent should actually learn to dominate
+            # - Smooth difficulty ramp with mixing to maintain learning signal
             phases = [
-                # Quick VP warmup (just 2 phases instead of 7)
-                ('random', None, 1.0, 6, 3.0, "1v1 Random 6VP"),
-                ('random', None, 1.0, 10, 4.0, "1v1 Random 10VP"),
-                # Opponent difficulty progression (main focus)
+                # Phase 1: Learn basics vs truly random (very weak opponent)
+                ('truly_random', None, 1.0, 5, 3.0, "1v1 TrulyRandom 5VP"),
+                ('truly_random', None, 1.0, 6, 3.5, "1v1 TrulyRandom 6VP"),
+                ('truly_random', None, 1.0, 7, 4.0, "1v1 TrulyRandom 7VP"),
+                ('truly_random', None, 1.0, 8, 4.5, "1v1 TrulyRandom 8VP"),
+                ('truly_random', None, 1.0, 10, 5.0, "1v1 TrulyRandom 10VP"),
+                # Phase 2: Transition to rule-based random (much harder)
+                ('random', 'truly_random', 0.5, 10, 4.0, "1v1 Random/TrulyRandom"),
+                ('random', None, 1.0, 10, 3.5, "1v1 Random 10VP"),
+                # Phase 3: Opponent difficulty progression
                 ('very_weak', 'random', 0.5, 10, 3.0, "1v1 VeryWeak/Random"),
-                ('very_weak', None, 1.0, 10, 2.5, "1v1 VeryWeak"),
+                ('very_weak', None, 1.0, 10, 2.8, "1v1 VeryWeak"),
                 ('weak', 'very_weak', 0.5, 10, 2.5, "1v1 Weak/VeryWeak"),
-                ('weak', None, 1.0, 10, 2.2, "1v1 Weak"),
+                ('weak', None, 1.0, 10, 2.3, "1v1 Weak"),
                 ('medium', 'weak', 0.5, 10, 2.2, "1v1 Medium/Weak"),
                 ('medium', None, 1.0, 10, 2.0, "1v1 Medium"),
                 ('strong', 'medium', 0.5, 10, 2.0, "1v1 Strong/Medium"),
@@ -1017,21 +1114,31 @@ if __name__ == "__main__":
         # Format: (primary_ai, secondary_ai, mix_prob, vp_to_win, vp_threshold, name)
         if args.num_players == 2:
             phases = [
-                ('random', None, 1.0, 6, 3.0, "1v1 Random 6VP"),
-                ('random', None, 1.0, 10, 4.0, "1v1 Random 10VP"),
+                # Phase 1: Learn basics vs truly random (very weak opponent)
+                ('truly_random', None, 1.0, 5, 3.0, "1v1 TrulyRandom 5VP"),
+                ('truly_random', None, 1.0, 6, 3.5, "1v1 TrulyRandom 6VP"),
+                ('truly_random', None, 1.0, 7, 4.0, "1v1 TrulyRandom 7VP"),
+                ('truly_random', None, 1.0, 8, 4.5, "1v1 TrulyRandom 8VP"),
+                ('truly_random', None, 1.0, 10, 5.0, "1v1 TrulyRandom 10VP"),
+                # Phase 2: Transition to rule-based random
+                ('random', 'truly_random', 0.5, 10, 4.0, "1v1 Random/TrulyRandom"),
+                ('random', None, 1.0, 10, 3.5, "1v1 Random 10VP"),
+                # Phase 3: Opponent difficulty progression
                 ('very_weak', 'random', 0.5, 10, 3.0, "1v1 VeryWeak/Random"),
-                ('very_weak', None, 1.0, 10, 2.5, "1v1 VeryWeak"),
+                ('very_weak', None, 1.0, 10, 2.8, "1v1 VeryWeak"),
                 ('weak', 'very_weak', 0.5, 10, 2.5, "1v1 Weak/VeryWeak"),
-                ('weak', None, 1.0, 10, 2.2, "1v1 Weak"),
+                ('weak', None, 1.0, 10, 2.3, "1v1 Weak"),
                 ('medium', 'weak', 0.5, 10, 2.2, "1v1 Medium/Weak"),
                 ('medium', None, 1.0, 10, 2.0, "1v1 Medium"),
                 ('strong', 'medium', 0.5, 10, 2.0, "1v1 Strong/Medium"),
                 ('strong', None, 1.0, 10, 999, "1v1 Strong FINAL"),
             ]
-            print("\n1v1 OPTIMIZED Curriculum Phases:")
+            print("\n1v1 OPTIMIZED Curriculum Phases (v2):")
             print("-" * 70)
-            print("  Faster progression: 10 phases (vs 15 in 4-player)")
-            print("  Lower VP thresholds: Adjusted for 1v1 difficulty")
+            print("  Phase 1: Learn basics vs TrulyRandom (30% build chance - very easy)")
+            print("  Phase 2: Transition to rule-based Random (85% build chance)")
+            print("  Phase 3: Difficulty progression (VeryWeak -> Strong)")
+            print("  Higher WR thresholds: Agent must actually dominate before advancing")
             print("-" * 70)
         else:
             phases = [

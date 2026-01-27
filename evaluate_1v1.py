@@ -160,7 +160,7 @@ def full_benchmark(model_path, num_games=50, num_parallel=8):
     Returns:
         dict mapping opponent type to results
     """
-    opponents = ['random', 'very_weak', 'weak', 'medium', 'strong']
+    opponents = ['truly_random', 'random', 'very_weak', 'weak', 'medium', 'strong']
     all_results = {}
 
     print("\n" + "=" * 70)
@@ -194,7 +194,7 @@ if __name__ == "__main__":
     parser.add_argument('--model', type=str, required=True,
                         help='Path to the trained model')
     parser.add_argument('--opponent', type=str, default='all',
-                        choices=['random', 'very_weak', 'weak', 'medium', 'strong', 'all'],
+                        choices=['truly_random', 'random', 'very_weak', 'weak', 'medium', 'strong', 'all'],
                         help='Opponent type to evaluate against (default: all)')
     parser.add_argument('--games', type=int, default=50,
                         help='Number of games to play (default: 50)')
