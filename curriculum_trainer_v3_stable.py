@@ -867,10 +867,11 @@ class CurriculumTrainerV3:
         # Different thresholds for 1v1 (50% baseline) vs 4-player (25% baseline)
         if self.num_players == 2:
             # 1v1 mode: 50% theoretical baseline
-            # Use HIGHER thresholds than before - agent should actually learn to win
-            # truly_random is very weak (30% build chance) - agent should dominate
-            # random is rule-based (85% build chance) - harder baseline
+            # passive = never builds, agent should win 95%+ just by building anything
+            # truly_random = 15% build chance, agent should dominate
+            # random = 85% build chance, harder baseline
             min_wr_by_difficulty = {
+                'passive': 0.80,       # 80% WR vs passive (should almost always win)
                 'truly_random': 0.55,  # 55% WR vs truly random (should dominate)
                 'random': 0.40,        # 40% WR vs rule-based "random" (fair fight)
                 'very_weak': 0.30,     # 30% WR vs VeryWeak
@@ -910,29 +911,28 @@ class CurriculumTrainerV3:
         # - Each opponent independently rolls primary vs secondary AI
 
         if self.num_players == 2:
-            # === 1v1 OPTIMIZED CURRICULUM (v2) ===
-            # Key insights:
-            # - Start with truly_random (30% build chance) for easy wins and clear signal
-            # - Gradual VP progression to learn game length
-            # - Higher win rate thresholds - agent should actually learn to dominate
-            # - Smooth difficulty ramp with mixing to maintain learning signal
+            # === 1v1 OPTIMIZED CURRICULUM (v3) ===
+            # Key insight: Agent needs EASY wins first to learn that building = good
+            # - Start with PASSIVE opponent (never builds) = guaranteed win if agent builds anything
+            # - Very low VP targets (3 VP = just build 1 settlement)
+            # - Gradual difficulty increase only after agent learns to build
             phases = [
-                # Phase 1: Learn basics vs truly random (very weak opponent)
-                ('truly_random', None, 1.0, 5, 3.0, "1v1 TrulyRandom 5VP"),
+                # Phase 0: Learn to build ANYTHING vs passive opponent
+                ('passive', None, 1.0, 3, 2.5, "1v1 Passive 3VP"),   # Just build 1 thing!
+                ('passive', None, 1.0, 4, 2.8, "1v1 Passive 4VP"),   # Build 2 things
+                ('passive', None, 1.0, 5, 3.2, "1v1 Passive 5VP"),   # Build 3 things
+                # Phase 1: Introduce truly_random (15% build chance)
+                ('truly_random', 'passive', 0.5, 5, 3.0, "1v1 TrulyRandom/Passive"),
                 ('truly_random', None, 1.0, 6, 3.5, "1v1 TrulyRandom 6VP"),
-                ('truly_random', None, 1.0, 7, 4.0, "1v1 TrulyRandom 7VP"),
-                ('truly_random', None, 1.0, 8, 4.5, "1v1 TrulyRandom 8VP"),
-                ('truly_random', None, 1.0, 10, 5.0, "1v1 TrulyRandom 10VP"),
-                # Phase 2: Transition to rule-based random (much harder)
-                ('random', 'truly_random', 0.5, 10, 4.0, "1v1 Random/TrulyRandom"),
-                ('random', None, 1.0, 10, 3.5, "1v1 Random 10VP"),
+                ('truly_random', None, 1.0, 8, 4.0, "1v1 TrulyRandom 8VP"),
+                ('truly_random', None, 1.0, 10, 4.5, "1v1 TrulyRandom 10VP"),
+                # Phase 2: Transition to rule-based random (85% build)
+                ('random', 'truly_random', 0.5, 10, 3.5, "1v1 Random/TrulyRandom"),
+                ('random', None, 1.0, 10, 3.0, "1v1 Random 10VP"),
                 # Phase 3: Opponent difficulty progression
-                ('very_weak', 'random', 0.5, 10, 3.0, "1v1 VeryWeak/Random"),
-                ('very_weak', None, 1.0, 10, 2.8, "1v1 VeryWeak"),
+                ('very_weak', 'random', 0.5, 10, 2.8, "1v1 VeryWeak/Random"),
                 ('weak', 'very_weak', 0.5, 10, 2.5, "1v1 Weak/VeryWeak"),
-                ('weak', None, 1.0, 10, 2.3, "1v1 Weak"),
                 ('medium', 'weak', 0.5, 10, 2.2, "1v1 Medium/Weak"),
-                ('medium', None, 1.0, 10, 2.0, "1v1 Medium"),
                 ('strong', 'medium', 0.5, 10, 2.0, "1v1 Strong/Medium"),
                 ('strong', None, 1.0, 10, 999, "1v1 Strong FINAL"),
             ]
