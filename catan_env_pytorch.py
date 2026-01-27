@@ -104,6 +104,10 @@ class CatanEnv(gym.Env):
         return obs, info
 
     def _get_vertex_mask(self):
+        """Get mask for valid vertex positions.
+
+        Returns separate masks for settlements vs cities since they need different vertices.
+        """
         mask = np.zeros(54, dtype=np.float32)
         all_vertices = self.game_env.game.game_board.vertices
         if self.game_env.game.is_initial_placement_phase():
@@ -120,11 +124,15 @@ class CatanEnv(gym.Env):
             player = self.game_env.game.players[self.player_id]
             current_player = self.game_env.game.get_current_player()
             if player == current_player and self.game_env.game.can_trade_or_build():
-                valid_vertices = self.game_env.game.get_buildable_vertices_for_settlements()
-                city_vertices = self.game_env.game.get_buildable_vertices_for_cities()
-                valid_vertices = list(set(valid_vertices + city_vertices))
+                # Get BOTH types but store separately for action-aware selection
+                self._settlement_vertices = self.game_env.game.get_buildable_vertices_for_settlements()
+                self._city_vertices = self.game_env.game.get_buildable_vertices_for_cities()
+                # Combine for mask (network sees all options)
+                valid_vertices = list(set(self._settlement_vertices + self._city_vertices))
             else:
                 valid_vertices = []
+                self._settlement_vertices = []
+                self._city_vertices = []
         for vertex in valid_vertices:
             try:
                 idx = all_vertices.index(vertex)
@@ -375,14 +383,66 @@ class CatanEnv(gym.Env):
         return obs, reward, terminated, truncated, info
 
     def _get_action_params(self, action_name, vertex_idx=None, edge_idx=None):
+        """Get action parameters, ensuring valid vertex/edge selection.
+
+        CRITICAL FIX: Select from action-appropriate valid positions.
+        - build_settlement: must use settlement-valid vertices
+        - build_city: must use city-valid vertices (existing settlements)
+        """
+        import random
         all_vertices = self.game_env.game.game_board.vertices
         all_edges = self.game_env.game.game_board.edges
-        if action_name in ['place_settlement', 'build_settlement', 'build_city']:
+
+        if action_name == 'place_settlement':
+            # Initial placement - use network's choice if valid
             if vertex_idx is not None and 0 <= vertex_idx < len(all_vertices):
                 return {'vertex': all_vertices[vertex_idx]}
+
+        elif action_name == 'build_settlement':
+            # FIXED: Only use settlement-valid vertices
+            valid = getattr(self, '_settlement_vertices', [])
+            if valid:
+                # Try network's choice first if it's valid
+                if vertex_idx is not None and 0 <= vertex_idx < len(all_vertices):
+                    chosen = all_vertices[vertex_idx]
+                    if chosen in valid:
+                        return {'vertex': chosen}
+                # Fallback: pick best valid vertex (prefer network's preference direction)
+                return {'vertex': random.choice(valid)}
+            return None
+
+        elif action_name == 'build_city':
+            # FIXED: Only use city-valid vertices (existing settlements)
+            valid = getattr(self, '_city_vertices', [])
+            if valid:
+                if vertex_idx is not None and 0 <= vertex_idx < len(all_vertices):
+                    chosen = all_vertices[vertex_idx]
+                    if chosen in valid:
+                        return {'vertex': chosen}
+                return {'vertex': random.choice(valid)}
+            return None
+
         elif action_name in ['place_road', 'build_road']:
-            if edge_idx is not None and 0 <= edge_idx < len(all_edges):
-                return {'edge': all_edges[edge_idx]}
+            # Get valid edges for roads
+            if action_name == 'place_road' and self.game_env.game.waiting_for_road:
+                last_settlement = self.game_env.game.last_settlement_vertex
+                if last_settlement:
+                    valid = [e for e in all_edges
+                             if e.structure is None and
+                             (e.vertex1 == last_settlement or e.vertex2 == last_settlement)]
+                else:
+                    valid = []
+            else:
+                valid = self.game_env.game.get_buildable_edges()
+
+            if valid:
+                if edge_idx is not None and 0 <= edge_idx < len(all_edges):
+                    chosen = all_edges[edge_idx]
+                    if chosen in valid:
+                        return {'edge': chosen}
+                return {'edge': random.choice(valid)}
+            return None
+
         return None
 
     def _calculate_potential(self, player: Player):

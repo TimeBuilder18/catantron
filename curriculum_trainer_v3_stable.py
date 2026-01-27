@@ -42,11 +42,52 @@ def get_device():
     return device
 
 
+def play_passive_turn(game, player_id):
+    """Passive opponent - NEVER builds after initial placement.
+
+    This is the easiest possible opponent:
+    - Completes initial placement (required)
+    - Then only rolls dice and ends turn
+    - Never builds settlements, cities, roads, or dev cards
+
+    Use this for the very first training phase so agent can learn basics.
+    """
+    player = game.players[player_id]
+
+    if game.is_initial_placement_phase():
+        if game.waiting_for_road:
+            if game.last_settlement_vertex:
+                edges = game.game_board.edges
+                valid = [e for e in edges
+                        if e.structure is None and
+                        (e.vertex1 == game.last_settlement_vertex or
+                         e.vertex2 == game.last_settlement_vertex)]
+                if valid:
+                    game.try_place_initial_road(random.choice(valid), player)
+        else:
+            vertices = game.game_board.vertices
+            valid = [v for v in vertices if v.structure is None and
+                    not any(adj.structure for adj in v.adjacent_vertices)]
+            if valid:
+                game.try_place_initial_settlement(random.choice(valid), player)
+        return True
+
+    # Just roll and end - never build
+    if game.can_roll_dice():
+        game.roll_dice()
+        return True
+
+    if game.can_end_turn():
+        game.end_turn()
+        return True
+    return True
+
+
 def play_truly_random_turn(game, player_id):
     """Truly random opponent - picks random legal actions with low build probability.
 
     This is much weaker than play_random_turn because:
-    - Only 30% chance to build when possible (vs 85%)
+    - Only 15% chance to build when possible (vs 85%)
     - Doesn't prioritize any action type
     - Often just ends turn even when builds are available
 
@@ -76,8 +117,8 @@ def play_truly_random_turn(game, player_id):
         game.roll_dice()
         return True
 
-    # Only 30% chance to even try building (vs 85% in "random")
-    if game.can_trade_or_build() and random.random() < 0.30:
+    # Only 15% chance to even try building (reduced from 30%)
+    if game.can_trade_or_build() and random.random() < 0.15:
         actions = []
         res = player.resources
 
@@ -217,7 +258,9 @@ def play_opponent_turn(game, player_id, mix_prob, primary_ai='medium', secondary
         chosen_ai = secondary_ai if secondary_ai else 'truly_random'
 
     # Play with chosen AI
-    if chosen_ai == 'truly_random':
+    if chosen_ai == 'passive':
+        return play_passive_turn(game, player_id)
+    elif chosen_ai == 'truly_random':
         return play_truly_random_turn(game, player_id)
     elif chosen_ai == 'random':
         return play_random_turn(game, player_id)
