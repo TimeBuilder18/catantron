@@ -433,9 +433,19 @@ class CatanEnv(gym.Env):
         all_edges = self.game_env.game.game_board.edges
 
         if action_name == 'place_settlement':
-            # Initial placement - use network's choice if valid
-            if vertex_idx is not None and 0 <= vertex_idx < len(all_vertices):
-                return {'vertex': all_vertices[vertex_idx]}
+            # Initial placement - must use valid vertex
+            # Get valid vertices for initial settlement (no structure, not adjacent to other settlements)
+            valid = [v for v in all_vertices if v.structure is None and
+                     not any(adj.structure for adj in v.adjacent_vertices)]
+            if valid:
+                # Try network's choice first if it's valid
+                if vertex_idx is not None and 0 <= vertex_idx < len(all_vertices):
+                    chosen = all_vertices[vertex_idx]
+                    if chosen in valid:
+                        return {'vertex': chosen}
+                # Fallback: pick random valid vertex
+                return {'vertex': random.choice(valid)}
+            return None
 
         elif action_name == 'build_settlement':
             # FIXED: Only use settlement-valid vertices
