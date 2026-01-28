@@ -150,7 +150,7 @@ def play_truly_random_turn(game, player_id):
                 player.try_build_road(random.choice(locs))
             elif action_type == 'dev':
                 game.try_buy_development_card(player)
-            return True
+            # FIX: Don't return - fall through to end turn
 
     if game.can_end_turn():
         game.end_turn()
