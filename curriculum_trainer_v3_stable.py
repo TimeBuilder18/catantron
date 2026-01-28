@@ -73,9 +73,10 @@ def play_passive_turn(game, player_id):
         return True
 
     # Just roll and end - never build
+    # FIX: Must roll AND end turn in same call, not return early
     if game.can_roll_dice():
         game.roll_dice()
-        return True
+        # Don't return here - fall through to end_turn
 
     if game.can_end_turn():
         game.end_turn()
@@ -115,7 +116,7 @@ def play_truly_random_turn(game, player_id):
 
     if game.can_roll_dice():
         game.roll_dice()
-        return True
+        # FIX: Don't return - fall through to build/end logic
 
     # Only 15% chance to even try building (reduced from 30%)
     if game.can_trade_or_build() and random.random() < 0.15:
@@ -186,7 +187,7 @@ def play_random_turn(game, player_id):
 
     if game.can_roll_dice():
         game.roll_dice()
-        return True
+        # FIX: Don't return - fall through to build/end logic
 
     if game.can_trade_or_build():
         actions = []
@@ -219,7 +220,7 @@ def play_random_turn(game, player_id):
                 player.try_build_road(random.choice(locs))
             elif action_type == 'dev':
                 game.try_buy_development_card(player)
-            return True
+            # FIX: Don't return - fall through to end turn
 
     if game.can_end_turn():
         game.end_turn()
@@ -553,6 +554,14 @@ class CurriculumTrainerV3:
                 success = play_opponent_turn(game, current_id, mix_prob, primary_ai, secondary_ai)
                 if not success and game.can_end_turn():
                     game.end_turn()
+
+                # FIX: Handle auto-discards after opponent rolls 7
+                # This was being skipped because opponent doesn't go through env.step()
+                if game.waiting_for_discards:
+                    env.game_env._handle_automatic_discards()
+
+                # FIX: Refresh observation after opponent turn so agent sees current state
+                obs = env._get_obs()
 
                 winner = game.check_victory_conditions()
                 if winner is not None:
