@@ -239,7 +239,10 @@ class CatanEnv(gym.Env):
                 float(opp['victory_points']),
                 float(opp.get('dev_card_count', 0))
             ])
-        while len(features) < 10 + 5 + 3 + 5 + 4 + 18:
+        # Pad opponent features to always have 3 opponents worth (18 features)
+        # This ensures consistent observation size for both 1v1 and 4-player
+        # 11 (game) + 5 (resources) + 3 (structures) + 5 (dev cards) + 4 (VP) + 18 (3 opponents) = 46
+        while len(features) < 11 + 5 + 3 + 5 + 4 + 18:
             features.append(0.0)
         resource_encoding = {
             'forest': 1.0, 'hill': 2.0, 'field': 3.0,
