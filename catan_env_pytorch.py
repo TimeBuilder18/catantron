@@ -50,6 +50,10 @@ class CatanEnv(gym.Env):
         self._last_city_count = 0
         self._resources_spent_on_trades = 0
 
+        # PERFORMANCE: Cache for port access checks (cleared on settlement/city build)
+        self._port_access_cache = None
+        self._port_access_cache_turn = -1
+
         # Action space: 11 discrete actions
         self.action_space = spaces.Discrete(11)
 
@@ -97,6 +101,10 @@ class CatanEnv(gym.Env):
         self._bank_trades_this_game = 0
         self._last_city_count = 0
         self._resources_spent_on_trades = 0
+
+        # Reset port access cache for new game
+        self._port_access_cache = None
+        self._port_access_cache_turn = None
 
         obs = self._get_obs()
         info = self._get_info()
@@ -288,17 +296,33 @@ class CatanEnv(gym.Env):
         return False
 
     def _player_has_port_access(self, vx, vy):
+        """Check if player has access to port at (vx, vy). Uses caching for performance."""
+        # PERFORMANCE: Build port access cache, invalidate when buildings change
         player = self.game_env.game.players[self.player_id]
-        for settlement in player.settlements:
-            if abs(settlement.position.x - vx) < 0.1 and abs(settlement.position.y - vy) < 0.1:
-                return True
-        for city in player.cities:
-            if abs(city.position.x - vx) < 0.1 and abs(city.position.y - vy) < 0.1:
-                return True
-        return False
+        current_building_count = len(player.settlements) + len(player.cities)
 
-    def _get_info(self):
-        raw_obs = self.game_env.get_observation(self.player_id)
+        # Check if cache needs rebuild (buildings changed)
+        cache_key = (self._turn_count, current_building_count)
+        if self._port_access_cache is None or self._port_access_cache_turn != cache_key:
+            self._port_access_cache = set()
+            # Pre-compute all accessible positions
+            for settlement in player.settlements:
+                # Round to 1 decimal for consistent lookup
+                pos_key = (round(settlement.position.x, 1), round(settlement.position.y, 1))
+                self._port_access_cache.add(pos_key)
+            for city in player.cities:
+                pos_key = (round(city.position.x, 1), round(city.position.y, 1))
+                self._port_access_cache.add(pos_key)
+            self._port_access_cache_turn = cache_key
+
+        # O(1) lookup instead of O(settlements + cities)
+        port_key = (round(vx, 1), round(vy, 1))
+        return port_key in self._port_access_cache
+
+    def _get_info(self, raw_obs=None):
+        """Get info dict. Optionally accepts cached raw_obs to avoid redundant calls."""
+        if raw_obs is None:
+            raw_obs = self.game_env.get_observation(self.player_id)
         return {
             'player_id': self.player_id,
             'is_my_turn': raw_obs['is_my_turn'],
@@ -307,22 +331,26 @@ class CatanEnv(gym.Env):
         }
 
     def step(self, action, vertex_idx=None, edge_idx=None, trade_give_idx=None, trade_get_idx=None):
+        # PERFORMANCE FIX: Cache observation to avoid redundant calls (was 6+ calls, now 2)
         raw_obs = self.game_env.get_observation(self.player_id)
+
         if not raw_obs['is_my_turn']:
             obs = self._get_obs()
             obs['action_mask'] = np.zeros(11, dtype=np.int8)
             obs['action_mask'][8] = 1
-            info = self._get_info()
+            info = self._get_info(raw_obs)  # Reuse cached raw_obs
             return obs, 0.0, False, False, info
+
+        # Build observation once, reuse for action mask check
         current_obs = self._get_obs()
         action_mask = current_obs['action_mask']
+
         if action_mask[action] == 0:
             # Masked action - PENALIZE to discourage illegal action spam
-            obs = self._get_obs()
-            info = self._get_info()
+            info = self._get_info(raw_obs)  # Reuse cached raw_obs
             info['illegal_action'] = True
             illegal_penalty = -2.0  # Strong penalty for trying illegal actions
-            return obs, illegal_penalty, False, False, info
+            return current_obs, illegal_penalty, False, False, info  # Reuse current_obs
 
         old_potential = self._calculate_potential(self.game_env.game.players[self.player_id])
 
@@ -377,11 +405,14 @@ class CatanEnv(gym.Env):
             step_info['winner'] = winner_id
             step_info['result'] = 'game_over'
 
-        new_obs = self.game_env.get_observation(self.player_id) # Get final observation after all changes
+        # PERFORMANCE FIX: Get final observation once, reuse for reward calc and return
+        new_obs = self.game_env.get_observation(self.player_id)
         debug_reward = (hasattr(self, '_episode_count') and self._episode_count % 50 == 0)
         reward = self._calculate_reward(raw_obs, new_obs, step_info, old_potential, new_potential, debug=debug_reward)
+
+        # Build final obs (includes masks) - single call instead of separate _get_obs() + _get_info()
         obs = self._get_obs()
-        info = self._get_info()
+        info = self._get_info(new_obs)  # Reuse new_obs instead of another get_observation call
         info.update(step_info)
         terminated = done
         truncated = False

@@ -56,16 +56,18 @@ def assign_resources_numbers(tiles, robber):
 class AIGameEnvironment:
     """
     Game environment for AI training
-    Manages 4 AI agents playing Catan
+    Manages AI agents playing Catan (2-4 players)
     """
 
-    def __init__(self, victory_points_to_win=10):
-        """Initialize game for 4 AI agents
+    def __init__(self, victory_points_to_win=10, num_players=4):
+        """Initialize game for AI agents
 
         Args:
             victory_points_to_win: VP needed to win (default 10, can be lowered for easier games)
+            num_players: Number of players (2 for 1v1, 4 for standard)
         """
         self.victory_points_to_win = victory_points_to_win
+        self.num_players = num_players
 
         # Create board
         tile_size = 50
@@ -79,18 +81,19 @@ class AIGameEnvironment:
 
         game_board = GameBoard(tiles)
 
-        # Create 4 AI players
-        players = [
-            Player("AI Agent 1", (255, 50, 50)),
-            Player("AI Agent 2", (50, 50, 255)),
-            Player("AI Agent 3", (255, 255, 50)),
-            Player("AI Agent 4", (255, 255, 255))
+        # Create players based on num_players (2 for 1v1, up to 4 for standard)
+        player_configs = [
+            ("AI Agent 1", (255, 50, 50)),
+            ("AI Agent 2", (50, 50, 255)),
+            ("AI Agent 3", (255, 255, 50)),
+            ("AI Agent 4", (255, 255, 255))
         ]
+        players = [Player(name, color) for name, color in player_configs[:num_players]]
 
         self.game = GameSystem(game_board, players, victory_points_to_win=victory_points_to_win)
 
-        # Create rule-based AIs for players 1-3
-        self.ai_players = [None, RuleBasedAI(), RuleBasedAI(), RuleBasedAI()]
+        # Create rule-based AIs for opponent players (all except player 0)
+        self.ai_players = [None] + [RuleBasedAI() for _ in range(num_players - 1)]
         self.game.robber = robber
 
     def get_observation(self, player_index):
@@ -399,8 +402,8 @@ class AIGameEnvironment:
 
     def reset(self):
         """Reset game for new episode"""
-        self.__init__()
-        return [self.get_observation(i) for i in range(4)]
+        self.__init__(victory_points_to_win=self.victory_points_to_win, num_players=self.num_players)
+        return [self.get_observation(i) for i in range(self.num_players)]
 
     def get_game_state(self):
         """
