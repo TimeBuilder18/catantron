@@ -387,9 +387,9 @@ class CurriculumTrainerV3:
 
         # Auto-tune settings for 1v1 mode (faster games = can run more in parallel)
         if self.num_players == 2:
-            # 1v1 games are ~2x faster, so we can run more in parallel
+            # 1v1 games are ~4x faster, run many more in parallel
             if num_parallel_games == 8:  # Only override if using default
-                num_parallel_games = 16  # Double parallelism for 1v1
+                num_parallel_games = 32  # 4x parallelism for 1v1
             # Smaller buffer for 1v1 - ensures policy trains on fresh data
             if buffer_size == 200000:  # Only override if using default
                 buffer_size = 50000  # Much smaller for 1v1 - less variance, fresher data
@@ -1098,8 +1098,8 @@ class CurriculumTrainerV3:
                 # Old experiences from easier opponents create conflicting training signals
                 self.replay_buffer.clear_old(keep_fraction=0.05)
 
-                # Reset entropy to encourage exploration with new opponent
-                self.current_entropy_coef = self.entropy_coef
+                # Boost entropy for new phase - explore new strategies against harder opponent
+                self.current_entropy_coef = self.max_entropy_coef  # Temporary high exploration
                 self.entropy_history.clear()
 
                 current_phase += 1
