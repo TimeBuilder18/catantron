@@ -419,11 +419,10 @@ class CurriculumTrainerV3:
         self._games_lock = threading.Lock()  # Thread safety for games_played counter
 
         # ENTROPY STABILITY PARAMETERS
-        # Policy gradient is ~0.001, so entropy_coef must be << 0.01
-        # or entropy term dominates and agent stays random forever
-        self.target_entropy = 0.8   # Target entropy (focused exploitation)
-        self.entropy_coef = 0.005   # Base entropy coefficient (was 0.05 - still too high)
-        self.min_entropy_coef = 0.001  # Allow near-deterministic policies
+        # Need balance: low enough to learn, high enough to not collapse instantly
+        self.target_entropy = 1.0   # Target entropy (balanced explore/exploit)
+        self.entropy_coef = 0.01    # Base entropy coefficient (moderate)
+        self.min_entropy_coef = 0.005  # Don't collapse below this
         self.max_entropy_coef = 0.05
 
         # Adaptive parameters
