@@ -42,6 +42,13 @@ def get_device():
     return device
 
 
+def _pip_count(number):
+    """Convert dice number to pip count (probability dots). 6 and 8 are best (5 pips)."""
+    if number is None:
+        return 0
+    return max(0, 6 - abs(7 - number))
+
+
 def play_passive_turn(game, player_id):
     """Passive opponent - NEVER builds after initial placement.
 
@@ -69,7 +76,11 @@ def play_passive_turn(game, player_id):
             valid = [v for v in vertices if v.structure is None and
                     not any(adj.structure for adj in v.adjacent_vertices)]
             if valid:
-                game.try_place_initial_settlement(random.choice(valid), player)
+                # Pick by pip count (higher = better production)
+                valid.sort(key=lambda v: sum(
+                    _pip_count(t.number) for t in v.adjacent_tiles
+                    if hasattr(t, 'number') and t.number), reverse=True)
+                game.try_place_initial_settlement(valid[0], player)
         return True
 
     # Just roll and end - never build
@@ -111,7 +122,11 @@ def play_truly_random_turn(game, player_id):
             valid = [v for v in vertices if v.structure is None and
                     not any(adj.structure for adj in v.adjacent_vertices)]
             if valid:
-                game.try_place_initial_settlement(random.choice(valid), player)
+                # Pick by pip count (higher = better production)
+                valid.sort(key=lambda v: sum(
+                    _pip_count(t.number) for t in v.adjacent_tiles
+                    if hasattr(t, 'number') and t.number), reverse=True)
+                game.try_place_initial_settlement(valid[0], player)
         return True
 
     if game.can_roll_dice():
@@ -182,7 +197,11 @@ def play_random_turn(game, player_id):
             valid = [v for v in vertices if v.structure is None and
                     not any(adj.structure for adj in v.adjacent_vertices)]
             if valid:
-                game.try_place_initial_settlement(random.choice(valid), player)
+                # Pick by pip count (higher = better production)
+                valid.sort(key=lambda v: sum(
+                    _pip_count(t.number) for t in v.adjacent_tiles
+                    if hasattr(t, 'number') and t.number), reverse=True)
+                game.try_place_initial_settlement(valid[0], player)
         return True
 
     if game.can_roll_dice():
@@ -371,9 +390,9 @@ class CurriculumTrainerV3:
             # 1v1 games are ~2x faster, so we can run more in parallel
             if num_parallel_games == 8:  # Only override if using default
                 num_parallel_games = 16  # Double parallelism for 1v1
-            # Smaller buffer is fine for 1v1 (games are shorter, less experience variety needed)
+            # Smaller buffer for 1v1 - ensures policy trains on fresh data
             if buffer_size == 200000:  # Only override if using default
-                buffer_size = 100000  # Halve buffer for 1v1
+                buffer_size = 50000  # Much smaller for 1v1 - less variance, fresher data
 
         # Store the (possibly auto-tuned) values
         self.num_parallel_games = num_parallel_games
@@ -400,10 +419,12 @@ class CurriculumTrainerV3:
         self._games_lock = threading.Lock()  # Thread safety for games_played counter
 
         # ENTROPY STABILITY PARAMETERS
-        self.target_entropy = 1.2  # Target entropy (allow agent to exploit more)
-        self.entropy_coef = 0.05   # Base entropy coefficient (reduced from 0.15)
-        self.min_entropy_coef = 0.005  # Allow near-deterministic policies
-        self.max_entropy_coef = 0.3
+        # Policy gradient is ~0.001, so entropy_coef must be << 0.01
+        # or entropy term dominates and agent stays random forever
+        self.target_entropy = 0.8   # Target entropy (focused exploitation)
+        self.entropy_coef = 0.005   # Base entropy coefficient (was 0.05 - still too high)
+        self.min_entropy_coef = 0.001  # Allow near-deterministic policies
+        self.max_entropy_coef = 0.05
 
         # Adaptive parameters
         self.entropy_history = deque(maxlen=100)
