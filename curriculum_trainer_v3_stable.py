@@ -418,14 +418,14 @@ class CurriculumTrainerV3:
         self.games_played = 0
         self._games_lock = threading.Lock()  # Thread safety for games_played counter
 
-        # ENTROPY STABILITY PARAMETERS
-        # Need balance: low enough to learn, high enough to not collapse instantly
-        self.target_entropy = 1.0   # Target entropy (balanced explore/exploit)
-        self.entropy_coef = 0.01    # Base entropy coefficient (moderate)
-        self.min_entropy_coef = 0.005  # Don't collapse below this
+        # ENTROPY PARAMETERS - SIMPLIFIED (no more adaptive chaos)
+        # Fixed coefficient, let --entropy-decay handle reduction over time
+        self.target_entropy = 1.0   # Only used for logging status
+        self.entropy_coef = 0.01    # Fixed entropy coefficient
+        self.min_entropy_coef = 0.005
         self.max_entropy_coef = 0.05
 
-        # Adaptive parameters
+        # NO adaptive parameters - they caused cascading failures
         self.entropy_history = deque(maxlen=100)
         self.policy_loss_history = deque(maxlen=50)
         self.current_entropy_coef = self.entropy_coef
@@ -434,9 +434,9 @@ class CurriculumTrainerV3:
         self.max_kl = 0.02  # Maximum KL divergence per update
         self.adaptive_kl_coef = 1.0
 
-        # Gradient clipping
-        self.base_grad_norm = 0.5
-        self.current_grad_norm = 0.5
+        # Gradient clipping - FIXED, no adaptation
+        self.base_grad_norm = 1.0
+        self.current_grad_norm = 1.0
 
         # Curriculum tracking (thread-safe)
         self.phase_wins = deque(maxlen=100)
@@ -474,49 +474,16 @@ class CurriculumTrainerV3:
         return penalty
 
     def _adapt_hyperparameters(self, entropy, policy_loss):
-        """Dynamically adjust hyperparameters based on training health"""
+        """Track entropy for logging only - NO adaptive changes.
+
+        The old adaptive system caused cascading failures:
+        - Low entropy → reduced grad norm → agent can't learn → entropy stays low
+        - LR adaptation pushed to 1e-3 which was too aggressive
+        Now we use fixed coefficients and let --entropy-decay handle reduction.
+        """
         self.entropy_history.append(entropy)
         self.policy_loss_history.append(abs(policy_loss))
-
-        if len(self.entropy_history) < 10:
-            return
-
-        avg_entropy = np.mean(list(self.entropy_history)[-20:])
-        entropy_trend = np.mean(list(self.entropy_history)[-10:]) - np.mean(list(self.entropy_history)[-20:-10])
-        avg_policy_loss = np.mean(list(self.policy_loss_history)[-10:])
-
-        # ENTROPY COEFFICIENT ADAPTATION
-        # Allow entropy to drop naturally as agent learns - only intervene at very low levels
-        if avg_entropy < 0.3:
-            # Critical: entropy collapsed, boost coefficient
-            self.current_entropy_coef = min(self.max_entropy_coef, self.current_entropy_coef * 1.3)
-            self.current_grad_norm = max(0.1, self.current_grad_norm * 0.7)
-        elif avg_entropy < 0.6:
-            # Warning: entropy very low, slight increase
-            self.current_entropy_coef = min(self.max_entropy_coef, self.current_entropy_coef * 1.05)
-            self.current_grad_norm = max(0.2, self.current_grad_norm * 0.95)
-        elif avg_entropy > 2.2:
-            # Too exploratory, reduce coefficient more aggressively
-            self.current_entropy_coef = max(self.min_entropy_coef, self.current_entropy_coef * 0.9)
-            self.current_grad_norm = min(1.0, self.current_grad_norm * 1.1)
-        elif avg_entropy > 1.8:
-            # Still too random, gently reduce
-            self.current_entropy_coef = max(self.min_entropy_coef, self.current_entropy_coef * 0.95)
-        elif 1.0 <= avg_entropy <= 1.5:
-            # Healthy range, slowly return to base
-            self.current_entropy_coef = 0.9 * self.current_entropy_coef + 0.1 * self.entropy_coef
-            self.current_grad_norm = 0.9 * self.current_grad_norm + 0.1 * self.base_grad_norm
-
-        # LEARNING RATE ADAPTATION based on policy loss stability
-        # Only reduce LR for instability; don't increase if using lr_decay (fine-tuning mode)
-        if avg_policy_loss > 5.0:
-            # Training unstable, reduce LR
-            for pg in self.optimizer.param_groups:
-                pg['lr'] = max(1e-5, pg['lr'] * 0.8)
-        elif avg_policy_loss < 0.5 and avg_entropy > 0.6 and self.lr_decay >= 1.0:
-            # Training stable and healthy, can increase LR (only if not in fine-tuning mode)
-            for pg in self.optimizer.param_groups:
-                pg['lr'] = min(self.base_lr * 2, pg['lr'] * 1.02)
+        # No adaptation - all parameters stay fixed
 
     def play_game(self, mix_prob=1.0, primary_ai='random', secondary_ai=None, victory_points_to_win=10):
         """Play game and collect experiences
