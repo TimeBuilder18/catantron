@@ -400,10 +400,10 @@ class CurriculumTrainerV3:
         self._games_lock = threading.Lock()  # Thread safety for games_played counter
 
         # ENTROPY STABILITY PARAMETERS
-        self.target_entropy = 1.8  # Target entropy (healthy range: 1.5-2.2)
-        self.entropy_coef = 0.15   # Base entropy coefficient
-        self.min_entropy_coef = 0.05
-        self.max_entropy_coef = 0.5
+        self.target_entropy = 1.2  # Target entropy (allow agent to exploit more)
+        self.entropy_coef = 0.05   # Base entropy coefficient (reduced from 0.15)
+        self.min_entropy_coef = 0.005  # Allow near-deterministic policies
+        self.max_entropy_coef = 0.3
 
         # Adaptive parameters
         self.entropy_history = deque(maxlen=100)
@@ -466,19 +466,23 @@ class CurriculumTrainerV3:
         avg_policy_loss = np.mean(list(self.policy_loss_history)[-10:])
 
         # ENTROPY COEFFICIENT ADAPTATION
-        if avg_entropy < 1.0:
-            # Critical: entropy very low, boost coefficient significantly
+        # Allow entropy to drop naturally as agent learns - only intervene at very low levels
+        if avg_entropy < 0.3:
+            # Critical: entropy collapsed, boost coefficient
             self.current_entropy_coef = min(self.max_entropy_coef, self.current_entropy_coef * 1.3)
             self.current_grad_norm = max(0.1, self.current_grad_norm * 0.7)
-        elif avg_entropy < 1.4:
-            # Warning: entropy dropping, increase coefficient
-            self.current_entropy_coef = min(self.max_entropy_coef, self.current_entropy_coef * 1.1)
-            self.current_grad_norm = max(0.2, self.current_grad_norm * 0.9)
+        elif avg_entropy < 0.6:
+            # Warning: entropy very low, slight increase
+            self.current_entropy_coef = min(self.max_entropy_coef, self.current_entropy_coef * 1.05)
+            self.current_grad_norm = max(0.2, self.current_grad_norm * 0.95)
         elif avg_entropy > 2.2:
-            # Too exploratory, reduce coefficient
-            self.current_entropy_coef = max(self.min_entropy_coef, self.current_entropy_coef * 0.95)
+            # Too exploratory, reduce coefficient more aggressively
+            self.current_entropy_coef = max(self.min_entropy_coef, self.current_entropy_coef * 0.9)
             self.current_grad_norm = min(1.0, self.current_grad_norm * 1.1)
-        elif 1.5 <= avg_entropy <= 2.0:
+        elif avg_entropy > 1.8:
+            # Still too random, gently reduce
+            self.current_entropy_coef = max(self.min_entropy_coef, self.current_entropy_coef * 0.95)
+        elif 1.0 <= avg_entropy <= 1.5:
             # Healthy range, slowly return to base
             self.current_entropy_coef = 0.9 * self.current_entropy_coef + 0.1 * self.entropy_coef
             self.current_grad_norm = 0.9 * self.current_grad_norm + 0.1 * self.base_grad_norm
@@ -489,7 +493,7 @@ class CurriculumTrainerV3:
             # Training unstable, reduce LR
             for pg in self.optimizer.param_groups:
                 pg['lr'] = max(1e-5, pg['lr'] * 0.8)
-        elif avg_policy_loss < 0.5 and avg_entropy > 1.4 and self.lr_decay >= 1.0:
+        elif avg_policy_loss < 0.5 and avg_entropy > 0.6 and self.lr_decay >= 1.0:
             # Training stable and healthy, can increase LR (only if not in fine-tuning mode)
             for pg in self.optimizer.param_groups:
                 pg['lr'] = min(self.base_lr * 2, pg['lr'] * 1.02)
@@ -680,7 +684,7 @@ class CurriculumTrainerV3:
         # Adaptive exploration based on recent entropy health
         if len(self.entropy_history) > 10:
             recent_entropy = np.mean(list(self.entropy_history)[-10:])
-            if recent_entropy < 1.2:
+            if recent_entropy < 0.3:
                 # Entropy collapsing, add temperature
                 temperature = 1.5
                 ap = np.power(ap, 1/temperature)
@@ -845,7 +849,7 @@ class CurriculumTrainerV3:
             + 0.5 * vertex_policy_loss
             + 0.5 * edge_policy_loss  # Increased weight since edge learning is now working
             - self.current_entropy_coef * total_entropy
-            + 5.0 * entropy_penalty_tensor
+            + 1.0 * entropy_penalty_tensor
             + self.value_weight * value_loss
             + self.adaptive_kl_coef * torch.clamp(kl_div - self.max_kl, min=0.0)
         )
@@ -1048,7 +1052,7 @@ class CurriculumTrainerV3:
                         recent_vp = np.mean(list(self.phase_vps)[-50:]) if len(self.phase_vps) >= 10 else 0
 
                     # Status indicators
-                    entropy_status = "✓" if 1.4 <= avg_e <= 2.2 else "⚠️" if avg_e < 1.0 else "↑"
+                    entropy_status = "✓" if 0.6 <= avg_e <= 1.8 else "⚠️" if avg_e < 0.3 else "↑"
 
                     print(f"  [{phase_name}] Game {game_num:5d}/{total_games} | "
                           f"WR: {recent_wr:5.1f}% | VP: {recent_vp:.1f} | "
