@@ -443,8 +443,20 @@ class CatanEnv(gym.Env):
                     chosen = all_vertices[vertex_idx]
                     if chosen in valid:
                         return {'vertex': chosen}
-                # Fallback: pick random valid vertex
-                return {'vertex': random.choice(valid)}
+                # Fallback: use pip-count strategy (not random!)
+                # This ensures agent always has access to good resource tiles
+                # Agent can learn mid-game strategy without needing to first learn placement
+                def pip_count(number):
+                    """Convert dice number to pip count (probability dots)."""
+                    if number is None:
+                        return 0
+                    return max(0, 6 - abs(7 - number))
+
+                # Sort by total pip count of adjacent tiles (best spots first)
+                valid.sort(key=lambda v: sum(
+                    pip_count(t.number) for t in v.adjacent_tiles
+                    if hasattr(t, 'number') and t.number), reverse=True)
+                return {'vertex': valid[0]}
             return None
 
         elif action_name == 'build_settlement':
