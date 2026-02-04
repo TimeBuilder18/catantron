@@ -567,7 +567,9 @@ class CatanEnv(gym.Env):
         sheep_ok = min(sheep_count, 1)
         wheat_ok = min(wheat_count_settle, 1)
         settlement_readiness = (wood_ok + brick_ok + sheep_ok + wheat_ok) / 4.0
-        potential += settlement_readiness * 3.0  # Up to +3 when ready to build
+        # In 1v1, don't reward settlement readiness - focus on cities only
+        if self.num_players != 2:
+            potential += settlement_readiness * 3.0  # Up to +3 when ready to build
 
         # ========== CITY BUILDING INCENTIVE (CAPPED AT 4) ==========
         # MASSIVE bonus for cities - this is the KEY to winning
@@ -586,8 +588,15 @@ class CatanEnv(gym.Env):
         wheat_progress = min(wheat_count / 2.0, 1.0)
         # Only give readiness bonus if we have a settlement to upgrade
         if len(player.settlements) > 0:
-            city_readiness = ore_progress * wheat_progress  # 0 to 1
-            potential += city_readiness * 5.0  # Up to +5 when ready to build (was 2)
+            # ADDITIVE bonus so agent gets credit for EACH resource collected
+            # Not multiplicative (which gives 0 unless you have both)
+            if self.num_players == 2:
+                # 1v1: Stronger bonus to focus on city building
+                # Up to +6 for ore (3 ore * 2.0) + +4 for wheat (2 wheat * 2.0) = +10 total
+                potential += ore_progress * 6.0 + wheat_progress * 4.0
+            else:
+                city_readiness = ore_progress * wheat_progress  # 0 to 1
+                potential += city_readiness * 5.0
 
         # ========== ROAD VALUE (CAPPED AT 15) ==========
         # Roads are valuable for expansion and longest road!
@@ -692,38 +701,44 @@ class CatanEnv(gym.Env):
             reward += city_bonus
             reward_breakdown['city_bonus'] = city_bonus
 
-        # ========== SETTLEMENT BUILDING BONUS (1v1 aware) ==========
-        # Settlements are critical - you need them to upgrade to cities!
+        # ========== SETTLEMENT BUILDING BONUS ==========
+        # Settlements give VP but in 1v1 early training (3VP), agent already has 2
+        # Building more settlements is a DISTRACTION - agent just needs ONE city
         if step_info.get('built_settlement') or (action_name == 'build_settlement' and vp_diff > 0):
             num_settlements = new_obs.get('my_settlements', 0)
 
             if self.num_players == 2:
-                # 1v1: Settlements matter more (direct competition for land)
-                settlement_bonus = 12.0  # Higher base bonus
-                if num_settlements > 2:
-                    settlement_bonus += 4.0 * (num_settlements - 2)
+                # 1v1: Skip settlement bonus - focus on cities only
+                # Agent starts with 2 settlements, just needs to upgrade one
+                settlement_bonus = 0.0
             else:
                 # 4-player: Standard bonus
                 settlement_bonus = 8.0
                 if num_settlements > 2:
                     settlement_bonus += 3.0 * (num_settlements - 2)
-            reward += settlement_bonus
-            reward_breakdown['settlement_bonus'] = settlement_bonus
+            if settlement_bonus > 0:
+                reward += settlement_bonus
+                reward_breakdown['settlement_bonus'] = settlement_bonus
 
-        # ========== ROAD BUILDING BONUS (NEW - critical for learning!) ==========
+        # ========== ROAD BUILDING BONUS ==========
         # Roads don't give VP but are REQUIRED to build new settlements
-        # Without this reward, agent never learns to build roads → can't expand
+        # In 1v1 early training (3VP), roads are a DISTRACTION - agent just needs cities
         if action_name == 'build_road' and step_info.get('success', False):
-            num_roads = new_obs.get('my_roads', 0)
-            # Base road bonus - roads enable expansion
-            road_bonus = 5.0
-            # Extra bonus for roads beyond starting 2 (shows expansion)
-            if num_roads > 2:
-                road_bonus += 2.0 * (num_roads - 2)
-            # Cap at reasonable amount
-            road_bonus = min(road_bonus, 15.0)
-            reward += road_bonus
-            reward_breakdown['road_bonus'] = road_bonus
+            # Skip road bonus in 1v1 - focus on cities only
+            if self.num_players == 2:
+                road_bonus = 0.0  # No bonus - don't distract from city building
+            else:
+                num_roads = new_obs.get('my_roads', 0)
+                # Base road bonus - roads enable expansion
+                road_bonus = 5.0
+                # Extra bonus for roads beyond starting 2 (shows expansion)
+                if num_roads > 2:
+                    road_bonus += 2.0 * (num_roads - 2)
+                # Cap at reasonable amount
+                road_bonus = min(road_bonus, 15.0)
+            if road_bonus > 0:
+                reward += road_bonus
+                reward_breakdown['road_bonus'] = road_bonus
 
         # ========== DEV CARD PURCHASE BONUS ==========
         # Buying dev cards is a valid strategy, give small reward
