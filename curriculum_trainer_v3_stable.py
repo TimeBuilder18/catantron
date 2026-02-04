@@ -836,7 +836,7 @@ class CurriculumTrainerV3:
             + 0.5 * vertex_policy_loss
             + 0.5 * edge_policy_loss  # Increased weight since edge learning is now working
             - self.current_entropy_coef * total_entropy
-            + 1.0 * entropy_penalty_tensor
+            + self.current_entropy_coef * entropy_penalty_tensor  # Same scale as entropy bonus
             + self.value_weight * value_loss
             + self.adaptive_kl_coef * torch.clamp(kl_div - self.max_kl, min=0.0)
         )

@@ -352,7 +352,7 @@ class CatanEnv(gym.Env):
             # Masked action - PENALIZE to discourage illegal action spam
             info = self._get_info(raw_obs)  # Reuse cached raw_obs
             info['illegal_action'] = True
-            illegal_penalty = -2.0  # Strong penalty for trying illegal actions
+            illegal_penalty = -5.0  # Strong penalty for trying illegal actions
             return current_obs, illegal_penalty, False, False, info  # Reuse current_obs
 
         old_potential = self._calculate_potential(self.game_env.game.players[self.player_id])
@@ -652,10 +652,11 @@ class CatanEnv(gym.Env):
         reward += vp_reward
         reward_breakdown['vp'] = vp_reward
 
-        # VP State Bonus (encourages maintaining high VP)
-        vp_state_bonus = new_obs['my_victory_points'] * 0.1
-        reward += vp_state_bonus
-        reward_breakdown['vp_state_bonus'] = vp_state_bonus
+        # VP State Bonus - REMOVED
+        # Was +0.1 per VP per step, which created a constant reward signal
+        # that drowned out building rewards and poisoned the value function.
+        # PBRS + VP change reward already cover VP incentives properly.
+        reward_breakdown['vp_state_bonus'] = 0.0
 
         # ========== CITY BUILDING BONUS (CRITICAL FIX v3 - 1v1 aware) ==========
         # Cities are THE key to winning - even more so in 1v1
