@@ -792,9 +792,11 @@ class CatanEnv(gym.Env):
                 reward += win_bonus
                 reward_breakdown['win_bonus'] = win_bonus
             else:
-                # Small loss penalty
-                reward -= 1.0
-                reward_breakdown['loss_penalty'] = -1.0
+                # Loss penalty - make it significant so agent learns losing is BAD
+                # Against passive opponent, losing means agent timed out without building
+                loss_penalty = -15.0
+                reward += loss_penalty
+                reward_breakdown['loss_penalty'] = loss_penalty
 
         if debug:
             self._last_reward_breakdown = reward_breakdown
