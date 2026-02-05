@@ -679,24 +679,22 @@ class CatanEnv(gym.Env):
         # PBRS + VP change reward already cover VP incentives properly.
         reward_breakdown['vp_state_bonus'] = 0.0
 
-        # ========== CITY BUILDING BONUS (CRITICAL FIX v3 - 1v1 aware) ==========
-        # Cities are THE key to winning - even more so in 1v1
+        # ========== CITY BUILDING BONUS (CRITICAL - 1v1 focused) ==========
+        # Cities are THE key to winning - make this reward DOMINANT
         if step_info.get('built_city') or (action_name == 'build_city' and vp_diff > 0):
-            # Determine game phase for phase-aware bonus
-            turn = self._turn_count
-            if turn < 15:
-                phase_multiplier = 1.5
-            elif turn < 40:
-                phase_multiplier = 2.0
-            else:
-                phase_multiplier = 1.5
-
-            # Base city bonus - higher in 1v1 (cities = direct VP swing)
             if self.num_players == 2:
-                # 1v1: Each city = +2VP = ~20% swing in win probability
-                city_bonus = 20.0 * phase_multiplier
+                # 1v1: MASSIVE bonus - this is the ONLY way to win at 3VP
+                # Make it so large it completely dominates all other signals
+                city_bonus = 100.0  # Huge bonus to cut through entropy noise
             else:
-                # 4-player: Standard bonus
+                # 4-player: Standard bonus with phase multiplier
+                turn = self._turn_count
+                if turn < 15:
+                    phase_multiplier = 1.5
+                elif turn < 40:
+                    phase_multiplier = 2.0
+                else:
+                    phase_multiplier = 1.5
                 city_bonus = 15.0 * phase_multiplier
             reward += city_bonus
             reward_breakdown['city_bonus'] = city_bonus
@@ -766,17 +764,25 @@ class CatanEnv(gym.Env):
         # ========== INACTION PENALTY (STRONGER) ==========
         if action_name == 'end_turn':
             legal_actions = old_obs.get('legal_actions', [])
-            build_actions = {'build_settlement', 'build_city', 'build_road', 'buy_dev_card'}
-            if any(action in legal_actions for action in build_actions):
-                # MASSIVE penalty if city was available but not built
+            # In 1v1, only care about city building
+            if self.num_players == 2:
                 if 'build_city' in legal_actions:
-                    inaction_penalty = -15.0  # HUGE penalty - you MUST build cities!
-                elif 'build_settlement' in legal_actions:
-                    inaction_penalty = -5.0  # Strong penalty for not building settlement
-                else:
-                    inaction_penalty = -1.0  # Small penalty for other builds
-                reward += inaction_penalty
-                reward_breakdown['inaction_penalty'] = inaction_penalty
+                    # MASSIVE penalty - you have resources for city but didn't build!
+                    inaction_penalty = -50.0
+                    reward += inaction_penalty
+                    reward_breakdown['inaction_penalty'] = inaction_penalty
+            else:
+                # 4-player: Penalize not building anything
+                build_actions = {'build_settlement', 'build_city', 'build_road', 'buy_dev_card'}
+                if any(action in legal_actions for action in build_actions):
+                    if 'build_city' in legal_actions:
+                        inaction_penalty = -15.0
+                    elif 'build_settlement' in legal_actions:
+                        inaction_penalty = -5.0
+                    else:
+                        inaction_penalty = -1.0
+                    reward += inaction_penalty
+                    reward_breakdown['inaction_penalty'] = inaction_penalty
 
         # Roads are valuable - no penalty for building them
         # Agent will learn to prioritize through VP rewards
@@ -813,15 +819,23 @@ class CatanEnv(gym.Env):
         # ========== GAME END REWARDS ==========
         if step_info.get('result') == 'game_over':
             if step_info.get('winner') == self.player_id:
-                # Win bonus scales with VP (higher VP wins are better)
-                final_vp = new_obs['my_victory_points']
-                win_bonus = 15.0 + final_vp * 1.0  # e.g., 10VP win = +25
+                if self.num_players == 2:
+                    # 1v1: Strong win bonus to reinforce winning
+                    win_bonus = 50.0
+                else:
+                    # 4-player: Win bonus scales with VP
+                    final_vp = new_obs['my_victory_points']
+                    win_bonus = 15.0 + final_vp * 1.0
                 reward += win_bonus
                 reward_breakdown['win_bonus'] = win_bonus
             else:
                 # Loss penalty - make it significant so agent learns losing is BAD
-                # Against passive opponent, losing means agent timed out without building
-                loss_penalty = -15.0
+                if self.num_players == 2:
+                    # 1v1: Strong penalty to match win bonus scale
+                    loss_penalty = -50.0
+                else:
+                    # 4-player: Standard penalty
+                    loss_penalty = -15.0
                 reward += loss_penalty
                 reward_breakdown['loss_penalty'] = loss_penalty
 
