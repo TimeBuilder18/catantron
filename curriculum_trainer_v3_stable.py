@@ -443,6 +443,12 @@ class CurriculumTrainerV3:
         self.phase_vps = deque(maxlen=100)
         self._phase_lock = threading.Lock()
 
+        # DIAGNOSTIC: Track city building attempts
+        self.diag_could_build_city = 0
+        self.diag_took_build_city = 0
+        self.diag_city_built = 0
+        self._diag_lock = threading.Lock()
+
         print(f"Batch size: {self.batch_size}")
         print(f"Buffer size: {self.buffer_size}")
         print(f"Batch/Buffer ratio: {self.batch_size/self.buffer_size*100:.1f}%")
@@ -533,10 +539,25 @@ class CurriculumTrainerV3:
                 episode_edge_idx.append(edge_id)
                 episode_log_probs.append(log_prob)
 
+                # DIAGNOSTIC: Track city building opportunities and actions
+                # Action 4 = build_city
+                action_mask = obs.get('action_mask', None)
+                could_build_city = action_mask is not None and len(action_mask) > 4 and action_mask[4] == 1
+                took_build_city = action_id == 4
+
                 next_obs, reward, terminated, truncated, info = env.step(
                     action_id, vertex_id, edge_id,
                     trade_give_idx=0, trade_get_idx=0
                 )
+
+                # Track diagnostics
+                with self._diag_lock:
+                    if could_build_city:
+                        self.diag_could_build_city += 1
+                    if took_build_city:
+                        self.diag_took_build_city += 1
+                    if info.get('built_city') or (took_build_city and info.get('success', False)):
+                        self.diag_city_built += 1
 
                 episode_rewards.append(reward)
                 obs = next_obs
@@ -1047,6 +1068,19 @@ class CurriculumTrainerV3:
                     print(f"    └─ policy={avg_p:+.4f}, value={avg_v:.4f}, "
                           f"entropy={avg_e:.3f}{entropy_status}, "
                           f"ec={curr_ec:.3f}, gn={curr_gn:.2f}, lr={curr_lr:.1e}")
+
+                    # DIAGNOSTIC: City building stats
+                    with self._diag_lock:
+                        if self.diag_could_build_city > 0:
+                            take_rate = self.diag_took_build_city / self.diag_could_build_city * 100
+                            success_rate = self.diag_city_built / max(1, self.diag_took_build_city) * 100
+                            print(f"    └─ CITY: opportunities={self.diag_could_build_city}, "
+                                  f"taken={self.diag_took_build_city} ({take_rate:.0f}%), "
+                                  f"built={self.diag_city_built} ({success_rate:.0f}% success)")
+                        # Reset counters
+                        self.diag_could_build_city = 0
+                        self.diag_took_build_city = 0
+                        self.diag_city_built = 0
 
             # Check for curriculum advancement
             if (phase_game_count >= min_games_per_phase and
