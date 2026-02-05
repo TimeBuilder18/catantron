@@ -575,8 +575,10 @@ class CatanEnv(gym.Env):
         # MASSIVE bonus for cities - this is the KEY to winning
         # Max 4 cities per player in Catan
         num_cities = min(len(player.cities), 4)  # Cap at 4 (Catan max)
-        # First city: +8, Second: +9, Third: +10, Fourth: +11 (compound bonus)
-        city_bonus = sum(8.0 + 1.0 * i for i in range(num_cities))
+        # CRITICAL: City bonus must be HIGHER than city_readiness bonus (+10)
+        # Otherwise PBRS gives negative reward for building cities!
+        # First city: +20, Second: +22, Third: +24, Fourth: +26 (compound bonus)
+        city_bonus = sum(20.0 + 2.0 * i for i in range(num_cities))
         potential += city_bonus
 
         # ========== CITY READINESS BONUS (STRONGER) ==========
