@@ -443,19 +443,48 @@ class CatanEnv(gym.Env):
                     chosen = all_vertices[vertex_idx]
                     if chosen in valid:
                         return {'vertex': chosen}
-                # Fallback: use pip-count strategy (not random!)
-                # This ensures agent always has access to good resource tiles
-                # Agent can learn mid-game strategy without needing to first learn placement
+                # Fallback: use strategic placement for CITY BUILDING
+                # Prioritize ORE + WHEAT tiles since cities need 3 ore + 2 wheat
                 def pip_count(number):
                     """Convert dice number to pip count (probability dots)."""
                     if number is None:
                         return 0
                     return max(0, 6 - abs(7 - number))
 
-                # Sort by total pip count of adjacent tiles (best spots first)
-                valid.sort(key=lambda v: sum(
-                    pip_count(t.number) for t in v.adjacent_tiles
-                    if hasattr(t, 'number') and t.number), reverse=True)
+                def resource_weight(resource):
+                    """Weight resources for balanced play (cities + settlements + roads).
+
+                    10 VP strategy needs:
+                    - Cities: 3 ore + 2 wheat (most VP efficient)
+                    - Settlements: wood + brick + sheep + wheat
+                    - Roads: wood + brick (for longest road + expansion)
+                    - Dev cards: ore + wheat + sheep (largest army + VP cards)
+                    """
+                    if resource == 'ore':
+                        return 1.5  # Cities + dev cards
+                    elif resource == 'wheat':
+                        return 1.5  # Used in everything except roads
+                    elif resource == 'brick':
+                        return 1.3  # Settlements + roads (expansion)
+                    elif resource == 'wood':
+                        return 1.3  # Settlements + roads (expansion)
+                    elif resource == 'sheep':
+                        return 1.0  # Settlements + dev cards
+                    else:
+                        return 0.0  # Desert
+
+                def vertex_score(v):
+                    """Score vertex by weighted pip count (ore/wheat prioritized)."""
+                    score = 0
+                    for t in v.adjacent_tiles:
+                        if hasattr(t, 'number') and t.number and hasattr(t, 'resource'):
+                            pips = pip_count(t.number)
+                            weight = resource_weight(t.resource)
+                            score += pips * weight
+                    return score
+
+                # Sort by strategic score (ore/wheat access with good probability)
+                valid.sort(key=vertex_score, reverse=True)
                 return {'vertex': valid[0]}
             return None
 
@@ -680,6 +709,52 @@ class CatanEnv(gym.Env):
         # that drowned out building rewards and poisoned the value function.
         # PBRS + VP change reward already cover VP incentives properly.
         reward_breakdown['vp_state_bonus'] = 0.0
+
+        # ========== INITIAL PLACEMENT QUALITY REWARD ==========
+        # Train the network to pick GOOD settlement locations during initial placement
+        # This teaches the agent to understand the map and make strategic decisions
+        if is_initial and action_name == 'place_settlement' and step_info.get('success'):
+            # Find the vertex that was just placed
+            player = self.game_env.game.players[self.player_id]
+            if player.settlements:
+                last_settlement = player.settlements[-1]
+                vertex = last_settlement.position
+
+                # Calculate placement quality score
+                def pip_count(number):
+                    if number is None:
+                        return 0
+                    return max(0, 6 - abs(7 - number))
+
+                # Score based on production probability AND resource diversity
+                total_pips = 0
+                resources_accessed = set()
+                ore_pips = 0
+                wheat_pips = 0
+
+                for tile in vertex.adjacent_tiles:
+                    if hasattr(tile, 'number') and tile.number and hasattr(tile, 'resource'):
+                        pips = pip_count(tile.number)
+                        total_pips += pips
+                        resources_accessed.add(tile.resource)
+                        if tile.resource == 'mountain':  # ore
+                            ore_pips += pips
+                        elif tile.resource == 'field':  # wheat
+                            wheat_pips += pips
+
+                # Reward components:
+                # 1. Total production (pip count) - max ~15 pips for 3 tiles
+                pip_reward = total_pips * 0.3  # Up to ~4.5
+
+                # 2. Resource diversity bonus (access to different resources)
+                diversity_reward = len(resources_accessed) * 1.0  # Up to 3.0
+
+                # 3. Ore/wheat access (critical for cities)
+                city_resource_reward = (ore_pips + wheat_pips) * 0.2  # Up to ~3.0
+
+                placement_reward = pip_reward + diversity_reward + city_resource_reward
+                reward += placement_reward
+                reward_breakdown['placement_quality'] = placement_reward
 
         # ========== CITY BUILDING BONUS (CRITICAL - 1v1 focused) ==========
         # Cities are THE key to winning - make this reward DOMINANT
