@@ -1211,6 +1211,8 @@ if __name__ == "__main__":
                         help='List all curriculum phases and exit')
     parser.add_argument('--num-players', type=int, default=4, choices=[2, 3, 4],
                         help='Number of players: 2 for 1v1 training, 4 for standard (default: 4)')
+    parser.add_argument('--save-path', type=str, default='models/curriculum_v3_stable',
+                        help='Path prefix for saving models (default: models/curriculum_v3_stable)')
     args = parser.parse_args()
 
     # List phases if requested
@@ -1308,5 +1310,6 @@ if __name__ == "__main__":
         train_frequency=args.train_frequency,
         train_steps=args.train_steps,
         min_games_per_phase=args.min_games_per_phase,
-        start_phase=args.start_phase
+        start_phase=args.start_phase,
+        save_path=args.save_path
     )
