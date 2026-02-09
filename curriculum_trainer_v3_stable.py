@@ -347,7 +347,11 @@ class PrioritizedReplayBuffer:
                 'old_action_log_probs': np.array([self.buffer[i].get('old_action_log_prob',
                                                    self.buffer[i].get('old_log_prob', 0.0)) for i in indices]),
                 'old_vertex_log_probs': np.array([self.buffer[i].get('old_vertex_log_prob', 0.0) for i in indices]),
-                'old_edge_log_probs': np.array([self.buffer[i].get('old_edge_log_prob', 0.0) for i in indices])
+                'old_edge_log_probs': np.array([self.buffer[i].get('old_edge_log_prob', 0.0) for i in indices]),
+                # CRITICAL FIX: Include masks for proper PPO training
+                'action_masks': np.array([self.buffer[i].get('action_mask', np.ones(11)) for i in indices]),
+                'vertex_masks': np.array([self.buffer[i].get('vertex_mask', np.ones(54)) for i in indices]),
+                'edge_masks': np.array([self.buffer[i].get('edge_mask', np.ones(72)) for i in indices])
             }
 
     def add_batch(self, experiences):
@@ -515,6 +519,10 @@ class CurriculumTrainerV3:
         episode_vertex_idx = []
         episode_edge_idx = []
         episode_log_probs = []
+        # CRITICAL FIX: Store masks for proper PPO training
+        episode_action_masks = []
+        episode_vertex_masks = []
+        episode_edge_masks = []
 
         done = False
         moves = 0
@@ -538,6 +546,10 @@ class CurriculumTrainerV3:
                 episode_vertex_idx.append(vertex_id)
                 episode_edge_idx.append(edge_id)
                 episode_log_probs.append(log_prob)
+                # CRITICAL FIX: Store masks for PPO training
+                episode_action_masks.append(obs['action_mask'].copy())
+                episode_vertex_masks.append(obs['vertex_mask'].copy())
+                episode_edge_masks.append(obs['edge_mask'].copy())
 
                 # DIAGNOSTIC: Track city building opportunities and actions
                 # Action 4 = build_city
@@ -605,7 +617,11 @@ class CurriculumTrainerV3:
                 'reward': returns[i],
                 'old_action_log_prob': action_log_prob,   # Split log probs for all heads
                 'old_vertex_log_prob': vertex_log_prob,
-                'old_edge_log_prob': edge_log_prob
+                'old_edge_log_prob': edge_log_prob,
+                # CRITICAL FIX: Store masks for proper PPO training
+                'action_mask': episode_action_masks[i],
+                'vertex_mask': episode_vertex_masks[i],
+                'edge_mask': episode_edge_masks[i]
             })
 
         # Add to buffer (thread-safe)
@@ -732,6 +748,10 @@ class CurriculumTrainerV3:
         old_action_log_probs = torch.FloatTensor(batch['old_action_log_probs']).to(self.device)
         old_vertex_log_probs = torch.FloatTensor(batch['old_vertex_log_probs']).to(self.device)
         old_edge_log_probs = torch.FloatTensor(batch['old_edge_log_probs']).to(self.device)
+        # CRITICAL FIX: Get masks for proper PPO training
+        action_masks = torch.FloatTensor(batch['action_masks']).to(self.device)
+        vertex_masks = torch.FloatTensor(batch['vertex_masks']).to(self.device)
+        edge_masks = torch.FloatTensor(batch['edge_masks']).to(self.device)
 
         self.network.train()
 
@@ -740,13 +760,15 @@ class CurriculumTrainerV3:
                 loss_dict = self._compute_loss(
                     obs, target_action_probs, target_vertex_probs, target_edge_probs,
                     action_idx, vertex_idx, edge_idx, returns,
-                    old_action_log_probs, old_vertex_log_probs, old_edge_log_probs
+                    old_action_log_probs, old_vertex_log_probs, old_edge_log_probs,
+                    action_masks, vertex_masks, edge_masks
                 )
         else:
             loss_dict = self._compute_loss(
                 obs, target_action_probs, target_vertex_probs, target_edge_probs,
                 action_idx, vertex_idx, edge_idx, returns,
-                old_action_log_probs, old_vertex_log_probs, old_edge_log_probs
+                old_action_log_probs, old_vertex_log_probs, old_edge_log_probs,
+                action_masks, vertex_masks, edge_masks
             )
 
         loss = loss_dict['total_loss']
@@ -782,15 +804,20 @@ class CurriculumTrainerV3:
 
     def _compute_loss(self, obs, target_action_probs, target_vertex_probs, target_edge_probs,
                        action_idx, vertex_idx, edge_idx, returns,
-                       old_action_log_probs, old_vertex_log_probs, old_edge_log_probs):
+                       old_action_log_probs, old_vertex_log_probs, old_edge_log_probs,
+                       action_masks=None, vertex_masks=None, edge_masks=None):
         """Compute loss with PROPER PPO for ALL heads.
 
         Key fixes:
         1. Use actual action indices (not weighted sum) for proper policy gradient
         2. PPO clipping applied to ALL heads (action, vertex, edge)
         3. Old log probs tracked for all heads
+        4. CRITICAL: Use action masks during forward pass so probabilities match gameplay
         """
-        action_probs, vertex_probs, edge_probs, _, _, value = self.network.forward(obs)
+        # CRITICAL FIX: Pass masks to forward() so probabilities match what was used during gameplay
+        action_probs, vertex_probs, edge_probs, _, _, value = self.network.forward(
+            obs, action_masks, vertex_masks, edge_masks
+        )
         value = value.squeeze()
 
         # Compute advantages (shared across all policy heads)
