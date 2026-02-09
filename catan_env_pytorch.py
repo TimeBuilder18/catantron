@@ -443,19 +443,48 @@ class CatanEnv(gym.Env):
                     chosen = all_vertices[vertex_idx]
                     if chosen in valid:
                         return {'vertex': chosen}
-                # Fallback: use pip-count strategy (not random!)
-                # This ensures agent always has access to good resource tiles
-                # Agent can learn mid-game strategy without needing to first learn placement
+                # Fallback: use strategic placement for CITY BUILDING
+                # Prioritize ORE + WHEAT tiles since cities need 3 ore + 2 wheat
                 def pip_count(number):
                     """Convert dice number to pip count (probability dots)."""
                     if number is None:
                         return 0
                     return max(0, 6 - abs(7 - number))
 
-                # Sort by total pip count of adjacent tiles (best spots first)
-                valid.sort(key=lambda v: sum(
-                    pip_count(t.number) for t in v.adjacent_tiles
-                    if hasattr(t, 'number') and t.number), reverse=True)
+                def resource_weight(resource):
+                    """Weight resources for balanced play (cities + settlements + roads).
+
+                    10 VP strategy needs:
+                    - Cities: 3 ore + 2 wheat (most VP efficient)
+                    - Settlements: wood + brick + sheep + wheat
+                    - Roads: wood + brick (for longest road + expansion)
+                    - Dev cards: ore + wheat + sheep (largest army + VP cards)
+                    """
+                    if resource == 'ore':
+                        return 1.5  # Cities + dev cards
+                    elif resource == 'wheat':
+                        return 1.5  # Used in everything except roads
+                    elif resource == 'brick':
+                        return 1.3  # Settlements + roads (expansion)
+                    elif resource == 'wood':
+                        return 1.3  # Settlements + roads (expansion)
+                    elif resource == 'sheep':
+                        return 1.0  # Settlements + dev cards
+                    else:
+                        return 0.0  # Desert
+
+                def vertex_score(v):
+                    """Score vertex by weighted pip count (ore/wheat prioritized)."""
+                    score = 0
+                    for t in v.adjacent_tiles:
+                        if hasattr(t, 'number') and t.number and hasattr(t, 'resource'):
+                            pips = pip_count(t.number)
+                            weight = resource_weight(t.resource)
+                            score += pips * weight
+                    return score
+
+                # Sort by strategic score (ore/wheat access with good probability)
+                valid.sort(key=vertex_score, reverse=True)
                 return {'vertex': valid[0]}
             return None
 
