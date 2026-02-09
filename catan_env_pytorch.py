@@ -710,6 +710,52 @@ class CatanEnv(gym.Env):
         # PBRS + VP change reward already cover VP incentives properly.
         reward_breakdown['vp_state_bonus'] = 0.0
 
+        # ========== INITIAL PLACEMENT QUALITY REWARD ==========
+        # Train the network to pick GOOD settlement locations during initial placement
+        # This teaches the agent to understand the map and make strategic decisions
+        if is_initial and action_name == 'place_settlement' and step_info.get('success'):
+            # Find the vertex that was just placed
+            player = self.game_env.game.players[self.player_id]
+            if player.settlements:
+                last_settlement = player.settlements[-1]
+                vertex = last_settlement.position
+
+                # Calculate placement quality score
+                def pip_count(number):
+                    if number is None:
+                        return 0
+                    return max(0, 6 - abs(7 - number))
+
+                # Score based on production probability AND resource diversity
+                total_pips = 0
+                resources_accessed = set()
+                ore_pips = 0
+                wheat_pips = 0
+
+                for tile in vertex.adjacent_tiles:
+                    if hasattr(tile, 'number') and tile.number and hasattr(tile, 'resource'):
+                        pips = pip_count(tile.number)
+                        total_pips += pips
+                        resources_accessed.add(tile.resource)
+                        if tile.resource == 'mountain':  # ore
+                            ore_pips += pips
+                        elif tile.resource == 'field':  # wheat
+                            wheat_pips += pips
+
+                # Reward components:
+                # 1. Total production (pip count) - max ~15 pips for 3 tiles
+                pip_reward = total_pips * 0.3  # Up to ~4.5
+
+                # 2. Resource diversity bonus (access to different resources)
+                diversity_reward = len(resources_accessed) * 1.0  # Up to 3.0
+
+                # 3. Ore/wheat access (critical for cities)
+                city_resource_reward = (ore_pips + wheat_pips) * 0.2  # Up to ~3.0
+
+                placement_reward = pip_reward + diversity_reward + city_resource_reward
+                reward += placement_reward
+                reward_breakdown['placement_quality'] = placement_reward
+
         # ========== CITY BUILDING BONUS (CRITICAL - 1v1 focused) ==========
         # Cities are THE key to winning - make this reward DOMINANT
         if step_info.get('built_city') or (action_name == 'build_city' and vp_diff > 0):
