@@ -919,13 +919,13 @@ class CurriculumTrainerV3:
             # truly_random = 15% build chance, agent should dominate
             # random = 85% build chance, harder baseline
             min_wr_by_difficulty = {
-                'passive': 0.65,       # 65% WR vs passive (lowered from 80% - was too strict)
-                'truly_random': 0.50,  # 50% WR vs truly random (lowered from 55%)
-                'random': 0.35,        # 35% WR vs rule-based "random" (lowered from 40%)
-                'very_weak': 0.25,     # 25% WR vs VeryWeak
-                'weak': 0.18,          # 18% WR vs Weak
-                'medium': 0.10,        # 10% WR vs Medium
-                'strong': 0.05,        # 5% WR vs Strong
+                'passive': 0.55,       # 55% WR vs passive (lowered further to allow progression)
+                'truly_random': 0.45,  # 45% WR vs truly random
+                'random': 0.30,        # 30% WR vs rule-based "random"
+                'very_weak': 0.22,     # 22% WR vs VeryWeak
+                'weak': 0.15,          # 15% WR vs Weak
+                'medium': 0.08,        # 8% WR vs Medium
+                'strong': 0.03,        # 3% WR vs Strong
             }
         else:
             # 4-player mode: 25% baseline, lower thresholds
