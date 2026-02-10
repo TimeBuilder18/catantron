@@ -1219,32 +1219,33 @@ if __name__ == "__main__":
     if args.list_phases:
         # Format: (primary_ai, secondary_ai, mix_prob, vp_to_win, vp_threshold, name)
         if args.num_players == 2:
+            # MUST match the actual phases used in train() method!
             phases = [
-                # Phase 1: Learn basics vs truly random (very weak opponent)
-                ('truly_random', None, 1.0, 5, 3.0, "1v1 TrulyRandom 5VP"),
+                # Phase 0-2: Learn to build ANYTHING vs passive opponent
+                ('passive', None, 1.0, 3, 2.5, "1v1 Passive 3VP"),
+                ('passive', None, 1.0, 4, 2.8, "1v1 Passive 4VP"),
+                ('passive', None, 1.0, 5, 3.2, "1v1 Passive 5VP"),
+                # Phase 3-6: Introduce truly_random (15% build chance)
+                ('truly_random', 'passive', 0.5, 5, 3.0, "1v1 TrulyRandom/Passive"),
                 ('truly_random', None, 1.0, 6, 3.5, "1v1 TrulyRandom 6VP"),
-                ('truly_random', None, 1.0, 7, 4.0, "1v1 TrulyRandom 7VP"),
-                ('truly_random', None, 1.0, 8, 4.5, "1v1 TrulyRandom 8VP"),
-                ('truly_random', None, 1.0, 10, 5.0, "1v1 TrulyRandom 10VP"),
-                # Phase 2: Transition to rule-based random
-                ('random', 'truly_random', 0.5, 10, 4.0, "1v1 Random/TrulyRandom"),
-                ('random', None, 1.0, 10, 3.5, "1v1 Random 10VP"),
-                # Phase 3: Opponent difficulty progression
-                ('very_weak', 'random', 0.5, 10, 3.0, "1v1 VeryWeak/Random"),
-                ('very_weak', None, 1.0, 10, 2.8, "1v1 VeryWeak"),
+                ('truly_random', None, 1.0, 8, 4.0, "1v1 TrulyRandom 8VP"),
+                ('truly_random', None, 1.0, 10, 4.5, "1v1 TrulyRandom 10VP"),
+                # Phase 7-8: Transition to rule-based random (85% build)
+                ('random', 'truly_random', 0.5, 10, 3.5, "1v1 Random/TrulyRandom"),
+                ('random', None, 1.0, 10, 3.0, "1v1 Random 10VP"),
+                # Phase 9-13: Opponent difficulty progression
+                ('very_weak', 'random', 0.5, 10, 2.8, "1v1 VeryWeak/Random"),
                 ('weak', 'very_weak', 0.5, 10, 2.5, "1v1 Weak/VeryWeak"),
-                ('weak', None, 1.0, 10, 2.3, "1v1 Weak"),
                 ('medium', 'weak', 0.5, 10, 2.2, "1v1 Medium/Weak"),
-                ('medium', None, 1.0, 10, 2.0, "1v1 Medium"),
                 ('strong', 'medium', 0.5, 10, 2.0, "1v1 Strong/Medium"),
                 ('strong', None, 1.0, 10, 999, "1v1 Strong FINAL"),
             ]
-            print("\n1v1 OPTIMIZED Curriculum Phases (v2):")
+            print("\n1v1 OPTIMIZED Curriculum Phases (v3):")
             print("-" * 70)
-            print("  Phase 1: Learn basics vs TrulyRandom (30% build chance - very easy)")
-            print("  Phase 2: Transition to rule-based Random (85% build chance)")
-            print("  Phase 3: Difficulty progression (VeryWeak -> Strong)")
-            print("  Higher WR thresholds: Agent must actually dominate before advancing")
+            print("  Phase 0-2: Learn to build vs Passive (never builds)")
+            print("  Phase 3-6: TrulyRandom opponent (15% build chance)")
+            print("  Phase 7-8: Rule-based Random (85% build chance)")
+            print("  Phase 9-13: Difficulty progression (VeryWeak -> Strong)")
             print("-" * 70)
         else:
             phases = [
@@ -1279,9 +1280,9 @@ if __name__ == "__main__":
 
     # Print training mode
     if args.num_players == 2:
-        # Show auto-tuned values
-        auto_parallel = 16 if args.parallel_games == 8 else args.parallel_games
-        auto_buffer = 100000 if args.buffer_size == 200000 else args.buffer_size
+        # Show auto-tuned values (must match logic in __init__ lines 393-399)
+        auto_parallel = 32 if args.parallel_games == 8 else args.parallel_games
+        auto_buffer = 50000 if args.buffer_size == 200000 else args.buffer_size
         print("\n" + "=" * 60)
         print("1v1 TRAINING MODE (Colonist-style)")
         print("=" * 60)
