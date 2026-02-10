@@ -425,9 +425,9 @@ class CurriculumTrainerV3:
         # ENTROPY PARAMETERS - SIMPLIFIED (no more adaptive chaos)
         # Fixed coefficient, let --entropy-decay handle reduction over time
         self.target_entropy = 1.0   # Only used for logging status
-        self.entropy_coef = 0.01    # Fixed entropy coefficient
-        self.min_entropy_coef = 0.005
-        self.max_entropy_coef = 0.05
+        self.entropy_coef = 0.025   # Increased for more exploration (was 0.01)
+        self.min_entropy_coef = 0.008
+        self.max_entropy_coef = 0.08
 
         # NO adaptive parameters - they caused cascading failures
         self.entropy_history = deque(maxlen=100)
