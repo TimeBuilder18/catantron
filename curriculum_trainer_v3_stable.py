@@ -825,7 +825,7 @@ class CurriculumTrainerV3:
         # Normalize advantages
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
-        clip_ratio = 0.2
+        clip_ratio = 0.3  # Increased from 0.2 to allow larger policy updates
 
         # ========== ACTION POLICY LOSS (PPO with proper log prob) ==========
         action_log_probs_all = torch.log(action_probs + 1e-8)
