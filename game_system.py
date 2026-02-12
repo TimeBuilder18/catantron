@@ -407,6 +407,10 @@ class Player:
 
     def try_build_road(self, edge):
         """Attempt to build a road"""
+        # Check road limit
+        if len(self.roads) >= GameConstants.MAX_ROADS:
+            return False, f"Road limit reached ({GameConstants.MAX_ROADS})"
+
         cost = Road.get_cost()
 
         # Check resources with detailed message
