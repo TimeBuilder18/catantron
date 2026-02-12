@@ -590,7 +590,7 @@ def play_random_turn(game, player_id):
         result = game.roll_dice()
         # Handle discards if 7 was rolled
         if result and result[2] == 7 and game.waiting_for_discards:
-            _auto_discard_for_game(game)
+            _auto_discard_for_game(game, player_id)
         return True
 
     if game.can_trade_or_build():
