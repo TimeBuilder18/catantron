@@ -158,9 +158,14 @@ def draw_game_board(screen, game_board, offset):
 
 
 def draw_player_info(screen, game_system, font, small_font):
-    """Draw player information panel on the right side"""
+    """Draw player information panel on the right side - optimized for 1v1 or 4p"""
+    num_players = len(game_system.players)
     panel_x = 820
     panel_y = 20
+
+    # Bigger panels for 1v1, compact for 4p
+    panel_height = 180 if num_players == 2 else 130
+    panel_spacing = 195 if num_players == 2 else 145
 
     title = font.render("PLAYERS", True, (255, 255, 255))
     screen.blit(title, (panel_x, panel_y))
@@ -170,10 +175,10 @@ def draw_player_info(screen, game_system, font, small_font):
         # Player header
         is_current = (player == game_system.get_current_player())
         bg_color = (60, 60, 60) if is_current else (30, 30, 30)
-        pygame.draw.rect(screen, bg_color, (panel_x, panel_y, 360, 130), border_radius=8)
+        pygame.draw.rect(screen, bg_color, (panel_x, panel_y, 360, panel_height), border_radius=8)
 
         if is_current:
-            pygame.draw.rect(screen, player.color, (panel_x, panel_y, 360, 130), 3, border_radius=8)
+            pygame.draw.rect(screen, player.color, (panel_x, panel_y, 360, panel_height), 3, border_radius=8)
 
         # Player name and color indicator
         pygame.draw.circle(screen, player.color, (panel_x + 15, panel_y + 15), 8)
@@ -187,15 +192,26 @@ def draw_player_info(screen, game_system, font, small_font):
 
         y = panel_y + 35
 
-        # Resources
-        total_resources = player.get_total_resources()
-        res_text = small_font.render(f"Resources: {total_resources}", True, (200, 200, 200))
-        screen.blit(res_text, (panel_x + 10, y))
-        y += 22
+        # For 1v1, show more detail
+        if num_players == 2:
+            # Individual resources
+            res_names = ['Wood', 'Brick', 'Wheat', 'Sheep', 'Ore']
+            res_types = [ResourceType.WOOD, ResourceType.BRICK, ResourceType.WHEAT,
+                        ResourceType.SHEEP, ResourceType.ORE]
+            res_str = "  ".join([f"{n[0]}:{player.resources[t]}" for n, t in zip(res_names, res_types)])
+            res_text = small_font.render(res_str, True, (200, 200, 200))
+            screen.blit(res_text, (panel_x + 10, y))
+            y += 25
+        else:
+            # Total resources only for 4p
+            total_resources = player.get_total_resources()
+            res_text = small_font.render(f"Resources: {total_resources}", True, (200, 200, 200))
+            screen.blit(res_text, (panel_x + 10, y))
+            y += 22
 
         # Buildings
         buildings_text = small_font.render(
-            f"🏘️ {len(player.settlements)}  🏰 {len(player.cities)}  🛤️  {len(player.roads)}",
+            f"Settlements: {len(player.settlements)}  Cities: {len(player.cities)}  Roads: {len(player.roads)}",
             True, (200, 200, 200)
         )
         screen.blit(buildings_text, (panel_x + 10, y))
@@ -203,20 +219,20 @@ def draw_player_info(screen, game_system, font, small_font):
 
         # Dev cards
         total_dev = sum(player.development_cards.values())
-        dev_text = small_font.render(f"Dev Cards: {total_dev}", True, (200, 200, 200))
+        dev_text = small_font.render(f"Dev Cards: {total_dev}  Knights: {player.knights_played}", True, (200, 200, 200))
         screen.blit(dev_text, (panel_x + 10, y))
         y += 22
 
         # Special achievements
         if player.has_longest_road:
-            lr_text = small_font.render("🏆 Longest Road", True, (255, 215, 0))
+            lr_text = small_font.render("Longest Road (+2 VP)", True, (255, 215, 0))
             screen.blit(lr_text, (panel_x + 10, y))
             y += 20
         if player.has_largest_army:
-            la_text = small_font.render("⚔️  Largest Army", True, (255, 215, 0))
+            la_text = small_font.render("Largest Army (+2 VP)", True, (255, 215, 0))
             screen.blit(la_text, (panel_x + 10, y))
 
-        panel_y += 145
+        panel_y += panel_spacing
 
 
 def draw_game_state(screen, game_system, font, small_font):
@@ -351,11 +367,12 @@ class VisualAIEnvironment:
     - Simplified: NO TRADING
     """
 
-    def __init__(self, screen, offset, font, small_font):
+    def __init__(self, screen, offset, font, small_font, num_players=2):
         self.screen = screen
         self.offset = offset
         self.font = font
         self.small_font = small_font
+        self.num_players = num_players
 
         # Create game
         tile_size = 50
@@ -369,13 +386,14 @@ class VisualAIEnvironment:
 
         game_board = GameBoard(tiles)
 
-        # Create 4 AI players
-        players = [
-            Player("AI 1", (255, 50, 50)),
-            Player("AI 2", (50, 50, 255)),
-            Player("AI 3", (255, 255, 50)),
-            Player("AI 4", (255, 255, 255))
+        # Create players based on num_players
+        all_players = [
+            Player("AI 1", (255, 50, 50)),    # Red
+            Player("AI 2", (50, 50, 255)),    # Blue
+            Player("AI 3", (255, 255, 50)),   # Yellow
+            Player("AI 4", (255, 255, 255))   # White
         ]
+        players = all_players[:num_players]
 
         self.game = GameSystem(game_board, players)
         self.game.robber = self.robber
@@ -553,6 +571,9 @@ def main():
                        help='AI difficulty for opponents')
     parser.add_argument('--manual', action='store_true', help='Manual control mode')
     parser.add_argument('--speed', type=float, default=0.5, help='Game speed (seconds per move)')
+    parser.add_argument('--num-players', type=int, default=2, choices=[2, 3, 4],
+                       help='Number of players (default: 2 for 1v1)')
+    parser.add_argument('--vp', type=int, default=10, help='Victory points to win')
     args = parser.parse_args()
 
     pygame.init()
@@ -665,17 +686,18 @@ def main():
     else:
         # AI mode - watch agents play
         print("\n" + "="*60)
-        print("AI VISUALIZATION MODE")
+        print(f"AI VISUALIZATION MODE - {args.num_players} PLAYERS")
         print("="*60)
         if args.model:
             print(f"Loading model: {args.model}")
         print(f"Opponent AI: {args.ai_difficulty}")
+        print(f"Victory points: {args.vp}")
         print(f"Game speed: {args.speed}s per move")
         print("Press ESC to quit")
         print("="*60 + "\n")
 
         # Create environment wrapper for proper observations (needed for model testing)
-        game_env = SimplifiedRewardWrapper(player_id=0, victory_points_to_win=10)
+        game_env = SimplifiedRewardWrapper(player_id=0, victory_points_to_win=args.vp, num_players=args.num_players)
         obs, _ = game_env.reset()
 
         # Load model if provided
@@ -728,21 +750,24 @@ def main():
                 network = None
 
         # Create visual environment with the same game instance
-        visual_env = VisualAIEnvironment(screen, offset, font, small_font)
+        visual_env = VisualAIEnvironment(screen, offset, font, small_font, num_players=args.num_players)
         visual_env.game = game_env.game_env.game
 
         # Update player names to show AI types
         if network:
-            visual_env.game.players[0].name = "🧠 Neural Net (RED)"
+            visual_env.game.players[0].name = "Neural Net (RED)"
         else:
-            visual_env.game.players[0].name = "🎲 Random (RED)"
+            visual_env.game.players[0].name = "Random (RED)"
 
         ai_type = args.ai_difficulty.capitalize() if args.ai_difficulty != 'random' else 'Random'
-        visual_env.game.players[1].name = f"🤖 {ai_type} (BLUE)"
-        visual_env.game.players[2].name = f"🤖 {ai_type} (YELLOW)"
-        visual_env.game.players[3].name = f"🤖 {ai_type} (WHITE)"
+        visual_env.game.players[1].name = f"{ai_type} AI (BLUE)"
+        if args.num_players >= 3:
+            visual_env.game.players[2].name = f"{ai_type} AI (YELLOW)"
+        if args.num_players >= 4:
+            visual_env.game.players[3].name = f"{ai_type} AI (WHITE)"
 
-        print("🎮 Game started! Player 0 is " + ("Neural Network" if network else "Random AI"))
+        mode_str = "1v1" if args.num_players == 2 else f"{args.num_players}-player"
+        print(f"Game started! {mode_str} mode - Player 0 is " + ("Neural Network" if network else "Random AI"))
 
         running = True
         moves = 0
@@ -822,7 +847,7 @@ def main():
 
                     winner = game.check_victory_conditions()
                     if winner:
-                        print(f"\n🏆 {winner.name} WINS with {winner.victory_points} points!")
+                        print(f"\n{winner.name} WINS with {winner.victory_points} VP!")
                         running = False
 
             # Draw everything
