@@ -275,7 +275,7 @@ class AIGameEnvironment:
 
             # Count opponent structures on adjacent vertices
             # Vertices have adjacent_tiles, so check all vertices
-            from game_system import StructureType
+            from game_system import City
             opponent_structures = 0
             my_structures = 0
 
@@ -286,7 +286,7 @@ class AIGameEnvironment:
                         my_structures += 1
                     else:
                         # Settlement = 1, City = 2
-                        if vertex.structure.structure_type == StructureType.CITY:
+                        if isinstance(vertex.structure, City):
                             opponent_structures += 2
                         else:
                             opponent_structures += 1

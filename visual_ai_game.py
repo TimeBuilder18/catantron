@@ -481,7 +481,7 @@ class VisualAIEnvironment:
 
 def _find_best_robber_tile(game, my_player_id):
     """Find best tile to place robber - blocks opponent's best hex"""
-    from game_system import StructureType
+    from game_system import City
     pip_values = {2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 8: 5, 9: 4, 10: 3, 11: 2, 12: 1}
 
     my_player = game.players[my_player_id]
@@ -505,7 +505,7 @@ def _find_best_robber_tile(game, my_player_id):
                 if owner == my_player:
                     my_structures += 1
                 else:
-                    if vertex.structure.structure_type == StructureType.CITY:
+                    if isinstance(vertex.structure, City):
                         opponent_structures += 2
                     else:
                         opponent_structures += 1
