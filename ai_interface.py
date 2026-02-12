@@ -241,6 +241,73 @@ class AIGameEnvironment:
             else:
                 break  # Player 0 or no AI available
 
+    def _find_best_robber_tile(self, my_player_id):
+        """
+        Find the best tile to place the robber - blocks opponent's best hex.
+
+        Strategy:
+        1. Find tiles where opponents (not us) have settlements/cities
+        2. Score by: pip value (6,8=5pts, 5,9=4pts, 4,10=3pts, 3,11=2pts, 2,12=1pt)
+        3. Multiply by number of opponent structures on that hex
+        4. Never block our own hexes
+        5. Can't place on current robber position
+
+        Returns: best tile to place robber, or None
+        """
+        # Pip values for dice roll probability
+        pip_values = {2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 8: 5, 9: 4, 10: 3, 11: 2, 12: 1}
+
+        my_player = self.game.players[my_player_id]
+        current_robber_tile = self.game.robber.position
+
+        best_tile = None
+        best_score = -1
+
+        for tile in self.game.game_board.tiles:
+            # Can't place on current position or desert
+            if tile == current_robber_tile:
+                continue
+            if tile.resource is None:  # Desert
+                continue
+
+            # Get pip value for this tile
+            pip_score = pip_values.get(tile.number, 0) if tile.number else 0
+
+            # Count opponent structures on adjacent vertices
+            opponent_structures = 0
+            my_structures = 0
+
+            for vertex in tile.vertices:
+                if vertex.structure:
+                    owner = vertex.structure.player
+                    if owner == my_player:
+                        my_structures += 1
+                    else:
+                        # Settlement = 1, City = 2
+                        from game_system import StructureType
+                        if vertex.structure.structure_type == StructureType.CITY:
+                            opponent_structures += 2
+                        else:
+                            opponent_structures += 1
+
+            # Don't block ourselves unless no other option
+            if my_structures > 0 and opponent_structures == 0:
+                continue
+
+            # Score = pip value * opponent structures
+            # Prefer blocking opponents even on lower pip tiles
+            score = pip_score * opponent_structures
+
+            # Bonus if this blocks multiple opponents
+            if opponent_structures >= 2:
+                score += 2
+
+            if score > best_score:
+                best_score = score
+                best_tile = tile
+
+        return best_tile
+
     def _handle_automatic_discards(self):
         """
         Automatically discard cards for all players with >7 cards when 7 is rolled
@@ -283,13 +350,17 @@ class AIGameEnvironment:
             self.game.players_must_discard = []
             self.game.players_discarded = set()
 
-            # Automatically move robber to a random tile (not current position)
-            # This simplifies AI training by not requiring robber movement strategy
-            import random
-            available_tiles = [t for t in self.game.game_board.tiles if t != self.game.robber.position]
-            if available_tiles:
-                new_tile = random.choice(available_tiles)
-                self.game.move_robber_to_tile(new_tile)
+            # Smart robber placement - block opponent's best hex
+            best_tile = self._find_best_robber_tile(self.player_id)
+            if best_tile:
+                self.game.move_robber_to_tile(best_tile)
+            else:
+                # Fallback to random if no good tile found
+                import random
+                available_tiles = [t for t in self.game.game_board.tiles if t != self.game.robber.position]
+                if available_tiles:
+                    new_tile = random.choice(available_tiles)
+                    self.game.move_robber_to_tile(new_tile)
 
     def step(self, player_index, action, action_params=None):
         """
