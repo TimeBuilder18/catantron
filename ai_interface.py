@@ -274,17 +274,18 @@ class AIGameEnvironment:
             pip_score = pip_values.get(tile.number, 0) if tile.number else 0
 
             # Count opponent structures on adjacent vertices
+            # Vertices have adjacent_tiles, so check all vertices
+            from game_system import StructureType
             opponent_structures = 0
             my_structures = 0
 
-            for vertex in tile.vertices:
-                if vertex.structure:
+            for vertex in self.game.game_board.vertices:
+                if tile in vertex.adjacent_tiles and vertex.structure:
                     owner = vertex.structure.player
                     if owner == my_player:
                         my_structures += 1
                     else:
                         # Settlement = 1, City = 2
-                        from game_system import StructureType
                         if vertex.structure.structure_type == StructureType.CITY:
                             opponent_structures += 2
                         else:

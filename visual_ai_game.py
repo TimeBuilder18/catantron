@@ -498,8 +498,9 @@ def _find_best_robber_tile(game, my_player_id):
         opponent_structures = 0
         my_structures = 0
 
-        for vertex in tile.vertices:
-            if vertex.structure:
+        # Vertices have adjacent_tiles, so check all vertices
+        for vertex in game.game_board.vertices:
+            if tile in vertex.adjacent_tiles and vertex.structure:
                 owner = vertex.structure.player
                 if owner == my_player:
                     my_structures += 1
@@ -589,7 +590,7 @@ def play_random_turn(game, player_id):
         result = game.roll_dice()
         # Handle discards if 7 was rolled
         if result and result[2] == 7 and game.waiting_for_discards:
-            _auto_discard_for_game(game)
+            _auto_discard_for_game(game, player_id)
         return True
 
     if game.can_trade_or_build():
