@@ -479,6 +479,36 @@ class VisualAIEnvironment:
         return actions
 
 
+def _auto_discard_for_game(game):
+    """Auto-discard for all players with 8+ cards when 7 is rolled"""
+    if not game.waiting_for_discards:
+        return
+
+    for player in game.players_must_discard:
+        if player in game.players_discarded:
+            continue
+
+        total = sum(player.resources.values())
+        num_to_discard = total // 2
+
+        # Collect all cards
+        all_cards = []
+        for res_type, count in player.resources.items():
+            all_cards.extend([res_type] * count)
+
+        if all_cards and num_to_discard > 0:
+            cards_to_discard = random.sample(all_cards, min(num_to_discard, len(all_cards)))
+            discard_dict = {}
+            for res_type in set(cards_to_discard):
+                discard_dict[res_type] = cards_to_discard.count(res_type)
+            game.discard_cards(player, discard_dict)
+
+    # Clear discard state
+    game.waiting_for_discards = False
+    game.players_must_discard = []
+    game.players_discarded = set()
+
+
 def play_random_turn(game, player_id):
     """Random AI opponent"""
     player = game.players[player_id]
@@ -502,7 +532,10 @@ def play_random_turn(game, player_id):
         return True
 
     if game.can_roll_dice():
-        game.roll_dice()
+        result = game.roll_dice()
+        # Handle discards if 7 was rolled
+        if result and result[2] == 7 and game.waiting_for_discards:
+            _auto_discard_for_game(game)
         return True
 
     if game.can_trade_or_build():
@@ -534,6 +567,7 @@ def play_random_turn(game, player_id):
                 player.try_build_city(random.choice(locs))
             elif action_type == 'road':
                 player.try_build_road(random.choice(locs))
+                game.update_longest_road()
             elif action_type == 'dev':
                 player.try_buy_development_card(game.dev_deck)
             return True
