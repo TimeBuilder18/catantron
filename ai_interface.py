@@ -351,7 +351,9 @@ class AIGameEnvironment:
             self.game.players_discarded = set()
 
             # Smart robber placement - block opponent's best hex
-            best_tile = self._find_best_robber_tile(self.player_id)
+            # The current player rolled the 7, so they place the robber
+            current_player_idx = self.game.current_player_index
+            best_tile = self._find_best_robber_tile(current_player_idx)
             if best_tile:
                 self.game.move_robber_to_tile(best_tile)
             else:
