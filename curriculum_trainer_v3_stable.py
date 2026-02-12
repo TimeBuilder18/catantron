@@ -536,7 +536,7 @@ class CurriculumTrainerV3:
             if current_id == 0:
                 moves += 1
                 action, action_probs, vertex_probs, edge_probs, log_prob = self._get_action(obs)
-                action_id, vertex_id, edge_id = action
+                action_id, vertex_id, edge_id, trade_give, trade_get = action
 
                 episode_obs.append(obs['observation'].copy())
                 episode_action_probs.append(action_probs)
@@ -559,7 +559,7 @@ class CurriculumTrainerV3:
 
                 next_obs, reward, terminated, truncated, info = env.step(
                     action_id, vertex_id, edge_id,
-                    trade_give_idx=0, trade_get_idx=0
+                    trade_give_idx=trade_give, trade_get_idx=trade_get
                 )
 
                 # Track diagnostics
@@ -673,7 +673,7 @@ class CurriculumTrainerV3:
         """Get action from network with entropy-aware exploration
 
         Returns:
-            action: (action_id, vertex_id, edge_id)
+            action: (action_id, vertex_id, edge_id, trade_give, trade_get)
             action_probs: probability distribution over actions
             vertex_probs: probability distribution over vertices
             edge_probs: probability distribution over edges
@@ -685,13 +685,15 @@ class CurriculumTrainerV3:
             vertex_mask = torch.FloatTensor(obs['vertex_mask']).unsqueeze(0).to(self.device)
             edge_mask = torch.FloatTensor(obs['edge_mask']).unsqueeze(0).to(self.device)
 
-            action_probs, vertex_probs, edge_probs, _, _, _ = self.network.forward(
+            action_probs, vertex_probs, edge_probs, trade_give_probs, trade_get_probs, _ = self.network.forward(
                 observation, action_mask, vertex_mask, edge_mask
             )
 
             ap = action_probs.cpu().numpy()[0]
             vp = vertex_probs.cpu().numpy()[0]
             ep = edge_probs.cpu().numpy()[0]
+            tgp = trade_give_probs.cpu().numpy()[0]  # trade give probs
+            tgetp = trade_get_probs.cpu().numpy()[0]  # trade get probs
 
         def safe_probs(probs):
             probs = np.nan_to_num(probs, nan=0.0, posinf=0.0, neginf=0.0)
@@ -704,6 +706,8 @@ class CurriculumTrainerV3:
         ap = safe_probs(ap)
         vp = safe_probs(vp)
         ep = safe_probs(ep)
+        tgp = safe_probs(tgp)
+        tgetp = safe_probs(tgetp)
 
         # Adaptive exploration based on recent entropy health
         if len(self.entropy_history) > 10:
@@ -721,13 +725,15 @@ class CurriculumTrainerV3:
         action_id = np.random.choice(len(ap), p=ap)
         vertex_id = np.random.choice(len(vp), p=vp)
         edge_id = np.random.choice(len(ep), p=ep)
+        trade_give = np.random.choice(len(tgp), p=tgp)
+        trade_get = np.random.choice(len(tgetp), p=tgetp)
 
         # Store log probs for ALL heads (needed for proper PPO)
         action_log_prob = np.log(ap[action_id] + 1e-8)
         vertex_log_prob = np.log(vp[vertex_id] + 1e-8)
         edge_log_prob = np.log(ep[edge_id] + 1e-8)
 
-        return (action_id, vertex_id, edge_id), ap, vp, ep, (action_log_prob, vertex_log_prob, edge_log_prob)
+        return (action_id, vertex_id, edge_id, trade_give, trade_get), ap, vp, ep, (action_log_prob, vertex_log_prob, edge_log_prob)
 
     def train_step(self):
         """Single training step with proper PPO for ALL heads"""

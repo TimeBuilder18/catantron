@@ -479,7 +479,51 @@ class VisualAIEnvironment:
         return actions
 
 
-def _auto_discard_for_game(game):
+def _find_best_robber_tile(game, my_player_id):
+    """Find best tile to place robber - blocks opponent's best hex"""
+    from game_system import StructureType
+    pip_values = {2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 8: 5, 9: 4, 10: 3, 11: 2, 12: 1}
+
+    my_player = game.players[my_player_id]
+    current_robber_tile = game.robber.position
+
+    best_tile = None
+    best_score = -1
+
+    for tile in game.game_board.tiles:
+        if tile == current_robber_tile or tile.resource is None:
+            continue
+
+        pip_score = pip_values.get(tile.number, 0) if tile.number else 0
+        opponent_structures = 0
+        my_structures = 0
+
+        for vertex in tile.vertices:
+            if vertex.structure:
+                owner = vertex.structure.player
+                if owner == my_player:
+                    my_structures += 1
+                else:
+                    if vertex.structure.structure_type == StructureType.CITY:
+                        opponent_structures += 2
+                    else:
+                        opponent_structures += 1
+
+        if my_structures > 0 and opponent_structures == 0:
+            continue
+
+        score = pip_score * opponent_structures
+        if opponent_structures >= 2:
+            score += 2
+
+        if score > best_score:
+            best_score = score
+            best_tile = tile
+
+    return best_tile
+
+
+def _auto_discard_for_game(game, current_player_id=0):
     """Auto-discard for all players with 8+ cards when 7 is rolled"""
     if not game.waiting_for_discards:
         return
@@ -503,10 +547,20 @@ def _auto_discard_for_game(game):
                 discard_dict[res_type] = cards_to_discard.count(res_type)
             game.discard_cards(player, discard_dict)
 
-    # Clear discard state
+    # Clear discard state and move robber smartly
     game.waiting_for_discards = False
     game.players_must_discard = []
     game.players_discarded = set()
+
+    # Smart robber placement
+    best_tile = _find_best_robber_tile(game, current_player_id)
+    if best_tile:
+        game.move_robber_to_tile(best_tile)
+    else:
+        # Fallback to random
+        available = [t for t in game.game_board.tiles if t != game.robber.position and t.resource]
+        if available:
+            game.move_robber_to_tile(random.choice(available))
 
 
 def play_random_turn(game, player_id):
