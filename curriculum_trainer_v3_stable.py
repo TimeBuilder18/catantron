@@ -964,14 +964,19 @@ class CurriculumTrainerV3:
             # passive = never builds, agent should win 95%+ just by building anything
             # truly_random = 15% build chance, agent should dominate
             # random = 85% build chance, harder baseline
+            #
+            # NOTE: Win rate thresholds are LOWERED for longer games (8VP, 10VP)
+            # because higher VP games have more variance and opponent gets more chances.
+            # The key insight: if agent is IMPROVING VP (e.g., 3.5 -> 4.0 -> 4.5),
+            # it's learning even if WR is low. Let it advance to see if it can improve.
             min_wr_by_difficulty = {
                 'passive': 0.55,       # 55% WR vs passive (lowered further to allow progression)
-                'truly_random': 0.45,  # 45% WR vs truly random
-                'random': 0.30,        # 30% WR vs rule-based "random"
-                'very_weak': 0.22,     # 22% WR vs VeryWeak
-                'weak': 0.15,          # 15% WR vs Weak
-                'medium': 0.08,        # 8% WR vs Medium
-                'strong': 0.03,        # 3% WR vs Strong
+                'truly_random': 0.25,  # 25% WR vs truly random (lowered from 45% - too hard for 8VP+)
+                'random': 0.20,        # 20% WR vs rule-based "random" (lowered from 30%)
+                'very_weak': 0.15,     # 15% WR vs VeryWeak (lowered from 22%)
+                'weak': 0.10,          # 10% WR vs Weak (lowered from 15%)
+                'medium': 0.05,        # 5% WR vs Medium (lowered from 8%)
+                'strong': 0.02,        # 2% WR vs Strong (lowered from 3%)
             }
         else:
             # 4-player mode: 25% baseline, lower thresholds
@@ -1171,7 +1176,9 @@ class CurriculumTrainerV3:
                 self.replay_buffer.clear_old(keep_fraction=0.3)
 
                 # Boost entropy for new phase - explore new strategies against harder opponent
-                self.current_entropy_coef = self.max_entropy_coef  # Temporary high exploration
+                # Use moderate boost (not max) to avoid destabilizing learned policy too much
+                moderate_boost = min(self.current_entropy_coef * 2.0, self.max_entropy_coef)
+                self.current_entropy_coef = max(moderate_boost, 0.05)  # At least 0.05, at most max
                 self.entropy_history.clear()
 
                 current_phase += 1
