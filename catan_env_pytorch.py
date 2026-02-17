@@ -783,9 +783,10 @@ class CatanEnv(gym.Env):
             num_settlements = new_obs.get('my_settlements', 0)
 
             if self.num_players == 2:
-                # 1v1: Skip settlement bonus - focus on cities only
-                # Agent starts with 2 settlements, just needs to upgrade one
-                settlement_bonus = 0.0
+                # 1v1: Smaller bonus - settlements enable cities and expansion
+                settlement_bonus = 5.0
+                if num_settlements > 2:
+                    settlement_bonus += 2.0 * (num_settlements - 2)
             else:
                 # 4-player: Standard bonus
                 settlement_bonus = 8.0
@@ -799,9 +800,9 @@ class CatanEnv(gym.Env):
         # Roads don't give VP but are REQUIRED to build new settlements
         # In 1v1 early training (3VP), roads are a DISTRACTION - agent just needs cities
         if action_name == 'build_road' and step_info.get('success', False):
-            # Skip road bonus in 1v1 - focus on cities only
             if self.num_players == 2:
-                road_bonus = 0.0  # No bonus - don't distract from city building
+                # Small bonus - roads enable expansion and longest road
+                road_bonus = 2.0
             else:
                 num_roads = new_obs.get('my_roads', 0)
                 # Base road bonus - roads enable expansion
@@ -920,8 +921,8 @@ class CatanEnv(gym.Env):
             self._last_reward_breakdown = reward_breakdown
 
         # Clip reward to prevent extreme values that destabilize training
-        # Range allows for strong signals while preventing explosions
-        reward = np.clip(reward, -20.0, 20.0)
+        # Increased range to preserve signal from cities (100) and wins (50)
+        reward = np.clip(reward, -100.0, 100.0)
 
         return reward
 
