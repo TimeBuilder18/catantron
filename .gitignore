@@ -21,3 +21,6 @@ Thumbs.db
 
 # Game data (if needed)
 *.log
+
+# Model checkpoints (large binary files)
+models/*.pt

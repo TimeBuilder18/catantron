@@ -348,7 +348,10 @@ class PrioritizedReplayBuffer:
                                                    self.buffer[i].get('old_log_prob', 0.0)) for i in indices]),
                 'old_vertex_log_probs': np.array([self.buffer[i].get('old_vertex_log_prob', 0.0) for i in indices]),
                 'old_edge_log_probs': np.array([self.buffer[i].get('old_edge_log_prob', 0.0) for i in indices]),
-                # CRITICAL FIX: Include masks for proper PPO training
+                'trade_give_idx': np.array([self.buffer[i].get('trade_give_idx', 0) for i in indices]),
+                'trade_get_idx': np.array([self.buffer[i].get('trade_get_idx', 0) for i in indices]),
+                'old_trade_give_log_probs': np.array([self.buffer[i].get('old_trade_give_log_prob', 0.0) for i in indices]),
+                'old_trade_get_log_probs': np.array([self.buffer[i].get('old_trade_get_log_prob', 0.0) for i in indices]),
                 'action_masks': np.array([self.buffer[i].get('action_mask', np.ones(11)) for i in indices]),
                 'vertex_masks': np.array([self.buffer[i].get('vertex_mask', np.ones(54)) for i in indices]),
                 'edge_masks': np.array([self.buffer[i].get('edge_mask', np.ones(72)) for i in indices])
@@ -515,9 +518,11 @@ class CurriculumTrainerV3:
         episode_action_probs = []
         episode_vertex_probs = []
         episode_edge_probs = []
-        episode_action_idx = []  # NEW: Track action indices for proper PPO
+        episode_action_idx = []
         episode_vertex_idx = []
         episode_edge_idx = []
+        episode_trade_give_idx = []
+        episode_trade_get_idx = []
         episode_log_probs = []
         # CRITICAL FIX: Store masks for proper PPO training
         episode_action_masks = []
@@ -542,9 +547,11 @@ class CurriculumTrainerV3:
                 episode_action_probs.append(action_probs)
                 episode_vertex_probs.append(vertex_probs)
                 episode_edge_probs.append(edge_probs)
-                episode_action_idx.append(action_id)  # NEW: Store action index
+                episode_action_idx.append(action_id)
                 episode_vertex_idx.append(vertex_id)
                 episode_edge_idx.append(edge_id)
+                episode_trade_give_idx.append(trade_give)
+                episode_trade_get_idx.append(trade_get)
                 episode_log_probs.append(log_prob)
                 # CRITICAL FIX: Store masks for PPO training
                 episode_action_masks.append(obs['action_mask'].copy())
@@ -605,7 +612,12 @@ class CurriculumTrainerV3:
         # Collect experiences as list of dicts
         experiences = []
         for i in range(len(episode_obs)):
-            action_log_prob, vertex_log_prob, edge_log_prob = episode_log_probs[i]
+            log_probs = episode_log_probs[i]
+            action_log_prob = log_probs[0]
+            vertex_log_prob = log_probs[1]
+            edge_log_prob = log_probs[2]
+            trade_give_log_prob = log_probs[3] if len(log_probs) > 3 else 0.0
+            trade_get_log_prob = log_probs[4] if len(log_probs) > 4 else 0.0
             experiences.append({
                 'obs': episode_obs[i],
                 'probs': episode_action_probs[i],
@@ -613,12 +625,15 @@ class CurriculumTrainerV3:
                 'edge_probs': episode_edge_probs[i],
                 'vertex_idx': episode_vertex_idx[i],
                 'edge_idx': episode_edge_idx[i],
-                'action_idx': episode_action_idx[i],  # NEW: Store action index for proper PPO
+                'action_idx': episode_action_idx[i],
+                'trade_give_idx': episode_trade_give_idx[i],
+                'trade_get_idx': episode_trade_get_idx[i],
                 'reward': returns[i],
-                'old_action_log_prob': action_log_prob,   # Split log probs for all heads
+                'old_action_log_prob': action_log_prob,
                 'old_vertex_log_prob': vertex_log_prob,
                 'old_edge_log_prob': edge_log_prob,
-                # CRITICAL FIX: Store masks for proper PPO training
+                'old_trade_give_log_prob': trade_give_log_prob,
+                'old_trade_get_log_prob': trade_get_log_prob,
                 'action_mask': episode_action_masks[i],
                 'vertex_mask': episode_vertex_masks[i],
                 'edge_mask': episode_edge_masks[i]
@@ -732,8 +747,10 @@ class CurriculumTrainerV3:
         action_log_prob = np.log(ap[action_id] + 1e-8)
         vertex_log_prob = np.log(vp[vertex_id] + 1e-8)
         edge_log_prob = np.log(ep[edge_id] + 1e-8)
+        trade_give_log_prob = np.log(tgp[trade_give] + 1e-8)
+        trade_get_log_prob = np.log(tgetp[trade_get] + 1e-8)
 
-        return (action_id, vertex_id, edge_id, trade_give, trade_get), ap, vp, ep, (action_log_prob, vertex_log_prob, edge_log_prob)
+        return (action_id, vertex_id, edge_id, trade_give, trade_get), ap, vp, ep, (action_log_prob, vertex_log_prob, edge_log_prob, trade_give_log_prob, trade_get_log_prob)
 
     def train_step(self):
         """Single training step with proper PPO for ALL heads"""
@@ -754,6 +771,11 @@ class CurriculumTrainerV3:
         old_action_log_probs = torch.FloatTensor(batch['old_action_log_probs']).to(self.device)
         old_vertex_log_probs = torch.FloatTensor(batch['old_vertex_log_probs']).to(self.device)
         old_edge_log_probs = torch.FloatTensor(batch['old_edge_log_probs']).to(self.device)
+        # Trade indices and log probs
+        trade_give_idx = torch.LongTensor(batch['trade_give_idx']).to(self.device)
+        trade_get_idx = torch.LongTensor(batch['trade_get_idx']).to(self.device)
+        old_trade_give_log_probs = torch.FloatTensor(batch['old_trade_give_log_probs']).to(self.device)
+        old_trade_get_log_probs = torch.FloatTensor(batch['old_trade_get_log_probs']).to(self.device)
         # CRITICAL FIX: Get masks for proper PPO training
         action_masks = torch.FloatTensor(batch['action_masks']).to(self.device)
         vertex_masks = torch.FloatTensor(batch['vertex_masks']).to(self.device)
@@ -767,14 +789,18 @@ class CurriculumTrainerV3:
                     obs, target_action_probs, target_vertex_probs, target_edge_probs,
                     action_idx, vertex_idx, edge_idx, returns,
                     old_action_log_probs, old_vertex_log_probs, old_edge_log_probs,
-                    action_masks, vertex_masks, edge_masks
+                    action_masks, vertex_masks, edge_masks,
+                    trade_give_idx, trade_get_idx,
+                    old_trade_give_log_probs, old_trade_get_log_probs
                 )
         else:
             loss_dict = self._compute_loss(
                 obs, target_action_probs, target_vertex_probs, target_edge_probs,
                 action_idx, vertex_idx, edge_idx, returns,
                 old_action_log_probs, old_vertex_log_probs, old_edge_log_probs,
-                action_masks, vertex_masks, edge_masks
+                action_masks, vertex_masks, edge_masks,
+                trade_give_idx, trade_get_idx,
+                old_trade_give_log_probs, old_trade_get_log_probs
             )
 
         loss = loss_dict['total_loss']
@@ -811,17 +837,12 @@ class CurriculumTrainerV3:
     def _compute_loss(self, obs, target_action_probs, target_vertex_probs, target_edge_probs,
                        action_idx, vertex_idx, edge_idx, returns,
                        old_action_log_probs, old_vertex_log_probs, old_edge_log_probs,
-                       action_masks=None, vertex_masks=None, edge_masks=None):
-        """Compute loss with PROPER PPO for ALL heads.
-
-        Key fixes:
-        1. Use actual action indices (not weighted sum) for proper policy gradient
-        2. PPO clipping applied to ALL heads (action, vertex, edge)
-        3. Old log probs tracked for all heads
-        4. CRITICAL: Use action masks during forward pass so probabilities match gameplay
-        """
+                       action_masks=None, vertex_masks=None, edge_masks=None,
+                       trade_give_idx=None, trade_get_idx=None,
+                       old_trade_give_log_probs=None, old_trade_get_log_probs=None):
+        """Compute loss with PROPER PPO for ALL heads including trade heads."""
         # CRITICAL FIX: Pass masks to forward() so probabilities match what was used during gameplay
-        action_probs, vertex_probs, edge_probs, _, _, value = self.network.forward(
+        action_probs, vertex_probs, edge_probs, trade_give_probs, trade_get_probs, value = self.network.forward(
             obs, action_masks, vertex_masks, edge_masks
         )
         value = value.squeeze()
@@ -882,15 +903,34 @@ class CurriculumTrainerV3:
         # Approximate KL divergence for monitoring (action head)
         kl_div = 0.5 * ((action_ratio - 1) ** 2).mean()
 
+        # ========== TRADE POLICY LOSSES (PPO) ==========
+        trade_give_policy_loss = torch.tensor(0.0, device=obs.device)
+        trade_get_policy_loss = torch.tensor(0.0, device=obs.device)
+        if trade_give_idx is not None and old_trade_give_log_probs is not None:
+            trade_give_log_probs_all = torch.log(trade_give_probs + 1e-8)
+            trade_give_chosen = trade_give_log_probs_all.gather(1, trade_give_idx.unsqueeze(1)).squeeze(1)
+            tg_ratio = torch.exp(trade_give_chosen - old_trade_give_log_probs)
+            tg_surr1 = tg_ratio * advantages
+            tg_surr2 = torch.clamp(tg_ratio, 1 - clip_ratio, 1 + clip_ratio) * advantages
+            trade_give_policy_loss = -torch.min(tg_surr1, tg_surr2).mean()
+
+            trade_get_log_probs_all = torch.log(trade_get_probs + 1e-8)
+            trade_get_chosen = trade_get_log_probs_all.gather(1, trade_get_idx.unsqueeze(1)).squeeze(1)
+            tget_ratio = torch.exp(trade_get_chosen - old_trade_get_log_probs)
+            tget_surr1 = tget_ratio * advantages
+            tget_surr2 = torch.clamp(tget_ratio, 1 - clip_ratio, 1 + clip_ratio) * advantages
+            trade_get_policy_loss = -torch.min(tget_surr1, tget_surr2).mean()
+
         # ========== COMBINED LOSS ==========
-        # All heads now have proper PPO!
-        # Weight: action=1.0, vertex=0.5, edge=0.5 (edge more important now that mask is fixed)
+        # All heads now have proper PPO including trade heads!
         total_loss = (
             action_policy_loss
             + 0.5 * vertex_policy_loss
-            + 0.5 * edge_policy_loss  # Increased weight since edge learning is now working
+            + 0.5 * edge_policy_loss
+            + 0.3 * trade_give_policy_loss
+            + 0.3 * trade_get_policy_loss
             - self.current_entropy_coef * total_entropy
-            + self.current_entropy_coef * entropy_penalty_tensor  # Same scale as entropy bonus
+            + self.current_entropy_coef * entropy_penalty_tensor
             + self.value_weight * value_loss
             + self.adaptive_kl_coef * torch.clamp(kl_div - self.max_kl, min=0.0)
         )
@@ -1126,10 +1166,9 @@ class CurriculumTrainerV3:
                     print(f"    Recent WR: {np.mean(list(self.phase_wins)[-50:])*100:.1f}%")
                     print(f"    Recent VP: {np.mean(list(self.phase_vps)[-50:]):.1f}\n")
 
-                # Clear most old experiences to reduce distribution mismatch
-                # IMPORTANT: Use very aggressive clearing (0.05) to avoid buffer contamination
-                # Old experiences from easier opponents create conflicting training signals
-                self.replay_buffer.clear_old(keep_fraction=0.05)
+                # Clear old experiences but keep enough to prevent catastrophic forgetting
+                # 30% retention balances distribution mismatch vs. forgetting
+                self.replay_buffer.clear_old(keep_fraction=0.3)
 
                 # Boost entropy for new phase - explore new strategies against harder opponent
                 self.current_entropy_coef = self.max_entropy_coef  # Temporary high exploration

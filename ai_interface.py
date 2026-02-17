@@ -202,16 +202,15 @@ class AIGameEnvironment:
                     res[ResourceType.SHEEP] >= 1 and not self.game.dev_deck.is_empty()):
                     actions.append('buy_dev_card')
 
-                # FIX: Only allow bank trade if player actually CAN trade
-                # Need 4 of same type for 4:1, or 3 with generic port, or 2 with specific port
+                # Check if player can trade: 4:1 always, 3:1 with generic port, 2:1 with specific port
                 can_trade = False
+                player = self.game.players[self.game.current_player_index]
                 for resource_type in ResourceType:
                     count = res.get(resource_type, 0)
-                    # Check for 4:1 trade (always available)
-                    if count >= 4:
+                    ratio = self.game.game_board.get_best_trade_ratio(player, resource_type)
+                    if count >= ratio:
                         can_trade = True
                         break
-                    # TODO: Could also check for port access (3:1 or 2:1)
                 if can_trade:
                     actions.append('trade_with_bank')
 
