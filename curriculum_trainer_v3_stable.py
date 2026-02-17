@@ -964,14 +964,19 @@ class CurriculumTrainerV3:
             # passive = never builds, agent should win 95%+ just by building anything
             # truly_random = 15% build chance, agent should dominate
             # random = 85% build chance, harder baseline
+            #
+            # NOTE: Win rate thresholds are LOWERED for longer games (8VP, 10VP)
+            # because higher VP games have more variance and opponent gets more chances.
+            # The key insight: if agent is IMPROVING VP (e.g., 3.5 -> 4.0 -> 4.5),
+            # it's learning even if WR is low. Let it advance to see if it can improve.
             min_wr_by_difficulty = {
                 'passive': 0.55,       # 55% WR vs passive (lowered further to allow progression)
-                'truly_random': 0.45,  # 45% WR vs truly random
-                'random': 0.30,        # 30% WR vs rule-based "random"
-                'very_weak': 0.22,     # 22% WR vs VeryWeak
-                'weak': 0.15,          # 15% WR vs Weak
-                'medium': 0.08,        # 8% WR vs Medium
-                'strong': 0.03,        # 3% WR vs Strong
+                'truly_random': 0.25,  # 25% WR vs truly random (lowered from 45% - too hard for 8VP+)
+                'random': 0.20,        # 20% WR vs rule-based "random" (lowered from 30%)
+                'very_weak': 0.15,     # 15% WR vs VeryWeak (lowered from 22%)
+                'weak': 0.10,          # 10% WR vs Weak (lowered from 15%)
+                'medium': 0.05,        # 5% WR vs Medium (lowered from 8%)
+                'strong': 0.02,        # 2% WR vs Strong (lowered from 3%)
             }
         else:
             # 4-player mode: 25% baseline, lower thresholds
@@ -1016,18 +1021,20 @@ class CurriculumTrainerV3:
                 ('passive', None, 1.0, 4, 2.8, "1v1 Passive 4VP"),   # Build 2 things
                 ('passive', None, 1.0, 5, 3.2, "1v1 Passive 5VP"),   # Build 3 things
                 # Phase 1: Introduce truly_random (15% build chance)
+                # VP thresholds raised to ~60% of VP-to-win to ensure real learning
                 ('truly_random', 'passive', 0.5, 5, 3.0, "1v1 TrulyRandom/Passive"),
-                ('truly_random', None, 1.0, 6, 3.5, "1v1 TrulyRandom 6VP"),
-                ('truly_random', None, 1.0, 8, 4.0, "1v1 TrulyRandom 8VP"),
-                ('truly_random', None, 1.0, 10, 4.5, "1v1 TrulyRandom 10VP"),
+                ('truly_random', None, 1.0, 6, 3.8, "1v1 TrulyRandom 6VP"),    # 63% of 6VP
+                ('truly_random', None, 1.0, 8, 5.0, "1v1 TrulyRandom 8VP"),    # 62.5% of 8VP
+                ('truly_random', None, 1.0, 10, 6.0, "1v1 TrulyRandom 10VP"),  # 60% of 10VP
                 # Phase 2: Transition to rule-based random (85% build)
-                ('random', 'truly_random', 0.5, 10, 3.5, "1v1 Random/TrulyRandom"),
-                ('random', None, 1.0, 10, 3.0, "1v1 Random 10VP"),
+                ('random', 'truly_random', 0.5, 10, 5.0, "1v1 Random/TrulyRandom"),  # 50% VP
+                ('random', None, 1.0, 10, 5.5, "1v1 Random 10VP"),                   # 55% VP
                 # Phase 3: Opponent difficulty progression
-                ('very_weak', 'random', 0.5, 10, 2.8, "1v1 VeryWeak/Random"),
-                ('weak', 'very_weak', 0.5, 10, 2.5, "1v1 Weak/VeryWeak"),
-                ('medium', 'weak', 0.5, 10, 2.2, "1v1 Medium/Weak"),
-                ('strong', 'medium', 0.5, 10, 2.0, "1v1 Strong/Medium"),
+                # VP thresholds decrease as opponents get harder (they steal VP)
+                ('very_weak', 'random', 0.5, 10, 5.0, "1v1 VeryWeak/Random"),
+                ('weak', 'very_weak', 0.5, 10, 4.5, "1v1 Weak/VeryWeak"),
+                ('medium', 'weak', 0.5, 10, 4.0, "1v1 Medium/Weak"),
+                ('strong', 'medium', 0.5, 10, 3.5, "1v1 Strong/Medium"),
                 ('strong', None, 1.0, 10, 999, "1v1 Strong FINAL"),
             ]
         else:
@@ -1171,7 +1178,9 @@ class CurriculumTrainerV3:
                 self.replay_buffer.clear_old(keep_fraction=0.3)
 
                 # Boost entropy for new phase - explore new strategies against harder opponent
-                self.current_entropy_coef = self.max_entropy_coef  # Temporary high exploration
+                # Use moderate boost (not max) to avoid destabilizing learned policy too much
+                moderate_boost = min(self.current_entropy_coef * 2.0, self.max_entropy_coef)
+                self.current_entropy_coef = max(moderate_boost, 0.05)  # At least 0.05, at most max
                 self.entropy_history.clear()
 
                 current_phase += 1
@@ -1271,26 +1280,28 @@ if __name__ == "__main__":
                 ('passive', None, 1.0, 4, 2.8, "1v1 Passive 4VP"),
                 ('passive', None, 1.0, 5, 3.2, "1v1 Passive 5VP"),
                 # Phase 3-6: Introduce truly_random (15% build chance)
+                # VP thresholds raised to ~60% of VP-to-win to ensure real learning
                 ('truly_random', 'passive', 0.5, 5, 3.0, "1v1 TrulyRandom/Passive"),
-                ('truly_random', None, 1.0, 6, 3.5, "1v1 TrulyRandom 6VP"),
-                ('truly_random', None, 1.0, 8, 4.0, "1v1 TrulyRandom 8VP"),
-                ('truly_random', None, 1.0, 10, 4.5, "1v1 TrulyRandom 10VP"),
+                ('truly_random', None, 1.0, 6, 3.8, "1v1 TrulyRandom 6VP"),    # 63% of 6VP
+                ('truly_random', None, 1.0, 8, 5.0, "1v1 TrulyRandom 8VP"),    # 62.5% of 8VP (was 4.0)
+                ('truly_random', None, 1.0, 10, 6.0, "1v1 TrulyRandom 10VP"),  # 60% of 10VP (was 4.5)
                 # Phase 7-8: Transition to rule-based random (85% build)
-                ('random', 'truly_random', 0.5, 10, 3.5, "1v1 Random/TrulyRandom"),
-                ('random', None, 1.0, 10, 3.0, "1v1 Random 10VP"),
+                ('random', 'truly_random', 0.5, 10, 5.0, "1v1 Random/TrulyRandom"),  # 50% VP (was 3.5)
+                ('random', None, 1.0, 10, 5.5, "1v1 Random 10VP"),                   # 55% VP (was 3.0)
                 # Phase 9-13: Opponent difficulty progression
-                ('very_weak', 'random', 0.5, 10, 2.8, "1v1 VeryWeak/Random"),
-                ('weak', 'very_weak', 0.5, 10, 2.5, "1v1 Weak/VeryWeak"),
-                ('medium', 'weak', 0.5, 10, 2.2, "1v1 Medium/Weak"),
-                ('strong', 'medium', 0.5, 10, 2.0, "1v1 Strong/Medium"),
+                # Lower VP thresholds as opponents get harder (they steal VP too)
+                ('very_weak', 'random', 0.5, 10, 5.0, "1v1 VeryWeak/Random"),        # (was 2.8)
+                ('weak', 'very_weak', 0.5, 10, 4.5, "1v1 Weak/VeryWeak"),            # (was 2.5)
+                ('medium', 'weak', 0.5, 10, 4.0, "1v1 Medium/Weak"),                 # (was 2.2)
+                ('strong', 'medium', 0.5, 10, 3.5, "1v1 Strong/Medium"),             # (was 2.0)
                 ('strong', None, 1.0, 10, 999, "1v1 Strong FINAL"),
             ]
             print("\n1v1 OPTIMIZED Curriculum Phases (v3):")
             print("-" * 70)
             print("  Phase 0-2: Learn to build vs Passive (never builds)")
-            print("  Phase 3-6: TrulyRandom opponent (15% build chance)")
-            print("  Phase 7-8: Rule-based Random (85% build chance)")
-            print("  Phase 9-13: Difficulty progression (VeryWeak -> Strong)")
+            print("  Phase 3-6: TrulyRandom opponent (VP thresh ~60% of win)")
+            print("  Phase 7-8: Rule-based Random (VP thresh ~50-55%)")
+            print("  Phase 9-13: Difficulty progression (VP thresh decreases)")
             print("-" * 70)
         else:
             phases = [
