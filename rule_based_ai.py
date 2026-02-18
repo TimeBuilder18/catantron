@@ -23,35 +23,54 @@ DICE_PIPS = {
 }
 
 
-def score_vertex(vertex, game_board=None, player=None, consider_diversity=True):
+def score_vertex(vertex, game_board=None, player=None, consider_diversity=True,
+                 consider_expansion=True, existing_settlement=None):
     """
     Score a vertex for settlement placement.
-    Higher score = better location.
 
-    Factors:
-    - Pip count (probability of getting resources)
-    - Resource diversity (different resources are better)
-    - Port access (bonus for port locations)
+    Args:
+        vertex: The vertex to score
+        game_board: Optional GameBoard for expansion scoring
+        player: Optional player (unused, for future port ownership checks)
+        consider_diversity: Include resource diversity bonus
+        consider_expansion: Include expansion potential scoring
+        existing_settlement: Vertex of player's first settlement (for 2nd placement gap-filling)
+
+    Returns:
+        float: Higher = better placement location
     """
     if not vertex.adjacent_tiles:
         return 0
 
+    # === 1. PIP COUNT ===
     pip_score = 0
-    resources = set()
+    resources = {}  # resource_type -> pip_contribution
 
     for tile in vertex.adjacent_tiles:
         if tile.resource and tile.resource != "desert" and tile.number:
-            # Add pip value
-            pip_score += DICE_PIPS.get(tile.number, 0)
-            # Track resource type
+            pips = DICE_PIPS.get(tile.number, 0)
+            pip_score += pips
             resource_type = tile.get_resource_type()
             if resource_type:
-                resources.add(resource_type)
+                resources[resource_type] = resources.get(resource_type, 0) + pips
 
-    # Diversity bonus: more unique resources = better
-    diversity_bonus = len(resources) * 2 if consider_diversity else 0
+    # === 2. RESOURCE DIVERSITY ===
+    diversity_bonus = 0
+    if consider_diversity:
+        unique_resources = len(resources)
+        diversity_bonus = unique_resources * 3  # 3 pts per unique resource type
 
-    # High-value resources bonus (ore and wheat for cities)
+        # Penalty for doubling up on the same resource (diminishing returns)
+        for res_type, pip_contrib in resources.items():
+            # If a resource has >5 pips worth of contribution, it's likely doubled up
+            tiles_with_resource = sum(
+                1 for tile in vertex.adjacent_tiles
+                if tile.resource and tile.get_resource_type() == res_type
+            )
+            if tiles_with_resource > 1:
+                diversity_bonus -= 2  # Penalty for duplicate resource type
+
+    # === 3. HIGH-VALUE RESOURCES BONUS (ore and wheat for cities) ===
     value_bonus = 0
     for tile in vertex.adjacent_tiles:
         if tile.resource == "mountain":  # Ore
@@ -59,7 +78,103 @@ def score_vertex(vertex, game_board=None, player=None, consider_diversity=True):
         elif tile.resource == "field":  # Wheat
             value_bonus += 1
 
-    return pip_score + diversity_bonus + value_bonus
+    # === 4. GAP-FILLING BONUS (for 2nd settlement placement) ===
+    # In 1v1, your second settlement should complement your first:
+    # - Cover resources you don't have yet
+    # - Avoid doubling up on what you already produce
+    gap_bonus = 0
+    if existing_settlement is not None and consider_diversity:
+        # Get resources already covered by first settlement
+        existing_resources = {}
+        for tile in existing_settlement.adjacent_tiles:
+            if tile.resource and tile.resource != "desert" and tile.number:
+                rt = tile.get_resource_type()
+                if rt:
+                    existing_resources[rt] = existing_resources.get(rt, 0) + DICE_PIPS.get(tile.number, 0)
+
+        # Bonus for each new resource type not covered by existing settlement
+        for res_type in resources:
+            if res_type not in existing_resources:
+                gap_bonus += 4  # Strong bonus for filling a gap
+            else:
+                gap_bonus -= 1  # Small penalty for overlap
+
+    # === 5. EXPANSION POTENTIAL ===
+    # How many good future settlement spots are reachable within 2 roads?
+    expansion_bonus = 0
+    if consider_expansion and game_board is not None:
+        expansion_bonus = _score_expansion_potential(vertex, game_board, depth=2)
+
+    return pip_score + diversity_bonus + value_bonus + gap_bonus + expansion_bonus
+
+
+def _score_expansion_potential(vertex, game_board, depth=2):
+    """
+    Score the expansion potential from a given vertex.
+
+    Looks 'depth' roads away and scores reachable vertices that:
+    - Are not already occupied
+    - Don't violate the distance rule currently
+    - Have good pip counts themselves
+
+    In 1v1, we discount future spots heavily because the opponent
+    will try to block corridors.
+
+    Returns: expansion score (0-10 range typically)
+    """
+    FUTURE_DISCOUNT = 0.25  # Future spots are uncertain - don't overvalue
+
+    visited_vertices = {vertex}
+    frontier = {vertex}
+    expansion_score = 0
+
+    for road_step in range(depth):
+        next_frontier = set()
+        discount = FUTURE_DISCOUNT ** (road_step + 1)
+
+        for v in frontier:
+            # Get edges connected to this vertex
+            connected_edges = []
+            for edge in game_board.edges:
+                if edge.vertex1 == v or edge.vertex2 == v:
+                    connected_edges.append(edge)
+
+            for edge in connected_edges:
+                # Get the other vertex on this edge
+                other = edge.vertex1 if edge.vertex2 == v else edge.vertex2
+
+                if other in visited_vertices:
+                    continue
+                visited_vertices.add(other)
+                next_frontier.add(other)
+
+                # Can this vertex ever become a settlement?
+                if other.structure is not None:
+                    continue  # Already occupied
+
+                # Check distance rule (no adjacent structures)
+                too_close = any(
+                    adj.structure is not None
+                    for adj in other.adjacent_vertices
+                )
+                if too_close:
+                    continue  # Too close to existing structure
+
+                # Score this future spot
+                future_pip = sum(
+                    DICE_PIPS.get(tile.number, 0)
+                    for tile in other.adjacent_tiles
+                    if tile.resource and tile.resource != "desert" and tile.number
+                )
+
+                # Only count spots worth settling on (avoid dead spots)
+                if future_pip >= 3:
+                    expansion_score += future_pip * discount
+
+        frontier = next_frontier
+
+    # Normalize to reasonable range
+    return min(expansion_score, 8.0)
 
 
 def score_edge(edge, player, game):
@@ -150,7 +265,8 @@ class RuleBasedAI:
             if self._can_afford_settlement(resources):
                 vertices = game.get_buildable_vertices_for_settlements()
                 if vertices:
-                    vertex = self._choose_best_vertex(vertices)
+                    vertex = self._choose_best_vertex(vertices, game=game, player=player,
+                                                       game_board=game.game_board)
                     success, msg = player.try_build_settlement(vertex, ignore_road_rule=False)
                     if success:
                         #print(f"[RULE AI] Player {player_id+1} built a settlement!")
@@ -206,7 +322,20 @@ class RuleBasedAI:
                               e.vertex2 == game.last_settlement_vertex)]
 
                 if valid_edges:
-                    edge = random.choice(valid_edges)
+                    # For medium/strong: pick road leading to best expansion vertex
+                    if self.difficulty in ('medium', 'strong'):
+                        last_v = game.last_settlement_vertex
+
+                        def score_initial_road(edge):
+                            other = edge.vertex1 if edge.vertex2 == last_v else edge.vertex2
+                            return score_vertex(other, consider_diversity=True,
+                                                consider_expansion=(self.difficulty == 'strong'),
+                                                game_board=game.game_board)
+
+                        valid_edges.sort(key=score_initial_road, reverse=True)
+                        edge = valid_edges[0] if self.difficulty == 'strong' else random.choice(valid_edges[:min(2, len(valid_edges))])
+                    else:
+                        edge = random.choice(valid_edges)
                     success, msg = game.try_place_initial_road(edge, player)
                     #print(f"[RULE AI DEBUG] Place road result: {success}, {msg}")
                     if success:
@@ -234,7 +363,8 @@ class RuleBasedAI:
             #print(f"[RULE AI DEBUG] Found {len(valid_vertices)} valid settlement positions")
 
             if valid_vertices:
-                vertex = self._choose_best_vertex(valid_vertices)
+                vertex = self._choose_best_vertex(valid_vertices, game=game, player=player,
+                                                   game_board=game.game_board)
                 success, msg = game.try_place_initial_settlement(vertex, player)
                 #print(f"[RULE AI DEBUG] Place settlement result: {success}, {msg}")
                 if success:
@@ -246,30 +376,47 @@ class RuleBasedAI:
 
         return False
 
-    def _choose_best_vertex(self, vertices):
+    def _choose_best_vertex(self, vertices, game=None, player=None, game_board=None):
         """Choose the best vertex based on difficulty level."""
+        # Detect if this is 2nd settlement placement
+        existing_settlement = None
+        if player is not None and hasattr(player, 'settlements') and len(player.settlements) == 1:
+            existing_settlement = player.settlements[0].position
+
         if self.difficulty == 'weak':
             # Weak: Random choice
             return random.choice(vertices)
+
         elif self.difficulty == 'very_weak':
-            # Very Weak: Score by pip count, but pick randomly from top 5
-            # This is a bridge between random and weak - slightly smarter than random
-            scored = [(v, score_vertex(v, consider_diversity=False)) for v in vertices]
+            # Very Weak: Pip only, no diversity, no expansion, pick from top 5
+            scored = [(v, score_vertex(v, consider_diversity=False, consider_expansion=False))
+                      for v in vertices]
             scored.sort(key=lambda x: x[1], reverse=True)
             top_n = min(5, len(scored))
             return random.choice([s[0] for s in scored[:top_n]])
+
         elif self.difficulty == 'medium':
-            # Medium: Score by pip count only
-            scored = [(v, score_vertex(v, consider_diversity=False)) for v in vertices]
+            # Medium: Pip + diversity, no expansion, pick from top 3
+            scored = [(v, score_vertex(
+                v,
+                consider_diversity=True,
+                consider_expansion=False,
+                existing_settlement=existing_settlement
+            )) for v in vertices]
             scored.sort(key=lambda x: x[1], reverse=True)
-            # Add some randomness - pick from top 3
             top_n = min(3, len(scored))
             return random.choice([s[0] for s in scored[:top_n]])
-        else:
-            # Strong: Score by pip count + diversity + value
-            scored = [(v, score_vertex(v, consider_diversity=True)) for v in vertices]
+
+        else:  # strong
+            # Full scoring: pip + diversity + gap-filling + expansion
+            scored = [(v, score_vertex(
+                v,
+                game_board=game_board,
+                consider_diversity=True,
+                consider_expansion=True,
+                existing_settlement=existing_settlement
+            )) for v in vertices]
             scored.sort(key=lambda x: x[1], reverse=True)
-            # Pick the best one
             return scored[0][0]
 
     def _choose_best_edge(self, edges, player, game):
