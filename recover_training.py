@@ -16,6 +16,7 @@ import os
 import argparse
 
 from network_wrapper import NetworkWrapper
+from network_gpu import TOTAL_OBS_DIM
 from curriculum_trainer_v3_stable import CurriculumTrainerV3
 
 
@@ -33,7 +34,7 @@ def heal_policy_entropy(network, device, temperature=2.0, iterations=100):
 
     # Sample random observations
     batch_size = 64
-    obs = torch.randn(batch_size, 121).to(device)  # Random obs
+    obs = torch.randn(batch_size, TOTAL_OBS_DIM).to(device)  # Random obs
 
     # Get current policy entropy
     with torch.no_grad():
@@ -55,7 +56,7 @@ def heal_policy_entropy(network, device, temperature=2.0, iterations=100):
     optimizer = torch.optim.Adam(network.parameters(), lr=1e-4)
 
     for i in range(iterations):
-        obs = torch.randn(batch_size, 121).to(device)
+        obs = torch.randn(batch_size, TOTAL_OBS_DIM).to(device)
 
         # Forward with temperature
         action_probs, vertex_probs, edge_probs, _, _, _ = network.forward(obs)
@@ -82,7 +83,7 @@ def heal_policy_entropy(network, device, temperature=2.0, iterations=100):
     # Check final entropy
     network.eval()
     with torch.no_grad():
-        obs = torch.randn(batch_size, 121).to(device)
+        obs = torch.randn(batch_size, TOTAL_OBS_DIM).to(device)
         action_probs, _, _, _, _, _ = network.forward(obs)
         log_probs = torch.log(action_probs + 1e-8)
         final_entropy = -(action_probs * log_probs).sum(dim=1).mean()
