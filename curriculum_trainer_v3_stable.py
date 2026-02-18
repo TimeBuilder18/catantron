@@ -27,6 +27,7 @@ from simplified_reward_wrapper import SimplifiedRewardWrapper
 from pbrs_fixed_reward_wrapper import PBRSFixedRewardWrapper
 from network_wrapper import NetworkWrapper
 from game_system import ResourceType
+from catanatron_opponent import play_weighted_random_turn
 
 
 def get_device():
@@ -282,6 +283,8 @@ def play_opponent_turn(game, player_id, mix_prob, primary_ai='medium', secondary
         return play_passive_turn(game, player_id)
     elif chosen_ai == 'truly_random':
         return play_truly_random_turn(game, player_id)
+    elif chosen_ai == 'weighted_random':
+        return play_weighted_random_turn(game, player_id)
     elif chosen_ai == 'random':
         return play_random_turn(game, player_id)
     else:
@@ -972,6 +975,7 @@ class CurriculumTrainerV3:
             min_wr_by_difficulty = {
                 'passive': 0.55,       # 55% WR vs passive (lowered further to allow progression)
                 'truly_random': 0.25,  # 25% WR vs truly random (lowered from 45% - too hard for 8VP+)
+                'weighted_random': 0.22,  # 22% WR vs weighted random (between truly_random and random)
                 'random': 0.20,        # 20% WR vs rule-based "random" (lowered from 30%)
                 'very_weak': 0.15,     # 15% WR vs VeryWeak (lowered from 22%)
                 'weak': 0.10,          # 10% WR vs Weak (lowered from 15%)
@@ -1289,9 +1293,12 @@ if __name__ == "__main__":
                 ('truly_random', None, 1.0, 8, 4.5, "1v1 TrulyRandom 8VP"),    # 56% of 8VP
                 ('truly_random', None, 1.0, 9, 5.0, "1v1 TrulyRandom 9VP"),    # 55% of 9VP
                 ('truly_random', None, 1.0, 10, 5.5, "1v1 TrulyRandom 10VP"),  # 55% of 10VP
-                # Phase 7-8: Transition to rule-based random (85% build)
-                ('random', 'truly_random', 0.5, 10, 5.0, "1v1 Random/TrulyRandom"),  # 50% VP (was 3.5)
-                ('random', None, 1.0, 10, 5.5, "1v1 Random 10VP"),                   # 55% VP (was 3.0)
+                # WeightedRandom bridge phase (catanatron-style weighted actions)
+                ('weighted_random', 'truly_random', 0.5, 10, 5.2, "1v1 WeightedRandom/TrulyRandom"),
+                ('weighted_random', None, 1.0, 10, 5.5, "1v1 WeightedRandom 10VP"),
+                # Transition to rule-based random (85% build)
+                ('random', 'weighted_random', 0.5, 10, 5.0, "1v1 Random/WeightedRandom"),
+                ('random', None, 1.0, 10, 5.5, "1v1 Random 10VP"),
                 # Phase 9-13: Opponent difficulty progression
                 # Lower VP thresholds as opponents get harder (they steal VP too)
                 ('very_weak', 'random', 0.5, 10, 5.0, "1v1 VeryWeak/Random"),        # (was 2.8)
@@ -1304,8 +1311,9 @@ if __name__ == "__main__":
             print("-" * 70)
             print("  Phase 0-2: Learn to build vs Passive (never builds)")
             print("  Phase 3-8: TrulyRandom opponent (6VP->7VP->8VP->9VP->10VP)")
-            print("  Phase 9-10: Rule-based Random (VP thresh ~50-55%)")
-            print("  Phase 11-15: Difficulty progression (VP thresh decreases)")
+            print("  Phase 9-10: WeightedRandom bridge (catanatron-style weighted actions)")
+            print("  Phase 11-12: Rule-based Random (VP thresh ~50-55%)")
+            print("  Phase 13-17: Difficulty progression (VP thresh decreases)")
             print("-" * 70)
         else:
             phases = [
