@@ -17,7 +17,9 @@ class CatanPolicy(nn.Module):
 
         print(f" Using device: {self.device}")
 
-        self.fc1 = nn.Linear(121, 768)
+        # Input size: 121 base features + 306 positional features = 427
+        # Positional features: 54 my_settlements + 54 my_cities + 54 opp_buildings + 72 my_roads + 72 opp_roads
+        self.fc1 = nn.Linear(427, 768)
         self.fc2 = nn.Linear(768, 768)
         self.fc3 = nn.Linear(768, 512)
         self.fc4 = nn.Linear(512, 256)

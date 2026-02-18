@@ -263,6 +263,45 @@ class CatanEnv(gym.Env):
                 port_type_encoding.get(port_type, 0.0),
                 1.0 if self._player_has_port_access(vx, vy) else 0.0
             ])
+
+        # === POSITIONAL FEATURES (critical for strategic play) ===
+        # These tell the model WHERE buildings are, not just HOW MANY
+        all_vertices = self.game_env.game.game_board.vertices
+        all_edges = self.game_env.game.game_board.edges
+        player = self.game_env.game.players[self.player_id]
+
+        # My settlement positions (54 binary features)
+        my_settlement_set = set(player.settlements)
+        for vertex in all_vertices:
+            features.append(1.0 if vertex in my_settlement_set else 0.0)
+
+        # My city positions (54 binary features)
+        my_city_set = set(player.cities)
+        for vertex in all_vertices:
+            features.append(1.0 if vertex in my_city_set else 0.0)
+
+        # Opponent building positions (54 binary features - any opponent)
+        opp_buildings = set()
+        for i, p in enumerate(self.game_env.game.players):
+            if i != self.player_id:
+                opp_buildings.update(p.settlements)
+                opp_buildings.update(p.cities)
+        for vertex in all_vertices:
+            features.append(1.0 if vertex in opp_buildings else 0.0)
+
+        # My road positions (72 binary features)
+        my_road_set = set(player.roads)
+        for edge in all_edges:
+            features.append(1.0 if edge in my_road_set else 0.0)
+
+        # Opponent road positions (72 binary features)
+        opp_roads = set()
+        for i, p in enumerate(self.game_env.game.players):
+            if i != self.player_id:
+                opp_roads.update(p.roads)
+        for edge in all_edges:
+            features.append(1.0 if edge in opp_roads else 0.0)
+
         legal_actions = raw_obs['legal_actions']
         action_mask = np.zeros(11, dtype=np.int8)
         if self.game_env.game.is_initial_placement_phase():
