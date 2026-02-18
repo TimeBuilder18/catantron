@@ -791,7 +791,56 @@ class CatanEnv(gym.Env):
                 # 3. Ore/wheat access (critical for cities)
                 city_resource_reward = (ore_pips + wheat_pips) * 0.2  # Up to ~3.0
 
-                placement_reward = pip_reward + diversity_reward + city_resource_reward
+                # 4. Expansion potential - score reachable future vertices (2 roads away)
+                expansion_score = 0
+                FUTURE_DISCOUNT = 0.25
+                frontier = {vertex}
+                visited = {vertex}
+                game_board = self.game_env.game.game_board
+
+                for road_step in range(2):
+                    discount = FUTURE_DISCOUNT ** (road_step + 1)
+                    next_frontier = set()
+                    for v in frontier:
+                        # Find connected edges
+                        for edge in game_board.edges:
+                            if edge.vertex1 == v or edge.vertex2 == v:
+                                other = edge.vertex1 if edge.vertex2 == v else edge.vertex2
+                                if other in visited:
+                                    continue
+                                visited.add(other)
+                                next_frontier.add(other)
+                                if other.structure is not None:
+                                    continue
+                                too_close = any(adj.structure is not None for adj in other.adjacent_vertices)
+                                if too_close:
+                                    continue
+                                future_pip = sum(
+                                    pip_count(tile.number)
+                                    for tile in other.adjacent_tiles
+                                    if hasattr(tile, 'number') and tile.number and
+                                    hasattr(tile, 'resource') and tile.resource and tile.resource != 'desert'
+                                )
+                                if future_pip >= 3:
+                                    expansion_score += future_pip * discount
+                    frontier = next_frontier
+
+                expansion_reward = min(expansion_score, 8.0) * 0.2  # Scale to ~0-1.6 range
+
+                # 5. Gap-filling reward for 2nd settlement
+                gap_reward = 0.0
+                if len(player.settlements) == 2:
+                    # Check what resources first settlement covers
+                    first_settlement = player.settlements[0]
+                    first_resources = set()
+                    for tile in first_settlement.position.adjacent_tiles:
+                        if hasattr(tile, 'resource') and tile.resource and tile.resource != 'desert':
+                            first_resources.add(tile.resource)
+                    # Bonus for covering new resources with second settlement
+                    new_resources = resources_accessed - first_resources
+                    gap_reward = len(new_resources) * 1.5
+
+                placement_reward = pip_reward + diversity_reward + city_resource_reward + expansion_reward + gap_reward
                 reward += placement_reward
                 reward_breakdown['placement_quality'] = placement_reward
 

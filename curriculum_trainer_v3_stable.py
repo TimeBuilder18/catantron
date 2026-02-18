@@ -28,6 +28,7 @@ from pbrs_fixed_reward_wrapper import PBRSFixedRewardWrapper
 from network_wrapper import NetworkWrapper
 from game_system import ResourceType
 from catanatron_opponent import play_weighted_random_turn
+from rule_based_ai import score_vertex
 
 
 def get_device():
@@ -71,17 +72,18 @@ def play_passive_turn(game, player_id):
                         (e.vertex1 == game.last_settlement_vertex or
                          e.vertex2 == game.last_settlement_vertex)]
                 if valid:
+                    # Random road for passive (doesn't matter, never builds)
                     game.try_place_initial_road(random.choice(valid), player)
         else:
             vertices = game.game_board.vertices
             valid = [v for v in vertices if v.structure is None and
                     not any(adj.structure for adj in v.adjacent_vertices)]
             if valid:
-                # Pick by pip count (higher = better production)
-                valid.sort(key=lambda v: sum(
-                    _pip_count(t.number) for t in v.adjacent_tiles
-                    if hasattr(t, 'number') and t.number), reverse=True)
-                game.try_place_initial_settlement(valid[0], player)
+                # Pip only scoring for passive (never builds anyway)
+                scored = [(v, score_vertex(v, consider_diversity=False, consider_expansion=False))
+                          for v in valid]
+                scored.sort(key=lambda x: x[1], reverse=True)
+                game.try_place_initial_settlement(scored[0][0], player)
         return True
 
     # Just roll and end - never build
@@ -117,17 +119,20 @@ def play_truly_random_turn(game, player_id):
                         (e.vertex1 == game.last_settlement_vertex or
                          e.vertex2 == game.last_settlement_vertex)]
                 if valid:
+                    # Random road selection (keep truly_random weak)
                     game.try_place_initial_road(random.choice(valid), player)
         else:
             vertices = game.game_board.vertices
             valid = [v for v in vertices if v.structure is None and
                     not any(adj.structure for adj in v.adjacent_vertices)]
             if valid:
-                # Pick by pip count (higher = better production)
-                valid.sort(key=lambda v: sum(
-                    _pip_count(t.number) for t in v.adjacent_tiles
-                    if hasattr(t, 'number') and t.number), reverse=True)
-                game.try_place_initial_settlement(valid[0], player)
+                # Pip only scoring, no expansion (keep truly_random weak)
+                # Pick randomly from top 3 to add variance
+                scored = [(v, score_vertex(v, consider_diversity=False, consider_expansion=False))
+                          for v in valid]
+                scored.sort(key=lambda x: x[1], reverse=True)
+                top3 = scored[:min(3, len(scored))]
+                game.try_place_initial_settlement(random.choice(top3)[0], player)
         return True
 
     if game.can_roll_dice():
@@ -186,23 +191,40 @@ def play_random_turn(game, player_id):
     if game.is_initial_placement_phase():
         if game.waiting_for_road:
             if game.last_settlement_vertex:
+                last_v = game.last_settlement_vertex
                 edges = game.game_board.edges
                 valid = [e for e in edges
                         if e.structure is None and
-                        (e.vertex1 == game.last_settlement_vertex or
-                         e.vertex2 == game.last_settlement_vertex)]
+                        (e.vertex1 == last_v or e.vertex2 == last_v)]
                 if valid:
-                    game.try_place_initial_road(random.choice(valid), player)
+                    # Smart road placement: pick edge leading to best expansion vertex
+                    def score_initial_road(edge):
+                        other = edge.vertex1 if edge.vertex2 == last_v else edge.vertex2
+                        return score_vertex(other, consider_diversity=True,
+                                            consider_expansion=True,
+                                            game_board=game.game_board)
+                    valid.sort(key=score_initial_road, reverse=True)
+                    game.try_place_initial_road(valid[0], player)
         else:
             vertices = game.game_board.vertices
             valid = [v for v in vertices if v.structure is None and
                     not any(adj.structure for adj in v.adjacent_vertices)]
             if valid:
-                # Pick by pip count (higher = better production)
-                valid.sort(key=lambda v: sum(
-                    _pip_count(t.number) for t in v.adjacent_tiles
-                    if hasattr(t, 'number') and t.number), reverse=True)
-                game.try_place_initial_settlement(valid[0], player)
+                # Detect if this is 2nd placement
+                existing_settlement = None
+                if len(player.settlements) == 1:
+                    existing_settlement = player.settlements[0].position
+
+                # Full scoring: pip + diversity + expansion + gap-filling
+                scored = [(v, score_vertex(
+                    v,
+                    game_board=game.game_board,
+                    consider_diversity=True,
+                    consider_expansion=True,
+                    existing_settlement=existing_settlement
+                )) for v in valid]
+                scored.sort(key=lambda x: x[1], reverse=True)
+                game.try_place_initial_settlement(scored[0][0], player)
         return True
 
     if game.can_roll_dice():
