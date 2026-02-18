@@ -79,11 +79,8 @@ def play_passive_turn(game, player_id):
             valid = [v for v in vertices if v.structure is None and
                     not any(adj.structure for adj in v.adjacent_vertices)]
             if valid:
-                # Pip only scoring for passive (never builds anyway)
-                scored = [(v, score_vertex(v, consider_diversity=False, consider_expansion=False))
-                          for v in valid]
-                scored.sort(key=lambda x: x[1], reverse=True)
-                game.try_place_initial_settlement(scored[0][0], player)
+                # Truly random for passive - keeps opponent weak
+                game.try_place_initial_settlement(random.choice(valid), player)
         return True
 
     # Just roll and end - never build
@@ -126,13 +123,8 @@ def play_truly_random_turn(game, player_id):
             valid = [v for v in vertices if v.structure is None and
                     not any(adj.structure for adj in v.adjacent_vertices)]
             if valid:
-                # Pip only scoring, no expansion (keep truly_random weak)
-                # Pick randomly from top 3 to add variance
-                scored = [(v, score_vertex(v, consider_diversity=False, consider_expansion=False))
-                          for v in valid]
-                scored.sort(key=lambda x: x[1], reverse=True)
-                top3 = scored[:min(3, len(scored))]
-                game.try_place_initial_settlement(random.choice(top3)[0], player)
+                # Actually truly random - no scoring, just pick any valid spot
+                game.try_place_initial_settlement(random.choice(valid), player)
         return True
 
     if game.can_roll_dice():
