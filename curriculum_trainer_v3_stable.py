@@ -1021,11 +1021,13 @@ class CurriculumTrainerV3:
                 ('passive', None, 1.0, 4, 2.8, "1v1 Passive 4VP"),   # Build 2 things
                 ('passive', None, 1.0, 5, 3.2, "1v1 Passive 5VP"),   # Build 3 things
                 # Phase 1: Introduce truly_random (15% build chance)
-                # VP thresholds raised to ~60% of VP-to-win to ensure real learning
+                # VP thresholds ~50% of VP-to-win - gradual progression
                 ('truly_random', 'passive', 0.5, 5, 3.0, "1v1 TrulyRandom/Passive"),
-                ('truly_random', None, 1.0, 6, 3.8, "1v1 TrulyRandom 6VP"),    # 63% of 6VP
-                ('truly_random', None, 1.0, 8, 5.0, "1v1 TrulyRandom 8VP"),    # 62.5% of 8VP
-                ('truly_random', None, 1.0, 10, 6.0, "1v1 TrulyRandom 10VP"),  # 60% of 10VP
+                ('truly_random', None, 1.0, 6, 3.5, "1v1 TrulyRandom 6VP"),    # 58% of 6VP
+                ('truly_random', None, 1.0, 7, 4.0, "1v1 TrulyRandom 7VP"),    # 57% of 7VP (NEW)
+                ('truly_random', None, 1.0, 8, 4.5, "1v1 TrulyRandom 8VP"),    # 56% of 8VP
+                ('truly_random', None, 1.0, 9, 5.0, "1v1 TrulyRandom 9VP"),    # 55% of 9VP (NEW)
+                ('truly_random', None, 1.0, 10, 5.5, "1v1 TrulyRandom 10VP"),  # 55% of 10VP
                 # Phase 2: Transition to rule-based random (85% build)
                 ('random', 'truly_random', 0.5, 10, 5.0, "1v1 Random/TrulyRandom"),  # 50% VP
                 ('random', None, 1.0, 10, 5.5, "1v1 Random 10VP"),                   # 55% VP
@@ -1174,8 +1176,8 @@ class CurriculumTrainerV3:
                     print(f"    Recent VP: {np.mean(list(self.phase_vps)[-50:]):.1f}\n")
 
                 # Clear old experiences but keep enough to prevent catastrophic forgetting
-                # 30% retention balances distribution mismatch vs. forgetting
-                self.replay_buffer.clear_old(keep_fraction=0.3)
+                # 50% retention to reduce forgetting on phase transitions
+                self.replay_buffer.clear_old(keep_fraction=0.5)
 
                 # Boost entropy for new phase - explore new strategies against harder opponent
                 # Use moderate boost (not max) to avoid destabilizing learned policy too much
@@ -1279,12 +1281,14 @@ if __name__ == "__main__":
                 ('passive', None, 1.0, 3, 2.5, "1v1 Passive 3VP"),
                 ('passive', None, 1.0, 4, 2.8, "1v1 Passive 4VP"),
                 ('passive', None, 1.0, 5, 3.2, "1v1 Passive 5VP"),
-                # Phase 3-6: Introduce truly_random (15% build chance)
-                # VP thresholds raised to ~60% of VP-to-win to ensure real learning
+                # Phase 3-8: Introduce truly_random (15% build chance)
+                # VP thresholds ~50-55% of VP-to-win - gradual progression
                 ('truly_random', 'passive', 0.5, 5, 3.0, "1v1 TrulyRandom/Passive"),
-                ('truly_random', None, 1.0, 6, 3.8, "1v1 TrulyRandom 6VP"),    # 63% of 6VP
-                ('truly_random', None, 1.0, 8, 5.0, "1v1 TrulyRandom 8VP"),    # 62.5% of 8VP (was 4.0)
-                ('truly_random', None, 1.0, 10, 6.0, "1v1 TrulyRandom 10VP"),  # 60% of 10VP (was 4.5)
+                ('truly_random', None, 1.0, 6, 3.5, "1v1 TrulyRandom 6VP"),    # 58% of 6VP
+                ('truly_random', None, 1.0, 7, 4.0, "1v1 TrulyRandom 7VP"),    # 57% of 7VP
+                ('truly_random', None, 1.0, 8, 4.5, "1v1 TrulyRandom 8VP"),    # 56% of 8VP
+                ('truly_random', None, 1.0, 9, 5.0, "1v1 TrulyRandom 9VP"),    # 55% of 9VP
+                ('truly_random', None, 1.0, 10, 5.5, "1v1 TrulyRandom 10VP"),  # 55% of 10VP
                 # Phase 7-8: Transition to rule-based random (85% build)
                 ('random', 'truly_random', 0.5, 10, 5.0, "1v1 Random/TrulyRandom"),  # 50% VP (was 3.5)
                 ('random', None, 1.0, 10, 5.5, "1v1 Random 10VP"),                   # 55% VP (was 3.0)
@@ -1296,12 +1300,12 @@ if __name__ == "__main__":
                 ('strong', 'medium', 0.5, 10, 3.5, "1v1 Strong/Medium"),             # (was 2.0)
                 ('strong', None, 1.0, 10, 999, "1v1 Strong FINAL"),
             ]
-            print("\n1v1 OPTIMIZED Curriculum Phases (v3):")
+            print("\n1v1 OPTIMIZED Curriculum Phases (v4 - gradual VP):")
             print("-" * 70)
             print("  Phase 0-2: Learn to build vs Passive (never builds)")
-            print("  Phase 3-6: TrulyRandom opponent (VP thresh ~60% of win)")
-            print("  Phase 7-8: Rule-based Random (VP thresh ~50-55%)")
-            print("  Phase 9-13: Difficulty progression (VP thresh decreases)")
+            print("  Phase 3-8: TrulyRandom opponent (6VP->7VP->8VP->9VP->10VP)")
+            print("  Phase 9-10: Rule-based Random (VP thresh ~50-55%)")
+            print("  Phase 11-15: Difficulty progression (VP thresh decreases)")
             print("-" * 70)
         else:
             phases = [
