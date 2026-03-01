@@ -1005,10 +1005,11 @@ class CurriculumTrainerV3:
             # The key insight: if agent is IMPROVING VP (e.g., 3.5 -> 4.0 -> 4.5),
             # it's learning even if WR is low. Let it advance to see if it can improve.
             min_wr_by_difficulty = {
-                # passive: WR is dice-luck dominated in short 3VP games (pre-trained models
-                # from 10VP training land at ~40-44% here due to recalibration lag).
-                # 0.38 threshold lets agent advance once it consistently beats passive.
-                'passive': 0.38,       # 38% WR vs passive (lowered from 0.55 - short games are dice-luck dominated)
+                # passive: WR scales with VP-to-win (more builds needed = more resource luck required)
+                # Expected WR: 3VP=~40%, 4VP=~22% (need 2 cities), 5VP=~15% (need 2 cities+settle)
+                # 0.18 threshold lets all passive phases (3VP/4VP/5VP) advance once agent is
+                # consistently building optimally. VP thresholds are the real learning signal.
+                'passive': 0.18,       # 18% WR vs passive (lowered from 0.38 - 4VP/5VP are resource-luck dominated)
                 'truly_random': 0.25,  # 25% WR vs truly random (lowered from 45% - too hard for 8VP+)
                 'weighted_random': 0.22,  # 22% WR vs weighted random (between truly_random and random)
                 'random': 0.20,        # 20% WR vs rule-based "random" (lowered from 30%)
@@ -1059,8 +1060,8 @@ class CurriculumTrainerV3:
                 # VP threshold 2.2 chosen so WR threshold (38%) is the binding constraint:
                 # at 38% WR avg_vp = 0.38*3 + 0.62*2 = 2.38 > 2.2, so WR gates progression.
                 ('passive', None, 1.0, 3, 2.2, "1v1 Passive 3VP"),   # Just build 1 thing!
-                ('passive', None, 1.0, 4, 2.7, "1v1 Passive 4VP"),   # Build 2 things
-                ('passive', None, 1.0, 5, 3.1, "1v1 Passive 5VP"),   # Build 3 things
+                ('passive', None, 1.0, 4, 2.4, "1v1 Passive 4VP"),   # Build 2 things (WR ~22%)
+                ('passive', None, 1.0, 5, 2.6, "1v1 Passive 5VP"),   # Build 3 things (WR ~15%)
                 # Phase 1: Introduce truly_random (15% build chance)
                 # VP thresholds ~50% of VP-to-win - gradual progression
                 ('truly_random', 'passive', 0.5, 5, 3.0, "1v1 TrulyRandom/Passive"),
@@ -1336,8 +1337,8 @@ if __name__ == "__main__":
                 # VP thresholds calibrated so WR threshold (38%) is the binding constraint.
                 # At 38% WR in a 3VP game: avg_vp = 0.38*3 + 0.62*2 = 2.38 > 2.2 ✓
                 ('passive', None, 1.0, 3, 2.2, "1v1 Passive 3VP"),
-                ('passive', None, 1.0, 4, 2.7, "1v1 Passive 4VP"),
-                ('passive', None, 1.0, 5, 3.1, "1v1 Passive 5VP"),
+                ('passive', None, 1.0, 4, 2.4, "1v1 Passive 4VP"),
+                ('passive', None, 1.0, 5, 2.6, "1v1 Passive 5VP"),
                 # Phase 3-8: Introduce truly_random (15% build chance)
                 # VP thresholds ~50-55% of VP-to-win - gradual progression
                 ('truly_random', 'passive', 0.5, 5, 3.0, "1v1 TrulyRandom/Passive"),
