@@ -75,16 +75,17 @@ class CatanEnv(gym.Env):
 
     def _calculate_obs_size(self):
         """Calculate total observation vector size"""
-        size = 0
-        size += 11
-        size += 5
-        size += 3
-        size += 5
-        size += 4
-        size += 18
-        size += 57
-        size += 18
-        return size
+        # Base features (121):
+        #   game state (11) + resources (5) + structures (3) + dev cards (5)
+        #   + VP/stats (4) + opponents (18) + tiles (57) + ports (18)
+        size = 11 + 5 + 3 + 5 + 4 + 18 + 57 + 18  # = 121
+
+        # Positional features (306):
+        #   my_settlements (54) + my_cities (54) + opp_buildings (54)
+        #   + my_roads (72) + opp_roads (72)
+        size += 54 + 54 + 54 + 72 + 72  # = 306
+
+        return size  # = 427
 
     def reset(self, seed=None, options=None):
         """Reset environment to initial state"""
@@ -848,9 +849,9 @@ class CatanEnv(gym.Env):
         # Cities are THE key to winning - make this reward DOMINANT
         if step_info.get('built_city') or (action_name == 'build_city' and vp_diff > 0):
             if self.num_players == 2:
-                # 1v1: MASSIVE bonus - this is the ONLY way to win at 3VP
-                # Make it so large it completely dominates all other signals
-                city_bonus = 100.0  # Huge bonus to cut through entropy noise
+                # 1v1: city bonus for 10VP target (not 3VP as in old curriculum phases).
+                # Win bonus (200) must dominate all per-step rewards; city is one step.
+                city_bonus = 15.0  # Reduced from 100: was designed for 3VP, wrong for 10VP
             else:
                 # 4-player: Standard bonus with phase multiplier
                 turn = self._turn_count
@@ -930,11 +931,11 @@ class CatanEnv(gym.Env):
         # ========== INACTION PENALTY (STRONGER) ==========
         if action_name == 'end_turn':
             legal_actions = old_obs.get('legal_actions', [])
-            # In 1v1, only care about city building
+            # In 1v1, penalize ending turn when build actions are available
             if self.num_players == 2:
                 if 'build_city' in legal_actions:
-                    # MASSIVE penalty - you have resources for city but didn't build!
-                    inaction_penalty = -50.0
+                    # Reduced from -50: smaller swing leaves room for road/settlement exploration
+                    inaction_penalty = -10.0
                     reward += inaction_penalty
                     reward_breakdown['inaction_penalty'] = inaction_penalty
             else:
@@ -986,8 +987,9 @@ class CatanEnv(gym.Env):
         if step_info.get('result') == 'game_over':
             if step_info.get('winner') == self.player_id:
                 if self.num_players == 2:
-                    # 1v1: Strong win bonus to reinforce winning
-                    win_bonus = 50.0
+                    # 1v1: Win must dominate all per-step rewards.
+                    # 4 cities * 15 + 8 settlement VP * 3 = 84 max per-step → win_bonus > this
+                    win_bonus = 200.0  # Increased from 50: was designed for 3VP, wrong for 10VP
                 else:
                     # 4-player: Win bonus scales with VP
                     final_vp = new_obs['my_victory_points']
@@ -997,8 +999,8 @@ class CatanEnv(gym.Env):
             else:
                 # Loss penalty - make it significant so agent learns losing is BAD
                 if self.num_players == 2:
-                    # 1v1: Strong penalty to match win bonus scale
-                    loss_penalty = -50.0
+                    # 1v1: Scaled with new win_bonus
+                    loss_penalty = -75.0
                 else:
                     # 4-player: Standard penalty
                     loss_penalty = -15.0
@@ -1009,8 +1011,8 @@ class CatanEnv(gym.Env):
             self._last_reward_breakdown = reward_breakdown
 
         # Clip reward to prevent extreme values that destabilize training
-        # Increased range to preserve signal from cities (100) and wins (50)
-        reward = np.clip(reward, -100.0, 100.0)
+        # Range expanded to preserve win signal (200) without clipping
+        reward = np.clip(reward, -200.0, 200.0)
 
         return reward
 
