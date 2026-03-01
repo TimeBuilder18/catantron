@@ -445,8 +445,11 @@ class CurriculumTrainerV3:
         # ENTROPY PARAMETERS - SIMPLIFIED (no more adaptive chaos)
         # Fixed coefficient, let --entropy-decay handle reduction over time
         self.target_entropy = 1.0   # Only used for logging status
-        self.entropy_coef = 0.025   # Reverted - doubling caused collapse
-        self.min_entropy_coef = 0.02
+        self.entropy_coef = 0.05    # Increased from 0.025: matches train_gpu.py intent.
+                                    # Previous "doubling" that collapsed was 0.05→0.10;
+                                    # this is 0.025→0.05 (restoring original stable value).
+                                    # Rollback to 0.035 if entropy drops below 0.3 within 5k games.
+        self.min_entropy_coef = 0.04
         self.max_entropy_coef = 0.15
 
         # NO adaptive parameters - they caused cascading failures
@@ -472,6 +475,12 @@ class CurriculumTrainerV3:
         self.diag_took_build_city = 0
         self.diag_city_built = 0
         self._diag_lock = threading.Lock()
+
+        # DIAGNOSTIC: Track settlement expansion and win signal
+        # If avg_settlements_at_end stays at 2.0, agent never builds new settlements
+        # (VP cap at 4 = only upgrading 2 initial settlements to cities)
+        self.diag_settlements_at_end = deque(maxlen=100)
+        self.diag_wins_last_log = 0  # How many times win_bonus fired since last log
 
         print(f"Batch size: {self.batch_size}")
         print(f"Buffer size: {self.buffer_size}")
@@ -671,6 +680,15 @@ class CurriculumTrainerV3:
         with self._phase_lock:
             self.phase_wins.append(1 if winner_id == 0 else 0)
             self.phase_vps.append(my_vp)
+
+        # Track settlement count at game end (diagnose expansion failure)
+        # If this stays at 2.0, agent never builds new settlements beyond initial placements
+        with self._diag_lock:
+            player0 = env.game_env.game.players[0]
+            settlements_count = len(player0.settlements) if hasattr(player0, 'settlements') else 0
+            self.diag_settlements_at_end.append(settlements_count)
+            if winner_id == 0:
+                self.diag_wins_last_log += 1
 
         return winner_id, my_vp, sum(episode_rewards)
 
@@ -1181,6 +1199,16 @@ class CurriculumTrainerV3:
                         self.diag_could_build_city = 0
                         self.diag_took_build_city = 0
                         self.diag_city_built = 0
+
+                    # DIAGNOSTIC: Settlement expansion and win signal
+                    # avg_at_end=2.0 → agent never expands past initial settlements → VP cap at 4
+                    # win_bonus_fired=0 → win signal never reaches policy
+                    if self.diag_settlements_at_end:
+                        avg_setts = np.mean(list(self.diag_settlements_at_end)[-50:])
+                        wins_since_log = self.diag_wins_last_log
+                        self.diag_wins_last_log = 0
+                        print(f"    └─ SETTLE: avg_at_end={avg_setts:.1f} | "
+                              f"win_bonus_fired={wins_since_log} (last ~10 games)")
 
             # Check for curriculum advancement
             if (phase_game_count >= min_games_per_phase and

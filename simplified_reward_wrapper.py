@@ -75,13 +75,19 @@ class SimplifiedRewardWrapper:
             if vp_gain > 0:
                 reward += vp_gain * 10.0  # +10 per VP
 
-            # Win bonus
+            # Road bonus: roads are prerequisite for settlement expansion → more cities.
+            # Without this, agent never learns to build roads and VP caps at ~4
+            # (2 initial settlements upgraded to cities → stuck, no new settlement spots).
+            if info.get('action_name') == 'build_road' and info.get('success', False):
+                reward += 1.5  # ~15% of a VP reward — tips agent toward expansion
+
+            # Win bonus (must dominate sum of all VP-step rewards so winning is #1 objective)
             if terminated:
                 winner_id = info.get('winner_id', None)
                 if winner_id == self.player_id:
-                    reward += 50.0  # Extra win bonus
+                    reward += 100.0  # Win dominates: 8 VP gains (80) + win (100) > 4 VP gains (40)
                 else:
-                    reward -= 5.0  # Small loss penalty
+                    reward -= 20.0  # Loss stings — opponent reaching 10 VP = failed urgently
 
             return reward
 
@@ -93,15 +99,20 @@ class SimplifiedRewardWrapper:
             if vp_gain > 0:
                 reward += vp_gain * 10.0
 
-            # Building rewards (encourage expansion)
-            step_info = info.get('step_info', {})
-            if step_info.get('built_city'):
+            # Building rewards (encourage expansion).
+            # FIX: CatanEnv.step() does info.update(step_info) so keys are at info top level,
+            # not nested under 'step_info'. Use info.get() directly.
+            if info.get('built_city'):
                 reward += 5.0  # Cities are good
-            if step_info.get('built_settlement'):
+            if info.get('built_settlement'):
                 reward += 3.0  # Settlements are good
 
+            # Road bonus: same fix as vp_only — roads must have non-zero reward
+            if info.get('action_name') == 'build_road' and info.get('success', False):
+                reward += 1.5  # Enables settlement → city expansion chain
+
             # Small inaction penalty (encourage action)
-            if step_info.get('action_name') == 'end_turn':
+            if info.get('action_name') == 'end_turn':
                 legal_actions = info.get('legal_actions', [])
                 if 'build_city' in legal_actions:
                     reward -= 2.0  # Should have built city!
@@ -110,9 +121,9 @@ class SimplifiedRewardWrapper:
             if terminated:
                 winner_id = info.get('winner_id', None)
                 if winner_id == self.player_id:
-                    reward += 50.0
+                    reward += 100.0  # Increased from 50: win must dominate all per-step rewards
                 else:
-                    reward -= 5.0
+                    reward -= 20.0  # Increased from -5: losing should sting
 
             return reward
 

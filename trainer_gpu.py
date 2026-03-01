@@ -156,8 +156,9 @@ class PPOTrainer:
                 policy_loss = -torch.min(surr1, surr2).mean()
 
                 # Clipped value loss to prevent extreme values
+                # Clip extended to match reward scale (win_bonus=200 in catan_env_pytorch.py)
                 values_pred = state_values.squeeze()
-                batch_returns_clipped = torch.clamp(batch_returns, -100, 100)  # Prevent extreme values
+                batch_returns_clipped = torch.clamp(batch_returns, -200, 200)
                 value_loss = nn.MSELoss()(values_pred, batch_returns_clipped)
                 loss = policy_loss + self.value_coef * value_loss - self.entropy_coef * entropy
 
