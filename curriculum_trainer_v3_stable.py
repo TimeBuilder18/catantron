@@ -400,7 +400,7 @@ class CurriculumTrainerV3:
     """
 
     def __init__(self, model_path=None, learning_rate=5e-4, batch_size=None, reward_mode='vp_only',
-                 lr_decay=1.0, value_weight=0.5, entropy_decay=1.0, num_parallel_games=8,
+                 lr_decay=1.0, value_weight=0.25, entropy_decay=1.0, num_parallel_games=8,
                  buffer_size=200000, num_players=4):
         self.device = get_device()
         self.reward_mode = reward_mode
