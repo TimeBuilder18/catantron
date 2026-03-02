@@ -79,7 +79,7 @@ class SimplifiedRewardWrapper:
             # Without this, agent never learns to build roads and VP caps at ~4
             # (2 initial settlements upgraded to cities → stuck, no new settlement spots).
             if info.get('action_name') == 'build_road' and info.get('success', False):
-                reward += 1.5  # ~15% of a VP reward — tips agent toward expansion
+                reward += 4.0  # Road chain: 4+10+10=24 over 3 actions (8/action) vs city 10/action — competitive enough to explore
 
             # Win bonus (must dominate sum of all VP-step rewards so winning is #1 objective)
             if terminated:
@@ -109,7 +109,7 @@ class SimplifiedRewardWrapper:
 
             # Road bonus: same fix as vp_only — roads must have non-zero reward
             if info.get('action_name') == 'build_road' and info.get('success', False):
-                reward += 1.5  # Enables settlement → city expansion chain
+                reward += 4.0  # Enables settlement → city expansion chain
 
             # Small inaction penalty (encourage action)
             if info.get('action_name') == 'end_turn':

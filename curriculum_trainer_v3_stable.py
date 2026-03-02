@@ -400,7 +400,7 @@ class CurriculumTrainerV3:
     """
 
     def __init__(self, model_path=None, learning_rate=5e-4, batch_size=None, reward_mode='vp_only',
-                 lr_decay=1.0, value_weight=0.5, entropy_decay=1.0, num_parallel_games=8,
+                 lr_decay=1.0, value_weight=0.25, entropy_decay=1.0, num_parallel_games=8,
                  buffer_size=200000, num_players=4):
         self.device = get_device()
         self.reward_mode = reward_mode
@@ -1010,7 +1010,7 @@ class CurriculumTrainerV3:
                 # 0.18 threshold lets all passive phases (3VP/4VP/5VP) advance once agent is
                 # consistently building optimally. VP thresholds are the real learning signal.
                 'passive': 0.18,       # 18% WR vs passive (lowered from 0.38 - 4VP/5VP are resource-luck dominated)
-                'truly_random': 0.25,  # 25% WR vs truly random (lowered from 45% - too hard for 8VP+)
+                'truly_random': 0.10,  # 10% WR vs truly random (lowered from 0.25 - 10VP games are resource-luck dominated)
                 'weighted_random': 0.22,  # 22% WR vs weighted random (between truly_random and random)
                 'random': 0.20,        # 20% WR vs rule-based "random" (lowered from 30%)
                 'very_weak': 0.15,     # 15% WR vs VeryWeak (lowered from 22%)
@@ -1069,7 +1069,7 @@ class CurriculumTrainerV3:
                 ('truly_random', None, 1.0, 7, 4.0, "1v1 TrulyRandom 7VP"),    # 57% of 7VP
                 ('truly_random', None, 1.0, 8, 4.5, "1v1 TrulyRandom 8VP"),    # 56% of 8VP
                 ('truly_random', None, 1.0, 9, 5.0, "1v1 TrulyRandom 9VP"),    # 55% of 9VP
-                ('truly_random', None, 1.0, 10, 5.5, "1v1 TrulyRandom 10VP"),  # 55% of 10VP
+                ('truly_random', None, 1.0, 10, 4.5, "1v1 TrulyRandom 10VP"),  # 45% of 10VP (lowered - agent caps at ~4.5 VP at 10% WR)
                 # Phase 2: WeightedRandom bridge (catanatron-style weighted actions)
                 # Bridges gap between truly_random (15% build) and random (85% build)
                 ('weighted_random', 'truly_random', 0.5, 10, 5.2, "1v1 WeightedRandom/TrulyRandom"),
@@ -1346,7 +1346,7 @@ if __name__ == "__main__":
                 ('truly_random', None, 1.0, 7, 4.0, "1v1 TrulyRandom 7VP"),    # 57% of 7VP
                 ('truly_random', None, 1.0, 8, 4.5, "1v1 TrulyRandom 8VP"),    # 56% of 8VP
                 ('truly_random', None, 1.0, 9, 5.0, "1v1 TrulyRandom 9VP"),    # 55% of 9VP
-                ('truly_random', None, 1.0, 10, 5.5, "1v1 TrulyRandom 10VP"),  # 55% of 10VP
+                ('truly_random', None, 1.0, 10, 4.5, "1v1 TrulyRandom 10VP"),  # 45% of 10VP (lowered - agent caps at ~4.5 VP at 10% WR)
                 # Phase 9-10: WeightedRandom bridge (catanatron-style weighted actions)
                 ('weighted_random', 'truly_random', 0.5, 10, 5.2, "1v1 WeightedRandom/TrulyRandom"),
                 ('weighted_random', None, 1.0, 10, 5.5, "1v1 WeightedRandom 10VP"),
