@@ -650,21 +650,20 @@ class CatanEnv(gym.Env):
         city_bonus = sum(20.0 + 2.0 * i for i in range(num_cities))
         potential += city_bonus
 
-        # ========== CITY READINESS BONUS (STRONGER) ==========
-        # Reward for being close to building a city
+        # ========== CITY READINESS BONUS ==========
+        # Reward for collecting city resources. Kept SMALL so the agent is
+        # incentivized to SPEND resources (build city, +20 PBRS) rather than
+        # hoard them (old +10 readiness was causing resource-hoarding behaviour).
         ore_count = player.resources.get(ResourceType.ORE, 0)
         wheat_count = player.resources.get(ResourceType.WHEAT, 0)
-        # How close are we to city resources? (3 ore, 2 wheat needed)
         ore_progress = min(ore_count / 3.0, 1.0)
         wheat_progress = min(wheat_count / 2.0, 1.0)
         # Only give readiness bonus if we have a settlement to upgrade
         if len(player.settlements) > 0:
-            # ADDITIVE bonus so agent gets credit for EACH resource collected
-            # Not multiplicative (which gives 0 unless you have both)
             if self.num_players == 2:
-                # 1v1: Stronger bonus to focus on city building
-                # Up to +6 for ore (3 ore * 2.0) + +4 for wheat (2 wheat * 2.0) = +10 total
-                potential += ore_progress * 6.0 + wheat_progress * 4.0
+                # 1v1: Small readiness bonus (+3 max) so net PBRS for building
+                # a city is clearly positive: +20 city - 3 readiness = +17 PBRS.
+                potential += ore_progress * 2.0 + wheat_progress * 1.0
             else:
                 city_readiness = ore_progress * wheat_progress  # 0 to 1
                 potential += city_readiness * 5.0
@@ -849,9 +848,10 @@ class CatanEnv(gym.Env):
         # Cities are THE key to winning - make this reward DOMINANT
         if step_info.get('built_city') or (action_name == 'build_city' and vp_diff > 0):
             if self.num_players == 2:
-                # 1v1: city bonus for 10VP target (not 3VP as in old curriculum phases).
-                # Win bonus (200) must dominate all per-step rewards; city is one step.
-                city_bonus = 15.0  # Reduced from 100: was designed for 3VP, wrong for 10VP
+                # 1v1: +40 makes city building the dominant per-step signal.
+                # Raised from 15 (which was too small vs old -10 inaction penalty).
+                # Now that inaction penalty is removed, city_bonus must drive the behavior.
+                city_bonus = 40.0
             else:
                 # 4-player: Standard bonus with phase multiplier
                 turn = self._turn_count
@@ -928,16 +928,15 @@ class CatanEnv(gym.Env):
             reward -= trade_penalty
             reward_breakdown['bank_trade_penalty'] = -trade_penalty
 
-        # ========== INACTION PENALTY (STRONGER) ==========
+        # ========== INACTION PENALTY ==========
+        # NOTE: 1v1 city inaction penalty REMOVED - it caused a death spiral where
+        # the value function learned "having city resources = terrible state" and the
+        # agent traded away resources to escape the penalty rather than building cities.
+        # City building is now incentivized purely via city_bonus (+40) and PBRS (+20 per city).
         if action_name == 'end_turn':
             legal_actions = old_obs.get('legal_actions', [])
-            # In 1v1, penalize ending turn when build actions are available
             if self.num_players == 2:
-                if 'build_city' in legal_actions:
-                    # Reduced from -50: smaller swing leaves room for road/settlement exploration
-                    inaction_penalty = -10.0
-                    reward += inaction_penalty
-                    reward_breakdown['inaction_penalty'] = inaction_penalty
+                pass  # No inaction penalty in 1v1 - rely on city_bonus + PBRS instead
             else:
                 # 4-player: Penalize not building anything
                 build_actions = {'build_settlement', 'build_city', 'build_road', 'buy_dev_card'}
