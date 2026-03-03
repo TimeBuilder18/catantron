@@ -1308,9 +1308,9 @@ if __name__ == "__main__":
                         help='Minimum games before curriculum can advance')
     parser.add_argument('--model', type=str, default=None,
                         help='Path to existing model to continue training')
-    parser.add_argument('--reward-mode', type=str, default='vp_only',
+    parser.add_argument('--reward-mode', type=str, default='pbrs_fixed',
                         choices=['sparse', 'vp_only', 'simplified', 'pbrs_fixed'],
-                        help='Reward mode: sparse, vp_only (default), simplified, or pbrs_fixed')
+                        help='Reward mode: sparse, vp_only, simplified, or pbrs_fixed (default)')
     parser.add_argument('--lr-decay', type=float, default=1.0,
                         help='Learning rate decay multiplier per 1000 games (default: 1.0 = no decay, try 0.95 for fine-tuning)')
     parser.add_argument('--value-weight', type=float, default=0.5,
