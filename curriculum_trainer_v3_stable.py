@@ -633,7 +633,11 @@ class CurriculumTrainerV3:
             returns.insert(0, G)
 
         returns = np.array(returns)
-        returns = np.clip(returns, -200, 200)
+        # Clip range must be wide enough so city_bonus+win returns are NOT clipped:
+        # city_bonus(40) + win_bonus(200)*gamma ≈ 238 → old clip of 200 crushed this to 200,
+        # making city-building steps indistinguishable from any other step in a winning episode.
+        # New upper bound of 300 lets the city step's ~238 return stand above the ~200 baseline.
+        returns = np.clip(returns, -200, 300)
 
         # Collect experiences as list of dicts
         experiences = []
