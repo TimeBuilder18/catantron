@@ -72,6 +72,18 @@ class PBRSFixedRewardWrapper:
         if vp_diff > 0:
             base_reward += vp_diff * 10.0  # +10 per VP
 
+        # City-specific bonus: cities cost 3 ore + 2 wheat (vs 4 resources for a settlement)
+        # but are strategically superior (2x production). Without an explicit bonus they're
+        # only +10 (same as a settlement), so the agent correctly avoids them.
+        # This bonus makes city-building clearly dominant (+30 total) over other actions.
+        if info.get('built_city'):
+            base_reward += 20.0  # On top of +10 VP gain = +30 total for a city
+
+        # Road bonus: roads are a prerequisite for expansion (road → settlement → city).
+        # Without this, agent VP-caps after upgrading initial settlements to cities.
+        if info.get('action_name') == 'build_road' and info.get('success', False):
+            base_reward += 2.0  # Road chain: road(2)+settle(10)+city(30)=42 over 3 actions
+
         # Terminal rewards (STRONG)
         if terminated:
             winner_id = info.get('winner_id', None)

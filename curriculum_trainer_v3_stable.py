@@ -399,7 +399,7 @@ class CurriculumTrainerV3:
     then transfer to 4-player mode.
     """
 
-    def __init__(self, model_path=None, learning_rate=5e-4, batch_size=None, reward_mode='vp_only',
+    def __init__(self, model_path=None, learning_rate=5e-4, batch_size=None, reward_mode='pbrs_fixed',
                  lr_decay=1.0, value_weight=0.25, entropy_decay=1.0, num_parallel_games=8,
                  buffer_size=200000, num_players=4):
         self.device = get_device()
