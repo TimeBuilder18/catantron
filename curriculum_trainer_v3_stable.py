@@ -400,12 +400,12 @@ class CurriculumTrainerV3:
     """
 
     def __init__(self, model_path=None, learning_rate=5e-4, batch_size=None, reward_mode='pbrs_fixed',
-                 lr_decay=1.0, value_weight=0.25, entropy_decay=1.0, num_parallel_games=8,
+                 lr_decay=1.0, value_weight=0.1, entropy_decay=1.0, num_parallel_games=8,
                  buffer_size=200000, num_players=4):
         self.device = get_device()
         self.reward_mode = reward_mode
         self.lr_decay = lr_decay  # Learning rate decay per 1000 games
-        self.value_weight = value_weight  # Weight for value loss (default increased from 0.1)
+        self.value_weight = value_weight  # Weight for value loss (reduced from 0.25; returns are now normalized so value loss ~1.0)
         self.entropy_decay = entropy_decay  # Entropy coefficient decay per 1000 games
         self.num_players = num_players  # 2 for 1v1, 4 for standard
 
@@ -886,8 +886,13 @@ class CurriculumTrainerV3:
         )
         value = value.squeeze()
 
-        # Compute advantages (shared across all policy heads)
-        advantages = returns - value.detach()
+        # Normalize returns to a stable scale for value learning.
+        # Raw returns can range [-200, 300], making MSE huge and drowning the policy gradient.
+        # Z-scoring them makes value loss ~1.0 when calibrated, keeping it from dominating.
+        returns_norm = (returns - returns.mean()) / (returns.std() + 1e-8)
+
+        # Compute advantages using normalized returns so value head and advantages are consistent
+        advantages = returns_norm - value.detach()
         # Normalize advantages
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
@@ -936,8 +941,8 @@ class CurriculumTrainerV3:
         entropy_penalty = self._compute_smooth_entropy_penalty(total_entropy.item())
         entropy_penalty_tensor = torch.tensor(entropy_penalty, device=self.device)
 
-        # Value loss
-        value_loss = F.mse_loss(value, returns)
+        # Value loss on normalized scale (expected ~1.0 when well-calibrated)
+        value_loss = F.mse_loss(value, returns_norm)
 
         # Approximate KL divergence for monitoring (action head)
         kl_div = 0.5 * ((action_ratio - 1) ** 2).mean()
@@ -1009,18 +1014,15 @@ class CurriculumTrainerV3:
             # The key insight: if agent is IMPROVING VP (e.g., 3.5 -> 4.0 -> 4.5),
             # it's learning even if WR is low. Let it advance to see if it can improve.
             min_wr_by_difficulty = {
-                # passive: WR scales with VP-to-win (more builds needed = more resource luck required)
-                # Expected WR: 3VP=~40%, 4VP=~22% (need 2 cities), 5VP=~15% (need 2 cities+settle)
-                # 0.18 threshold lets all passive phases (3VP/4VP/5VP) advance once agent is
-                # consistently building optimally. VP thresholds are the real learning signal.
-                'passive': 0.18,       # 18% WR vs passive (lowered from 0.38 - 4VP/5VP are resource-luck dominated)
-                'truly_random': 0.10,  # 10% WR vs truly random (lowered from 0.25 - 10VP games are resource-luck dominated)
-                'weighted_random': 0.22,  # 22% WR vs weighted random (between truly_random and random)
-                'random': 0.20,        # 20% WR vs rule-based "random" (lowered from 30%)
-                'very_weak': 0.15,     # 15% WR vs VeryWeak (lowered from 22%)
-                'weak': 0.10,          # 10% WR vs Weak (lowered from 15%)
-                'medium': 0.05,        # 5% WR vs Medium (lowered from 8%)
-                'strong': 0.02,        # 2% WR vs Strong (lowered from 3%)
+                # passive: agent should dominate a player that never builds
+                'passive': 0.35,       # 35% WR vs passive (agent must actually learn to build)
+                'truly_random': 0.25,  # 25% WR vs truly random (was 0.10 - too low, caused premature advancement)
+                'weighted_random': 0.22,  # 22% WR vs weighted random
+                'random': 0.20,        # 20% WR vs rule-based "random"
+                'very_weak': 0.15,     # 15% WR vs VeryWeak
+                'weak': 0.10,          # 10% WR vs Weak
+                'medium': 0.05,        # 5% WR vs Medium
+                'strong': 0.02,        # 2% WR vs Strong
             }
         else:
             # 4-player mode: 25% baseline, lower thresholds
