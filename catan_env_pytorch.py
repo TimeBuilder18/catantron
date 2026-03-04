@@ -55,7 +55,7 @@ class CatanEnv(gym.Env):
         self._port_access_cache_turn = -1
 
         # Action space: 11 discrete actions
-        self.action_space = spaces.Discrete(11)
+        self.action_space = spaces.Discrete(14)
 
         # Observation space: flat vector + action mask
         obs_size = self._calculate_obs_size()
@@ -304,7 +304,7 @@ class CatanEnv(gym.Env):
             features.append(1.0 if edge in opp_roads else 0.0)
 
         legal_actions = raw_obs['legal_actions']
-        action_mask = np.zeros(11, dtype=np.int8)
+        action_mask = np.zeros(14, dtype=np.int8)
         if self.game_env.game.is_initial_placement_phase():
             if self.game_env.game.waiting_for_road:
                 action_mask[2] = 1
@@ -319,6 +319,15 @@ class CatanEnv(gym.Env):
             for action_name in legal_actions:
                 if action_name in action_map:
                     action_mask[action_map[action_name]] = 1
+            # Dev card play actions (not in legal_actions from game_env, computed manually)
+            player = self.game_env.game.players[self.player_id]
+            if self.game_env.game.can_trade_or_build():
+                if player.development_cards.get(DevelopmentCardType.KNIGHT, 0) > 0:
+                    action_mask[11] = 1  # play_knight
+                if player.development_cards.get(DevelopmentCardType.MONOPOLY, 0) > 0:
+                    action_mask[12] = 1  # play_monopoly
+                if player.development_cards.get(DevelopmentCardType.YEAR_OF_PLENTY, 0) > 0:
+                    action_mask[13] = 1  # play_year_of_plenty
         observation = np.array(features, dtype=np.float32)
         vertex_mask = self._get_vertex_mask()
         edge_mask = self._get_edge_mask()
@@ -379,7 +388,7 @@ class CatanEnv(gym.Env):
 
         if not raw_obs['is_my_turn']:
             obs = self._get_obs()
-            obs['action_mask'] = np.zeros(11, dtype=np.int8)
+            obs['action_mask'] = np.zeros(14, dtype=np.int8)
             obs['action_mask'][8] = 1
             info = self._get_info(raw_obs)  # Reuse cached raw_obs
             return obs, 0.0, False, False, info
@@ -400,7 +409,8 @@ class CatanEnv(gym.Env):
         action_names = [
             'roll_dice', 'place_settlement', 'place_road',
             'build_settlement', 'build_city', 'build_road',
-            'buy_dev_card', 'end_turn', 'wait', 'trade_with_bank', 'do_nothing'
+            'buy_dev_card', 'end_turn', 'wait', 'trade_with_bank', 'do_nothing',
+            'play_knight', 'play_monopoly', 'play_year_of_plenty'
         ]
         action_name = action_names[action]
         step_info = {'action_name': action_name}
@@ -439,6 +449,61 @@ class CatanEnv(gym.Env):
             # Track settlement building for rewards - ONLY if build actually succeeded!
             if action_name == 'build_settlement' and step_info.get('success', False):
                 step_info['built_settlement'] = True
+
+        elif action_name == 'play_knight':
+            player = self.game_env.game.players[self.player_id]
+            success, message = self.game_env.game.play_knight_card(player)
+            step_info['success'] = success
+            step_info['message'] = message
+            if success:
+                # Auto-move robber to opponent's best hex (same logic as 7-roll handler)
+                best_tile = self.game_env._find_best_robber_tile(self.player_id)
+                if best_tile:
+                    self.game_env.game.move_robber_to_tile(best_tile)
+                    # Try to steal from richest opponent on that tile
+                    import random
+                    opponents_on_tile = []
+                    for vertex in self.game_env.game.game_board.vertices:
+                        if best_tile in vertex.adjacent_tiles and vertex.structure:
+                            owner = vertex.structure.player
+                            if owner != player:
+                                opponents_on_tile.append(owner)
+                    if opponents_on_tile:
+                        victim = max(opponents_on_tile, key=lambda p: sum(p.resources.values()))
+                        stealable = [r for r, amt in victim.resources.items() if amt > 0]
+                        if stealable:
+                            stolen = random.choice(stealable)
+                            victim.resources[stolen] -= 1
+                            player.resources[stolen] = player.resources.get(stolen, 0) + 1
+                            step_info['stolen_resource'] = str(stolen)
+                else:
+                    import random
+                    available = [t for t in self.game_env.game.game_board.tiles
+                                 if t != self.game_env.game.robber.position and t.resource is not None]
+                    if available:
+                        self.game_env.game.move_robber_to_tile(random.choice(available))
+            new_obs_raw, done, _ = self.game_env.step(self.player_id, 'wait', {})
+
+        elif action_name == 'play_monopoly':
+            player = self.game_env.game.players[self.player_id]
+            resource_map = [ResourceType.WOOD, ResourceType.BRICK, ResourceType.WHEAT,
+                            ResourceType.SHEEP, ResourceType.ORE]
+            resource = resource_map[trade_give_idx] if trade_give_idx is not None else ResourceType.ORE
+            success, message = self.game_env.game.play_monopoly_card(player, resource)
+            step_info['success'] = success
+            step_info['message'] = message
+            new_obs_raw, done, _ = self.game_env.step(self.player_id, 'wait', {})
+
+        elif action_name == 'play_year_of_plenty':
+            player = self.game_env.game.players[self.player_id]
+            resource_map = [ResourceType.WOOD, ResourceType.BRICK, ResourceType.WHEAT,
+                            ResourceType.SHEEP, ResourceType.ORE]
+            res1 = resource_map[trade_give_idx] if trade_give_idx is not None else ResourceType.ORE
+            res2 = resource_map[trade_get_idx] if trade_get_idx is not None else ResourceType.WHEAT
+            success, message = self.game_env.game.play_year_of_plenty_card(player, res1, res2)
+            step_info['success'] = success
+            step_info['message'] = message
+            new_obs_raw, done, _ = self.game_env.step(self.player_id, 'wait', {})
 
         new_potential = self._calculate_potential(self.game_env.game.players[self.player_id])
         winner = self.game_env.game.check_victory_conditions()

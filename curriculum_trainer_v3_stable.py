@@ -369,7 +369,7 @@ class PrioritizedReplayBuffer:
                 'trade_get_idx': np.array([self.buffer[i].get('trade_get_idx', 0) for i in indices]),
                 'old_trade_give_log_probs': np.array([self.buffer[i].get('old_trade_give_log_prob', 0.0) for i in indices]),
                 'old_trade_get_log_probs': np.array([self.buffer[i].get('old_trade_get_log_prob', 0.0) for i in indices]),
-                'action_masks': np.array([self.buffer[i].get('action_mask', np.ones(11)) for i in indices]),
+                'action_masks': np.array([self.buffer[i].get('action_mask', np.ones(14)) for i in indices]),
                 'vertex_masks': np.array([self.buffer[i].get('vertex_mask', np.ones(54)) for i in indices]),
                 'edge_masks': np.array([self.buffer[i].get('edge_mask', np.ones(72)) for i in indices])
             }

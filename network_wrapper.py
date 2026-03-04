@@ -37,7 +37,7 @@ class NetworkWrapper:
             obs: Observation dict from GameState.get_observation()
 
         Returns:
-            policy: numpy array of action probabilities (11 actions)
+            policy: numpy array of action probabilities (14 actions)
             value: float in [-1, 1] estimating win probability
         """
         with torch.no_grad():
