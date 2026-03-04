@@ -25,6 +25,8 @@ class PBRSFixedRewardWrapper:
         self.last_vp = 0
         self.gamma = 0.99
         self.victory_points_to_win = victory_points_to_win
+        self.last_has_largest_army = False
+        self.last_has_longest_road = False
 
     def reset(self):
         obs, info = self.env.reset()
@@ -32,6 +34,8 @@ class PBRSFixedRewardWrapper:
         player = self.env.game_env.game.players[self.player_id]
         self.last_potential = self._calculate_scaled_potential(player)
         self.last_vp = obs.get('my_victory_points', 0)
+        self.last_has_largest_army = player.has_largest_army
+        self.last_has_longest_road = player.has_longest_road
         return obs, info
 
     def _calculate_scaled_potential(self, player):
@@ -101,6 +105,20 @@ class PBRSFixedRewardWrapper:
 
         if info.get('action_name') == 'buy_dev_card' and info.get('success', False):
             base_reward += dev_card_bonus
+
+        # 1v1 strategic milestone bonuses (on top of VP reward).
+        # In 1v1 these confer permanent advantage beyond just the 2 bonus VP:
+        #   Largest Army = ongoing robber control (suppress opponent's best hex every turn)
+        #   Longest Road = map denial (cuts expansion routes, forces opponent to spend resources)
+        # The VP signal alone undersells these since their denial value doesn't show up in VP.
+        has_largest_army = player.has_largest_army
+        has_longest_road = player.has_longest_road
+        if has_largest_army and not self.last_has_largest_army:
+            base_reward += 30.0  # Gained Largest Army: +2 VP already counted + denial bonus
+        if has_longest_road and not self.last_has_longest_road:
+            base_reward += 20.0  # Gained Longest Road: +2 VP already counted + map control bonus
+        self.last_has_largest_army = has_largest_army
+        self.last_has_longest_road = has_longest_road
 
         # Terminal rewards (STRONG)
         if terminated:
