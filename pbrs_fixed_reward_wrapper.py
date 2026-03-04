@@ -72,25 +72,25 @@ class PBRSFixedRewardWrapper:
         if vp_diff > 0:
             base_reward += vp_diff * 10.0  # +10 per VP
 
-        # City-specific bonus: cities cost 3 ore + 2 wheat (vs 4 resources for a settlement)
-        # but are strategically superior (2x production). Without an explicit bonus they're
-        # only +10 (same as a settlement), so the agent correctly avoids them.
-        # This bonus makes city-building clearly dominant (+30 total) over other actions.
+        # City bonus: small, because cities are UPGRADES not expansion.
+        # Reducing from +20 to +5 prevents the model greedily burning all settlements
+        # into cities and getting stuck at 4VP with nowhere left to build.
+        # City total: +5 + +10 VP = +15 per action.
         if info.get('built_city'):
-            base_reward += 20.0  # On top of +10 VP gain = +30 total for a city
+            base_reward += 5.0
 
-        # Settlement expansion bonus: without this the agent VP-caps at 4VP by upgrading
-        # its 2 initial settlements to cities and never expanding. The city bonus (+20) makes
-        # cities worth +30 but settlements only +10, so the agent never bothers to place new
-        # ones. This bonus makes the road→settle→city chain (+2+20+30=52) better than hoarding
-        # resources for a direct city upgrade (+30), incentivizing map expansion.
+        # Settlement expansion bonus: larger than city bonus to make expansion
+        # the preferred action. The model must learn road→settle→city chains.
+        # Settlement total: +15 + +10 VP = +25 per action (> city at +15).
+        # Full chain: road(+8) + settle(+25) + city(+15) = +48 over 3 actions = +16/action.
         if info.get('built_settlement'):
-            base_reward += 10.0  # On top of +10 VP gain = +20 total for a new settlement
+            base_reward += 15.0
 
-        # Road bonus: roads are a prerequisite for expansion (road → settlement → city).
-        # Without this, agent VP-caps after upgrading initial settlements to cities.
+        # Road bonus: increased from +2 to +8 to make the expansion prerequisite
+        # competitive. Without this, road(+2)+settle(+25) = +27 over 2 actions = +13.5/action
+        # still loses to direct city(+15)/action when the model has city opportunities.
         if info.get('action_name') == 'build_road' and info.get('success', False):
-            base_reward += 2.0  # Road chain: road(2)+settle(20)+city(30)=52 over 3 actions
+            base_reward += 8.0
 
         # Terminal rewards (STRONG)
         if terminated:
