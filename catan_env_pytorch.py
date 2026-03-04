@@ -735,13 +735,18 @@ class CatanEnv(gym.Env):
         # Max 5 settlements per player in Catan
         num_settlements = min(len(player.settlements), 5)  # Cap at 5 (Catan max)
         # Bonus for each settlement beyond starting 2
-        # 3rd settlement: +5, 4th: +6, 5th: +7
+        # 3rd settlement: +15, 4th: +20, 5th: +25 (scaled up to compete with city bonus ~20+)
         if num_settlements > 2:
             extra_settlements = num_settlements - 2
-            settlement_bonus = sum(5.0 + 1.0 * i for i in range(extra_settlements))
+            settlement_bonus = sum(15.0 + 5.0 * i for i in range(extra_settlements))
             potential += settlement_bonus
         # Small bonus for having settlements (encourages not losing them all to cities too fast)
         potential += num_settlements * 2.0
+        # PENALTY: being stuck with zero settlements and <10VP is a dead end
+        # (can't build cities without settlements to upgrade)
+        num_cities = min(len(player.cities), 4)
+        if num_settlements == 0 and (num_settlements + num_cities * 2) < 8:
+            potential -= 20.0
 
         # ========== SETTLEMENT READINESS BONUS (NEW) ==========
         # Reward for being close to building a settlement (wood, brick, sheep, wheat)
@@ -989,10 +994,11 @@ class CatanEnv(gym.Env):
             num_settlements = new_obs.get('my_settlements', 0)
 
             if self.num_players == 2:
-                # 1v1: Smaller bonus - settlements enable cities and expansion
-                settlement_bonus = 5.0
+                # 1v1: Raised to ~city-level so the agent treats settlements as
+                # equally important prerequisites (3rd=+30, 4th=+35, 5th=+40)
+                settlement_bonus = 25.0
                 if num_settlements > 2:
-                    settlement_bonus += 2.0 * (num_settlements - 2)
+                    settlement_bonus += 5.0 * (num_settlements - 2)
             else:
                 # 4-player: Standard bonus
                 settlement_bonus = 8.0
