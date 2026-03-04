@@ -72,25 +72,35 @@ class PBRSFixedRewardWrapper:
         if vp_diff > 0:
             base_reward += vp_diff * 10.0  # +10 per VP
 
-        # City bonus: small, because cities are UPGRADES not expansion.
-        # Reducing from +20 to +5 prevents the model greedily burning all settlements
-        # into cities and getting stuck at 4VP with nowhere left to build.
-        # City total: +5 + +10 VP = +15 per action.
+        # Phase-aware bonuses: optimal Catan strategy changes through the game.
+        #   Early  (VP < 50% of win): EXPAND — roads + settlements claim territory
+        #   Mid    (50–80% of win):   CITIES — upgrade production to fund endgame
+        #   Late   (>80% of win):     DEV CARDS — largest army / VP cards seal the win
+        #
+        # Per-action value summary (bonus + 10 VP where applicable):
+        #   Phase     road   settle  city   dev_card
+        #   Early      +12    +35    +13      +8
+        #   Mid         +6    +25    +22     +15
+        #   Late        +3    +20    +20     +25
+        win_vp = self.victory_points_to_win
+        phase = 'early' if current_vp < 0.5 * win_vp else ('late' if current_vp >= 0.8 * win_vp else 'mid')
+
+        road_bonus      = {'early': 12, 'mid':  6, 'late':  3}[phase]
+        settle_bonus    = {'early': 25, 'mid': 15, 'late': 10}[phase]
+        city_bonus      = {'early':  3, 'mid': 12, 'late': 10}[phase]
+        dev_card_bonus  = {'early':  8, 'mid': 15, 'late': 25}[phase]
+
         if info.get('built_city'):
-            base_reward += 5.0
+            base_reward += city_bonus
 
-        # Settlement expansion bonus: larger than city bonus to make expansion
-        # the preferred action. The model must learn road→settle→city chains.
-        # Settlement total: +15 + +10 VP = +25 per action (> city at +15).
-        # Full chain: road(+8) + settle(+25) + city(+15) = +48 over 3 actions = +16/action.
         if info.get('built_settlement'):
-            base_reward += 15.0
+            base_reward += settle_bonus
 
-        # Road bonus: increased from +2 to +8 to make the expansion prerequisite
-        # competitive. Without this, road(+2)+settle(+25) = +27 over 2 actions = +13.5/action
-        # still loses to direct city(+15)/action when the model has city opportunities.
         if info.get('action_name') == 'build_road' and info.get('success', False):
-            base_reward += 8.0
+            base_reward += road_bonus
+
+        if info.get('action_name') == 'buy_dev_card' and info.get('success', False):
+            base_reward += dev_card_bonus
 
         # Terminal rewards (STRONG)
         if terminated:
