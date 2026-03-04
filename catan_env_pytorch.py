@@ -755,9 +755,8 @@ class CatanEnv(gym.Env):
         sheep_ok = min(sheep_count, 1)
         wheat_ok = min(wheat_count_settle, 1)
         settlement_readiness = (wood_ok + brick_ok + sheep_ok + wheat_ok) / 4.0
-        # In 1v1, don't reward settlement readiness - focus on cities only
-        if self.num_players != 2:
-            potential += settlement_readiness * 3.0  # Up to +3 when ready to build
+        # Settlement readiness matters in all modes - in 10VP 1v1 you need expansion
+        potential += settlement_readiness * 3.0  # Up to +3 when ready to build
 
         # ========== CITY BUILDING INCENTIVE (CAPPED AT 4) ==========
         # MASSIVE bonus for cities - this is the KEY to winning
@@ -985,8 +984,7 @@ class CatanEnv(gym.Env):
             reward_breakdown['city_bonus'] = city_bonus
 
         # ========== SETTLEMENT BUILDING BONUS ==========
-        # Settlements give VP but in 1v1 early training (3VP), agent already has 2
-        # Building more settlements is a DISTRACTION - agent just needs ONE city
+        # Settlements give VP and unlock city upgrades - essential for 10VP
         if step_info.get('built_settlement') or (action_name == 'build_settlement' and vp_diff > 0):
             num_settlements = new_obs.get('my_settlements', 0)
 
@@ -1005,21 +1003,13 @@ class CatanEnv(gym.Env):
                 reward_breakdown['settlement_bonus'] = settlement_bonus
 
         # ========== ROAD BUILDING BONUS ==========
-        # Roads don't give VP but are REQUIRED to build new settlements
-        # In 1v1 early training (3VP), roads are a DISTRACTION - agent just needs cities
+        # Roads are required to expand settlements - critical for 10VP
         if action_name == 'build_road' and step_info.get('success', False):
-            if self.num_players == 2:
-                # Small bonus - roads enable expansion and longest road
-                road_bonus = 2.0
-            else:
-                num_roads = new_obs.get('my_roads', 0)
-                # Base road bonus - roads enable expansion
-                road_bonus = 5.0
-                # Extra bonus for roads beyond starting 2 (shows expansion)
-                if num_roads > 2:
-                    road_bonus += 2.0 * (num_roads - 2)
-                # Cap at reasonable amount
-                road_bonus = min(road_bonus, 15.0)
+            num_roads = new_obs.get('my_roads', 0)
+            road_bonus = 5.0
+            if num_roads > 2:
+                road_bonus += 2.0 * (num_roads - 2)
+            road_bonus = min(road_bonus, 15.0)
             if road_bonus > 0:
                 reward += road_bonus
                 reward_breakdown['road_bonus'] = road_bonus
