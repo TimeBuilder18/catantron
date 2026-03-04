@@ -79,10 +79,18 @@ class PBRSFixedRewardWrapper:
         if info.get('built_city'):
             base_reward += 20.0  # On top of +10 VP gain = +30 total for a city
 
+        # Settlement expansion bonus: without this the agent VP-caps at 4VP by upgrading
+        # its 2 initial settlements to cities and never expanding. The city bonus (+20) makes
+        # cities worth +30 but settlements only +10, so the agent never bothers to place new
+        # ones. This bonus makes the road→settle→city chain (+2+20+30=52) better than hoarding
+        # resources for a direct city upgrade (+30), incentivizing map expansion.
+        if info.get('built_settlement'):
+            base_reward += 10.0  # On top of +10 VP gain = +20 total for a new settlement
+
         # Road bonus: roads are a prerequisite for expansion (road → settlement → city).
         # Without this, agent VP-caps after upgrading initial settlements to cities.
         if info.get('action_name') == 'build_road' and info.get('success', False):
-            base_reward += 2.0  # Road chain: road(2)+settle(10)+city(30)=42 over 3 actions
+            base_reward += 2.0  # Road chain: road(2)+settle(20)+city(30)=52 over 3 actions
 
         # Terminal rewards (STRONG)
         if terminated:
