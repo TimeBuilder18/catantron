@@ -1166,8 +1166,13 @@ class CurriculumTrainerV3:
 
             # Train after each batch
             if len(self.replay_buffer) >= self.batch_size:
-                # Scale train steps with batch size for consistent updates
-                effective_train_steps = max(1, train_steps * batch_size // train_frequency)
+                # Scale train steps with batch size, but cap at 1 epoch through the buffer.
+                # Without the cap, large parallel_games (e.g. 64) produces 192 gradient steps
+                # on a buffer of only ~6K experiences = 65+ epochs, causing value overfitting.
+                # Overfit value → advantages ≈ 0 → policy gradient dies.
+                scaled_steps = max(1, train_steps * batch_size // train_frequency)
+                one_epoch = max(1, len(self.replay_buffer) // self.batch_size)
+                effective_train_steps = min(scaled_steps, one_epoch)
                 losses = [self.train_step() for _ in range(effective_train_steps)]
                 losses = [l for l in losses if l]
 
@@ -1310,8 +1315,8 @@ if __name__ == "__main__":
                         help='Reward mode: sparse, vp_only, simplified, or pbrs_fixed (default)')
     parser.add_argument('--lr-decay', type=float, default=1.0,
                         help='Learning rate decay multiplier per 1000 games (default: 1.0 = no decay, try 0.95 for fine-tuning)')
-    parser.add_argument('--value-weight', type=float, default=0.5,
-                        help='Weight for value loss (default: 0.5, increased from 0.1 for better critic learning)')
+    parser.add_argument('--value-weight', type=float, default=0.1,
+                        help='Weight for value loss (default: 0.1; higher values risk value overfitting and killing policy gradient)')
     parser.add_argument('--entropy-decay', type=float, default=1.0,
                         help='Entropy coefficient decay per 1000 games (default: 1.0 = no decay, try 0.95 to reduce exploration over time)')
     parser.add_argument('--parallel-games', type=int, default=8,
