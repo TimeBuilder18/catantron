@@ -82,16 +82,10 @@ class PBRSFixedRewardWrapper:
         #   Late   (>80% of win):     DEV CARDS — largest army / VP cards seal the win
         #
         # Per-action value summary (bonus + 10 VP where applicable):
-        #   Phase     road   settle  city   dev_card
-        #   Early      +12    +35    +13      +5
-        #   Mid         +6    +25    +22      +8
-        #   Late        +3    +20    +20     +10
-        #
-        # NOTE: dev_card bonus is kept LOW because knight/road-building/YoP/monopoly
-        # cards cannot currently be PLAYED (no play_knight action in the action space).
-        # Only VP cards give real value (auto-counted in vp_diff). Overrewarding dev
-        # card purchases would incentivize buying useless cards.
-        # TODO: add play_knight action to env to unlock Largest Army path.
+        #   Phase     road   settle  city   buy_dev  play_knight  play_monopoly  play_yop
+        #   Early      +12    +25    +13      +5         +8            +6           +5
+        #   Mid         +6    +15    +22      +8         +8            +6           +5
+        #   Late        +3    +10    +20     +10         +8            +6           +5
         win_vp = self.victory_points_to_win
         phase = 'early' if current_vp < 0.5 * win_vp else ('late' if current_vp >= 0.8 * win_vp else 'mid')
 
@@ -111,6 +105,21 @@ class PBRSFixedRewardWrapper:
 
         if info.get('action_name') == 'buy_dev_card' and info.get('success', False):
             base_reward += dev_card_bonus
+
+        # Dev card play rewards: incentivize actually using cards (not just hoarding them).
+        # knight:  +8 for robber disruption + resource steal tempo (Largest Army bonus separate)
+        # monopoly: +6 base (avg steal ~2-3 resources = significant tempo swing)
+        # yop:      +5 for 2 free resources of choice (completes builds that wouldn't otherwise happen)
+        action_name = info.get('action_name', '')
+        if action_name == 'play_knight' and info.get('success', False):
+            base_reward += 8.0
+            # Bonus for actually stealing a resource (robber landed on opponent's hex)
+            if info.get('stolen_resource'):
+                base_reward += 3.0
+        elif action_name == 'play_monopoly' and info.get('success', False):
+            base_reward += 6.0
+        elif action_name == 'play_year_of_plenty' and info.get('success', False):
+            base_reward += 5.0
 
         # 1v1 strategic milestone bonuses (on top of VP reward).
         # In 1v1 these confer permanent advantage beyond just the 2 bonus VP:

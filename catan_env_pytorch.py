@@ -438,25 +438,6 @@ class CatanEnv(gym.Env):
                 self._bank_trades_this_game += 1
                 self._resources_spent_on_trades += 4  # 4:1 trade ratio
             new_obs, done, _ = self.game_env.step(self.player_id, 'wait', {})
-        else:
-            action_params = self._get_action_params(action_name, vertex_idx, edge_idx)
-            new_obs, done, step_info_from_env = self.game_env.step(
-                self.player_id, action_name, action_params
-            )
-            step_info.update(step_info_from_env)
-
-            # Track turn count for phase awareness
-            if action_name == 'end_turn':
-                self._turn_count += 1
-
-            # Track city building for rewards - ONLY if build actually succeeded!
-            if action_name == 'build_city' and step_info.get('success', False):
-                step_info['built_city'] = True
-
-            # Track settlement building for rewards - ONLY if build actually succeeded!
-            if action_name == 'build_settlement' and step_info.get('success', False):
-                step_info['built_settlement'] = True
-
         elif action_name == 'play_knight':
             player = self.game_env.game.players[self.player_id]
             success, message = self.game_env.game.play_knight_card(player)
@@ -489,8 +470,7 @@ class CatanEnv(gym.Env):
                                  if t != self.game_env.game.robber.position and t.resource is not None]
                     if available:
                         self.game_env.game.move_robber_to_tile(random.choice(available))
-            new_obs_raw, done, _ = self.game_env.step(self.player_id, 'wait', {})
-
+            new_obs, done, _ = self.game_env.step(self.player_id, 'wait', {})
         elif action_name == 'play_monopoly':
             player = self.game_env.game.players[self.player_id]
             resource_map = [ResourceType.WOOD, ResourceType.BRICK, ResourceType.WHEAT,
@@ -499,8 +479,7 @@ class CatanEnv(gym.Env):
             success, message = self.game_env.game.play_monopoly_card(player, resource)
             step_info['success'] = success
             step_info['message'] = message
-            new_obs_raw, done, _ = self.game_env.step(self.player_id, 'wait', {})
-
+            new_obs, done, _ = self.game_env.step(self.player_id, 'wait', {})
         elif action_name == 'play_year_of_plenty':
             player = self.game_env.game.players[self.player_id]
             resource_map = [ResourceType.WOOD, ResourceType.BRICK, ResourceType.WHEAT,
@@ -510,7 +489,25 @@ class CatanEnv(gym.Env):
             success, message = self.game_env.game.play_year_of_plenty_card(player, res1, res2)
             step_info['success'] = success
             step_info['message'] = message
-            new_obs_raw, done, _ = self.game_env.step(self.player_id, 'wait', {})
+            new_obs, done, _ = self.game_env.step(self.player_id, 'wait', {})
+        else:
+            action_params = self._get_action_params(action_name, vertex_idx, edge_idx)
+            new_obs, done, step_info_from_env = self.game_env.step(
+                self.player_id, action_name, action_params
+            )
+            step_info.update(step_info_from_env)
+
+            # Track turn count for phase awareness
+            if action_name == 'end_turn':
+                self._turn_count += 1
+
+            # Track city building for rewards - ONLY if build actually succeeded!
+            if action_name == 'build_city' and step_info.get('success', False):
+                step_info['built_city'] = True
+
+            # Track settlement building for rewards - ONLY if build actually succeeded!
+            if action_name == 'build_settlement' and step_info.get('success', False):
+                step_info['built_settlement'] = True
 
         new_potential = self._calculate_potential(self.game_env.game.players[self.player_id])
         winner = self.game_env.game.check_victory_conditions()

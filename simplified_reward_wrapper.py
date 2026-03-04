@@ -88,6 +88,17 @@ class SimplifiedRewardWrapper:
             if info.get('action_name') == 'build_road' and info.get('success', False):
                 reward += 2.0  # Reduced from 4.0: road chain 2+10+30=42 over 3 actions (14/action) vs city 30/action
 
+            # Dev card play rewards: incentivize using cards, not hoarding them
+            action_name = info.get('action_name', '')
+            if action_name == 'play_knight' and info.get('success', False):
+                reward += 8.0
+                if info.get('stolen_resource'):
+                    reward += 3.0  # Bonus for actually stealing a resource
+            elif action_name == 'play_monopoly' and info.get('success', False):
+                reward += 6.0
+            elif action_name == 'play_year_of_plenty' and info.get('success', False):
+                reward += 5.0
+
             # Win bonus (must dominate sum of all VP-step rewards so winning is #1 objective)
             if terminated:
                 winner_id = info.get('winner_id', None)
@@ -117,6 +128,17 @@ class SimplifiedRewardWrapper:
             # Road bonus: same fix as vp_only — roads must have non-zero reward
             if info.get('action_name') == 'build_road' and info.get('success', False):
                 reward += 2.0  # Enables settlement → city expansion chain
+
+            # Dev card play rewards
+            action_name = info.get('action_name', '')
+            if action_name == 'play_knight' and info.get('success', False):
+                reward += 8.0
+                if info.get('stolen_resource'):
+                    reward += 3.0
+            elif action_name == 'play_monopoly' and info.get('success', False):
+                reward += 6.0
+            elif action_name == 'play_year_of_plenty' and info.get('success', False):
+                reward += 5.0
 
             # Small inaction penalty (encourage action)
             if info.get('action_name') == 'end_turn':
