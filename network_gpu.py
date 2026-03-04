@@ -130,7 +130,7 @@ class CatanPolicy(nn.Module):
         self.ln3 = nn.LayerNorm(256)
 
         # === Output Heads (unchanged) ===
-        self.policy_head = nn.Linear(256, 11)  # 11 action types
+        self.policy_head = nn.Linear(256, 14)  # 14 action types (added play_knight/monopoly/yop)
         self.location_head_vertex = nn.Linear(256, 54)  # 54 vertices
         self.location_head_edge = nn.Linear(256, 72)  # 72 edges
         self.trade_give_head = nn.Linear(256, 5)  # 5 resources (unused in 1v1)
@@ -291,14 +291,14 @@ if __name__ == "__main__":
 
     batch_size = 8
     obs = torch.randn(batch_size, TOTAL_OBS_DIM).to(net.device)
-    action_mask = torch.ones(batch_size, 11).to(net.device)
+    action_mask = torch.ones(batch_size, 14).to(net.device)
     vertex_mask = torch.ones(batch_size, 54).to(net.device)
     edge_mask = torch.ones(batch_size, 72).to(net.device)
 
     out = net.forward(obs, action_mask, vertex_mask, edge_mask)
     action_probs, vertex_probs, edge_probs, tg, tk, value = out
 
-    assert action_probs.shape == (batch_size, 11), f"Bad action shape: {action_probs.shape}"
+    assert action_probs.shape == (batch_size, 14), f"Bad action shape: {action_probs.shape}"
     assert vertex_probs.shape == (batch_size, 54), f"Bad vertex shape: {vertex_probs.shape}"
     assert edge_probs.shape == (batch_size, 72), f"Bad edge shape: {edge_probs.shape}"
     assert value.shape == (batch_size, 1), f"Bad value shape: {value.shape}"

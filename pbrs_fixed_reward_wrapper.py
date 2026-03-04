@@ -25,6 +25,8 @@ class PBRSFixedRewardWrapper:
         self.last_vp = 0
         self.gamma = 0.99
         self.victory_points_to_win = victory_points_to_win
+        self.last_has_largest_army = False
+        self.last_has_longest_road = False
 
     def reset(self):
         obs, info = self.env.reset()
@@ -32,6 +34,8 @@ class PBRSFixedRewardWrapper:
         player = self.env.game_env.game.players[self.player_id]
         self.last_potential = self._calculate_scaled_potential(player)
         self.last_vp = obs.get('my_victory_points', 0)
+        self.last_has_largest_army = player.has_largest_army
+        self.last_has_longest_road = player.has_longest_road
         return obs, info
 
     def _calculate_scaled_potential(self, player):
@@ -72,25 +76,72 @@ class PBRSFixedRewardWrapper:
         if vp_diff > 0:
             base_reward += vp_diff * 10.0  # +10 per VP
 
-        # City-specific bonus: cities cost 3 ore + 2 wheat (vs 4 resources for a settlement)
-        # but are strategically superior (2x production). Without an explicit bonus they're
-        # only +10 (same as a settlement), so the agent correctly avoids them.
-        # This bonus makes city-building clearly dominant (+30 total) over other actions.
+        # Phase-aware bonuses: optimal Catan strategy changes through the game.
+        #   Early  (VP < 50% of win): EXPAND — roads + settlements claim territory
+        #   Mid    (50–80% of win):   CITIES — upgrade production to fund endgame
+        #   Late   (>80% of win):     DEV CARDS — largest army / VP cards seal the win
+        #
+        # Per-action value summary (bonus + 10 VP where applicable):
+        #   Phase     road   settle  city   buy_dev  play_knight  play_monopoly  play_yop
+        #   Early      +12    +25    +13      +5         +8            +6           +5
+        #   Mid         +6    +15    +22      +8         +8            +6           +5
+        #   Late        +3    +10    +20     +10         +8            +6           +5
+        win_vp = self.victory_points_to_win
+        phase = 'early' if current_vp < 0.5 * win_vp else ('late' if current_vp >= 0.8 * win_vp else 'mid')
+
+        road_bonus      = {'early': 12, 'mid':  6, 'late':  3}[phase]
+        settle_bonus    = {'early': 25, 'mid': 15, 'late': 10}[phase]
+        city_bonus      = {'early':  3, 'mid': 12, 'late': 10}[phase]
+        dev_card_bonus  = {'early':  5, 'mid':  8, 'late': 10}[phase]
+
         if info.get('built_city'):
-            base_reward += 20.0  # On top of +10 VP gain = +30 total for a city
+            base_reward += city_bonus
 
-        # Settlement expansion bonus: without this the agent VP-caps at 4VP by upgrading
-        # its 2 initial settlements to cities and never expanding. The city bonus (+20) makes
-        # cities worth +30 but settlements only +10, so the agent never bothers to place new
-        # ones. This bonus makes the road→settle→city chain (+2+20+30=52) better than hoarding
-        # resources for a direct city upgrade (+30), incentivizing map expansion.
         if info.get('built_settlement'):
-            base_reward += 10.0  # On top of +10 VP gain = +20 total for a new settlement
+            base_reward += settle_bonus
 
-        # Road bonus: roads are a prerequisite for expansion (road → settlement → city).
-        # Without this, agent VP-caps after upgrading initial settlements to cities.
         if info.get('action_name') == 'build_road' and info.get('success', False):
-            base_reward += 2.0  # Road chain: road(2)+settle(20)+city(30)=52 over 3 actions
+            base_reward += road_bonus
+
+        if info.get('action_name') == 'buy_dev_card' and info.get('success', False):
+            base_reward += dev_card_bonus
+
+        # Dev card play rewards
+        # Reward hierarchy (from most to least valuable per play):
+        #   monopoly:  +3 per card stolen (steal 5 = +15, steal 0 = +0, typically > knight)
+        #   knight:    +8 base (robber blocks best hex) + 3 steal + 5 if steal completes a build
+        #   yop:       +5 (2 free resources of choice — targeted, not luck-based)
+        #
+        # VP dev card (auto on purchase): vp_diff already gives +10, plus explicit +15 bonus
+        # so VP card buy = +10 VP + +15 bonus + dev_card_bonus = strongest single buy action
+        action_name = info.get('action_name', '')
+        if action_name == 'play_knight' and info.get('success', False):
+            base_reward += 8.0  # Robber disruption value (Largest Army bonus tracked separately)
+            if info.get('stolen_resource'):
+                base_reward += 3.0  # Stole a resource (now always guaranteed if opponent has any)
+                if info.get('steal_completes_build'):
+                    base_reward += 5.0  # Stolen card was the last one needed for a build
+        elif action_name == 'play_monopoly' and info.get('success', False):
+            stolen_count = info.get('stolen_count', 0)
+            base_reward += stolen_count * 3.0  # +3 per card stolen; beats knight when you steal 4+
+        elif action_name == 'play_year_of_plenty' and info.get('success', False):
+            base_reward += 5.0  # 2 targeted free resources (completes builds)
+        elif action_name == 'buy_dev_card' and info.get('got_vp_card'):
+            base_reward += 15.0  # VP card = instant +1 VP. vp_diff gives +10, this seals the deal.
+
+        # 1v1 strategic milestone bonuses (on top of VP reward).
+        # In 1v1 these confer permanent advantage beyond just the 2 bonus VP:
+        #   Largest Army = ongoing robber control (suppress opponent's best hex every turn)
+        #   Longest Road = map denial (cuts expansion routes, forces opponent to spend resources)
+        # The VP signal alone undersells these since their denial value doesn't show up in VP.
+        has_largest_army = player.has_largest_army
+        has_longest_road = player.has_longest_road
+        if has_largest_army and not self.last_has_largest_army:
+            base_reward += 30.0  # Gained Largest Army: +2 VP already counted + denial bonus
+        if has_longest_road and not self.last_has_longest_road:
+            base_reward += 20.0  # Gained Longest Road: +2 VP already counted + map control bonus
+        self.last_has_largest_army = has_largest_army
+        self.last_has_longest_road = has_longest_road
 
         # Terminal rewards (STRONG)
         if terminated:

@@ -75,11 +75,33 @@ class SimplifiedRewardWrapper:
             if vp_gain > 0:
                 reward += vp_gain * 10.0  # +10 per VP
 
+            # City bonus: cities cost more resources but are strategically superior.
+            # Without this, vp_only treats city and settlement identically (+10 VP each).
+            # City total = 10 (VP) + 20 (bonus) = 30. Road chain = 2+10+20=32 over 3 actions
+            # (10.7/action) vs city alone (30/action) — cities still clearly best single action.
+            if info.get('built_city'):
+                reward += 20.0
+
             # Road bonus: roads are prerequisite for settlement expansion → more cities.
             # Without this, agent never learns to build roads and VP caps at ~4
             # (2 initial settlements upgraded to cities → stuck, no new settlement spots).
             if info.get('action_name') == 'build_road' and info.get('success', False):
-                reward += 4.0  # Road chain: 4+10+10=24 over 3 actions (8/action) vs city 10/action — competitive enough to explore
+                reward += 2.0  # Reduced from 4.0: road chain 2+10+30=42 over 3 actions (14/action) vs city 30/action
+
+            # Dev card play rewards
+            action_name = info.get('action_name', '')
+            if action_name == 'play_knight' and info.get('success', False):
+                reward += 8.0
+                if info.get('stolen_resource'):
+                    reward += 3.0
+                    if info.get('steal_completes_build'):
+                        reward += 5.0  # Stolen card unlocked a build
+            elif action_name == 'play_monopoly' and info.get('success', False):
+                reward += info.get('stolen_count', 0) * 3.0  # +3 per card stolen
+            elif action_name == 'play_year_of_plenty' and info.get('success', False):
+                reward += 5.0
+            elif action_name == 'buy_dev_card' and info.get('got_vp_card'):
+                reward += 15.0  # VP card: instant +1 VP (vp_diff gives +10 too)
 
             # Win bonus (must dominate sum of all VP-step rewards so winning is #1 objective)
             if terminated:
@@ -109,7 +131,22 @@ class SimplifiedRewardWrapper:
 
             # Road bonus: same fix as vp_only — roads must have non-zero reward
             if info.get('action_name') == 'build_road' and info.get('success', False):
-                reward += 4.0  # Enables settlement → city expansion chain
+                reward += 2.0  # Enables settlement → city expansion chain
+
+            # Dev card play rewards
+            action_name = info.get('action_name', '')
+            if action_name == 'play_knight' and info.get('success', False):
+                reward += 8.0
+                if info.get('stolen_resource'):
+                    reward += 3.0
+                    if info.get('steal_completes_build'):
+                        reward += 5.0
+            elif action_name == 'play_monopoly' and info.get('success', False):
+                reward += info.get('stolen_count', 0) * 3.0
+            elif action_name == 'play_year_of_plenty' and info.get('success', False):
+                reward += 5.0
+            elif action_name == 'buy_dev_card' and info.get('got_vp_card'):
+                reward += 15.0
 
             # Small inaction penalty (encourage action)
             if info.get('action_name') == 'end_turn':
