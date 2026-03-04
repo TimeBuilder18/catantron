@@ -88,16 +88,20 @@ class SimplifiedRewardWrapper:
             if info.get('action_name') == 'build_road' and info.get('success', False):
                 reward += 2.0  # Reduced from 4.0: road chain 2+10+30=42 over 3 actions (14/action) vs city 30/action
 
-            # Dev card play rewards: incentivize using cards, not hoarding them
+            # Dev card play rewards
             action_name = info.get('action_name', '')
             if action_name == 'play_knight' and info.get('success', False):
                 reward += 8.0
                 if info.get('stolen_resource'):
-                    reward += 3.0  # Bonus for actually stealing a resource
+                    reward += 3.0
+                    if info.get('steal_completes_build'):
+                        reward += 5.0  # Stolen card unlocked a build
             elif action_name == 'play_monopoly' and info.get('success', False):
-                reward += 6.0
+                reward += info.get('stolen_count', 0) * 3.0  # +3 per card stolen
             elif action_name == 'play_year_of_plenty' and info.get('success', False):
                 reward += 5.0
+            elif action_name == 'buy_dev_card' and info.get('got_vp_card'):
+                reward += 15.0  # VP card: instant +1 VP (vp_diff gives +10 too)
 
             # Win bonus (must dominate sum of all VP-step rewards so winning is #1 objective)
             if terminated:
@@ -135,10 +139,14 @@ class SimplifiedRewardWrapper:
                 reward += 8.0
                 if info.get('stolen_resource'):
                     reward += 3.0
+                    if info.get('steal_completes_build'):
+                        reward += 5.0
             elif action_name == 'play_monopoly' and info.get('success', False):
-                reward += 6.0
+                reward += info.get('stolen_count', 0) * 3.0
             elif action_name == 'play_year_of_plenty' and info.get('success', False):
                 reward += 5.0
+            elif action_name == 'buy_dev_card' and info.get('got_vp_card'):
+                reward += 15.0
 
             # Small inaction penalty (encourage action)
             if info.get('action_name') == 'end_turn':

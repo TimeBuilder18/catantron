@@ -106,20 +106,28 @@ class PBRSFixedRewardWrapper:
         if info.get('action_name') == 'buy_dev_card' and info.get('success', False):
             base_reward += dev_card_bonus
 
-        # Dev card play rewards: incentivize actually using cards (not just hoarding them).
-        # knight:  +8 for robber disruption + resource steal tempo (Largest Army bonus separate)
-        # monopoly: +6 base (avg steal ~2-3 resources = significant tempo swing)
-        # yop:      +5 for 2 free resources of choice (completes builds that wouldn't otherwise happen)
+        # Dev card play rewards
+        # Reward hierarchy (from most to least valuable per play):
+        #   monopoly:  +3 per card stolen (steal 5 = +15, steal 0 = +0, typically > knight)
+        #   knight:    +8 base (robber blocks best hex) + 3 steal + 5 if steal completes a build
+        #   yop:       +5 (2 free resources of choice — targeted, not luck-based)
+        #
+        # VP dev card (auto on purchase): vp_diff already gives +10, plus explicit +15 bonus
+        # so VP card buy = +10 VP + +15 bonus + dev_card_bonus = strongest single buy action
         action_name = info.get('action_name', '')
         if action_name == 'play_knight' and info.get('success', False):
-            base_reward += 8.0
-            # Bonus for actually stealing a resource (robber landed on opponent's hex)
+            base_reward += 8.0  # Robber disruption value (Largest Army bonus tracked separately)
             if info.get('stolen_resource'):
-                base_reward += 3.0
+                base_reward += 3.0  # Stole a resource (now always guaranteed if opponent has any)
+                if info.get('steal_completes_build'):
+                    base_reward += 5.0  # Stolen card was the last one needed for a build
         elif action_name == 'play_monopoly' and info.get('success', False):
-            base_reward += 6.0
+            stolen_count = info.get('stolen_count', 0)
+            base_reward += stolen_count * 3.0  # +3 per card stolen; beats knight when you steal 4+
         elif action_name == 'play_year_of_plenty' and info.get('success', False):
-            base_reward += 5.0
+            base_reward += 5.0  # 2 targeted free resources (completes builds)
+        elif action_name == 'buy_dev_card' and info.get('got_vp_card'):
+            base_reward += 15.0  # VP card = instant +1 VP. vp_diff gives +10, this seals the deal.
 
         # 1v1 strategic milestone bonuses (on top of VP reward).
         # In 1v1 these confer permanent advantage beyond just the 2 bonus VP:

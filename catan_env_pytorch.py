@@ -439,17 +439,18 @@ class CatanEnv(gym.Env):
                 self._resources_spent_on_trades += 4  # 4:1 trade ratio
             new_obs, done, _ = self.game_env.step(self.player_id, 'wait', {})
         elif action_name == 'play_knight':
+            import random
             player = self.game_env.game.players[self.player_id]
+            # Snapshot resources before steal to detect "completed a build"
+            res_before = dict(player.resources)
             success, message = self.game_env.game.play_knight_card(player)
             step_info['success'] = success
             step_info['message'] = message
             if success:
-                # Auto-move robber to opponent's best hex (same logic as 7-roll handler)
+                # Move robber to best opponent hex
                 best_tile = self.game_env._find_best_robber_tile(self.player_id)
                 if best_tile:
                     self.game_env.game.move_robber_to_tile(best_tile)
-                    # Try to steal from richest opponent on that tile
-                    import random
                     opponents_on_tile = []
                     for vertex in self.game_env.game.game_board.vertices:
                         if best_tile in vertex.adjacent_tiles and vertex.structure:
@@ -465,11 +466,47 @@ class CatanEnv(gym.Env):
                             player.resources[stolen] = player.resources.get(stolen, 0) + 1
                             step_info['stolen_resource'] = str(stolen)
                 else:
-                    import random
                     available = [t for t in self.game_env.game.game_board.tiles
                                  if t != self.game_env.game.robber.position and t.resource is not None]
                     if available:
                         self.game_env.game.move_robber_to_tile(random.choice(available))
+
+                # Always steal: if no steal from tile, steal from richest opponent globally
+                if not step_info.get('stolen_resource'):
+                    all_opponents = [p for p in self.game_env.game.players if p != player]
+                    if all_opponents:
+                        richest = max(all_opponents, key=lambda p: sum(p.resources.values()))
+                        stealable = [r for r, amt in richest.resources.items() if amt > 0]
+                        if stealable:
+                            stolen = random.choice(stealable)
+                            richest.resources[stolen] -= 1
+                            player.resources[stolen] = player.resources.get(stolen, 0) + 1
+                            step_info['stolen_resource'] = str(stolen)
+
+                # Check if stolen resource completed a build the player was one card short of
+                if step_info.get('stolen_resource'):
+                    stolen_type = None
+                    for rt in ResourceType:
+                        if str(rt) == step_info['stolen_resource'] or rt.value == step_info['stolen_resource'].lower().replace('resourcetype.', ''):
+                            stolen_type = rt
+                            break
+                    if stolen_type is not None:
+                        build_costs = [
+                            {ResourceType.ORE: 3, ResourceType.WHEAT: 2},                          # city
+                            {ResourceType.WOOD: 1, ResourceType.BRICK: 1,
+                             ResourceType.WHEAT: 1, ResourceType.SHEEP: 1},                       # settlement
+                            {ResourceType.ORE: 1, ResourceType.WHEAT: 1, ResourceType.SHEEP: 1},  # dev card
+                            {ResourceType.WOOD: 1, ResourceType.BRICK: 1},                        # road
+                        ]
+                        res_after = player.resources
+                        for cost in build_costs:
+                            # Can afford after steal but couldn't before
+                            can_now = all(res_after.get(r, 0) >= amt for r, amt in cost.items())
+                            could_before = all(res_before.get(r, 0) >= amt for r, amt in cost.items())
+                            if can_now and not could_before:
+                                step_info['steal_completes_build'] = True
+                                break
+
             new_obs, done, _ = self.game_env.step(self.player_id, 'wait', {})
         elif action_name == 'play_monopoly':
             player = self.game_env.game.players[self.player_id]
@@ -479,6 +516,13 @@ class CatanEnv(gym.Env):
             success, message = self.game_env.game.play_monopoly_card(player, resource)
             step_info['success'] = success
             step_info['message'] = message
+            # Parse stolen count from message: "Monopoly: Stole 5 wood from other players"
+            if success:
+                try:
+                    stolen_count = int(message.split('Stole ')[1].split(' ')[0])
+                    step_info['stolen_count'] = stolen_count
+                except (IndexError, ValueError):
+                    step_info['stolen_count'] = 0
             new_obs, done, _ = self.game_env.step(self.player_id, 'wait', {})
         elif action_name == 'play_year_of_plenty':
             player = self.game_env.game.players[self.player_id]
@@ -508,6 +552,12 @@ class CatanEnv(gym.Env):
             # Track settlement building for rewards - ONLY if build actually succeeded!
             if action_name == 'build_settlement' and step_info.get('success', False):
                 step_info['built_settlement'] = True
+
+            # Detect VP dev card purchase: VP cards auto-apply on buy ("Bought Victory Point")
+            if action_name == 'buy_dev_card' and step_info.get('success', False):
+                msg = step_info.get('message', '')
+                if 'Victory Point' in msg or 'victory_point' in msg.lower():
+                    step_info['got_vp_card'] = True
 
         new_potential = self._calculate_potential(self.game_env.game.players[self.player_id])
         winner = self.game_env.game.check_victory_conditions()
