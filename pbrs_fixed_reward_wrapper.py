@@ -83,16 +83,22 @@ class PBRSFixedRewardWrapper:
         #
         # Per-action value summary (bonus + 10 VP where applicable):
         #   Phase     road   settle  city   dev_card
-        #   Early      +12    +35    +13      +8
-        #   Mid         +6    +25    +22     +15
-        #   Late        +3    +20    +20     +25
+        #   Early      +12    +35    +13      +5
+        #   Mid         +6    +25    +22      +8
+        #   Late        +3    +20    +20     +10
+        #
+        # NOTE: dev_card bonus is kept LOW because knight/road-building/YoP/monopoly
+        # cards cannot currently be PLAYED (no play_knight action in the action space).
+        # Only VP cards give real value (auto-counted in vp_diff). Overrewarding dev
+        # card purchases would incentivize buying useless cards.
+        # TODO: add play_knight action to env to unlock Largest Army path.
         win_vp = self.victory_points_to_win
         phase = 'early' if current_vp < 0.5 * win_vp else ('late' if current_vp >= 0.8 * win_vp else 'mid')
 
         road_bonus      = {'early': 12, 'mid':  6, 'late':  3}[phase]
         settle_bonus    = {'early': 25, 'mid': 15, 'late': 10}[phase]
         city_bonus      = {'early':  3, 'mid': 12, 'late': 10}[phase]
-        dev_card_bonus  = {'early':  8, 'mid': 15, 'late': 25}[phase]
+        dev_card_bonus  = {'early':  5, 'mid':  8, 'late': 10}[phase]
 
         if info.get('built_city'):
             base_reward += city_bonus
