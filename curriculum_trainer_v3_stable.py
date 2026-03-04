@@ -886,13 +886,8 @@ class CurriculumTrainerV3:
         )
         value = value.squeeze()
 
-        # Normalize returns to a stable scale for value learning.
-        # Raw returns can range [-200, 300], making MSE huge and drowning the policy gradient.
-        # Z-scoring them makes value loss ~1.0 when calibrated, keeping it from dominating.
-        returns_norm = (returns - returns.mean()) / (returns.std() + 1e-8)
-
-        # Compute advantages using normalized returns so value head and advantages are consistent
-        advantages = returns_norm - value.detach()
+        # Compute advantages (shared across all policy heads)
+        advantages = returns - value.detach()
         # Normalize advantages
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
@@ -941,8 +936,8 @@ class CurriculumTrainerV3:
         entropy_penalty = self._compute_smooth_entropy_penalty(total_entropy.item())
         entropy_penalty_tensor = torch.tensor(entropy_penalty, device=self.device)
 
-        # Value loss on normalized scale (expected ~1.0 when well-calibrated)
-        value_loss = F.mse_loss(value, returns_norm)
+        # Value loss (raw returns; value_weight=0.1 keeps this from drowning policy gradient)
+        value_loss = F.mse_loss(value, returns)
 
         # Approximate KL divergence for monitoring (action head)
         kl_div = 0.5 * ((action_ratio - 1) ** 2).mean()
