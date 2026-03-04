@@ -320,8 +320,15 @@ class CatanEnv(gym.Env):
                 if action_name in action_map:
                     action_mask[action_map[action_name]] = 1
             # Dev card play actions (not in legal_actions from game_env, computed manually)
+            # Respect real Catan rules: can't play a card bought this turn; only one per turn
             player = self.game_env.game.players[self.player_id]
-            if self.game_env.game.can_trade_or_build():
+            game = self.game_env.game
+            can_play_dev = (
+                game.can_trade_or_build() and
+                not game.dev_card_bought_this_turn and
+                not game.dev_card_played_this_turn
+            )
+            if can_play_dev:
                 if player.development_cards.get(DevelopmentCardType.KNIGHT, 0) > 0:
                     action_mask[11] = 1  # play_knight
                 if player.development_cards.get(DevelopmentCardType.MONOPOLY, 0) > 0:

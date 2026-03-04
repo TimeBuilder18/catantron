@@ -823,6 +823,10 @@ class GameSystem:
         self.last_resource_gains = None
         self.turn_number = 1
 
+        # Dev card play restrictions (real Catan rules)
+        self.dev_card_bought_this_turn = False   # Can't play a card bought this turn
+        self.dev_card_played_this_turn = False   # Only one dev card play per turn
+
         # Game objects
         self.robber = Robber()
         self.dev_deck = DevelopmentCardDeck()
@@ -922,6 +926,9 @@ class GameSystem:
         self.last_dice_roll = (die1, die2, total)
         self.dice_rolled = True
         self.turn_phase = "TRADE_BUILD"
+        # Reset per-turn dev card flags for the new active turn
+        self.dev_card_bought_this_turn = False
+        self.dev_card_played_this_turn = False
 
         if total == 7:
             # When 7 is rolled, players with 8+ cards must discard half
@@ -1131,7 +1138,10 @@ class GameSystem:
         if not self.can_trade_or_build():
             return False, "Cannot buy cards now"
 
-        return player.try_buy_development_card(self.dev_deck)
+        success, message = player.try_buy_development_card(self.dev_deck)
+        if success:
+            self.dev_card_bought_this_turn = True
+        return success, message
 
     def can_play_development_card(self, player, card_type):
         """Check if player can play a development card"""
@@ -1140,6 +1150,13 @@ class GameSystem:
 
         if not self.can_trade_or_build():
             return False, "Can only play cards during your turn"
+
+        # Real Catan rules: can't play a card bought this turn, only one card per turn
+        if self.dev_card_bought_this_turn:
+            return False, "Cannot play a development card bought this turn"
+
+        if self.dev_card_played_this_turn:
+            return False, "Can only play one development card per turn"
 
         return True, "Can play card"
 
@@ -1152,6 +1169,7 @@ class GameSystem:
         player.development_cards[DevelopmentCardType.KNIGHT] -= 1
         player.knights_played += 1
         self.update_largest_army()
+        self.dev_card_played_this_turn = True
 
         return True, "Knight played - move the robber and steal from a player"
 
@@ -1164,6 +1182,7 @@ class GameSystem:
         player.development_cards[DevelopmentCardType.YEAR_OF_PLENTY] -= 1
         player.add_resource(resource1, 1)
         player.add_resource(resource2, 1)
+        self.dev_card_played_this_turn = True
 
         return True, f"Year of Plenty: Gained 1 {resource1.value} and 1 {resource2.value}"
 
@@ -1175,6 +1194,7 @@ class GameSystem:
 
         player.development_cards[DevelopmentCardType.ROAD_BUILDING] -= 1
         self.free_roads_remaining = 2
+        self.dev_card_played_this_turn = True
         return True, "Road Building: Click 2 edges to build free roads"
 
     def try_build_free_road(self, edge, player=None):
@@ -1216,6 +1236,7 @@ class GameSystem:
                     player.add_resource(resource_type, amount)
                     total_stolen += amount
 
+        self.dev_card_played_this_turn = True
         return True, f"Monopoly: Stole {total_stolen} {resource_type.value} from other players"
 
     # ==================== ROBBER SYSTEM ====================
