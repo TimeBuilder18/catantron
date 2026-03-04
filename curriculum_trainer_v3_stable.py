@@ -1009,15 +1009,19 @@ class CurriculumTrainerV3:
             # The key insight: if agent is IMPROVING VP (e.g., 3.5 -> 4.0 -> 4.5),
             # it's learning even if WR is low. Let it advance to see if it can improve.
             min_wr_by_difficulty = {
-                # passive: agent should dominate a player that never builds
-                'passive': 0.35,       # 35% WR vs passive (agent must actually learn to build)
-                'truly_random': 0.25,  # 25% WR vs truly random (was 0.10 - too low, caused premature advancement)
-                'weighted_random': 0.22,  # 22% WR vs weighted random
-                'random': 0.20,        # 20% WR vs rule-based "random"
-                'very_weak': 0.15,     # 15% WR vs VeryWeak
-                'weak': 0.10,          # 10% WR vs Weak
-                'medium': 0.05,        # 5% WR vs Medium
-                'strong': 0.02,        # 2% WR vs Strong
+                # All phases at 10VP now - thresholds reflect realistic 10VP win rates.
+                # vs passive (never builds): agent should comfortably win 60%+
+                'passive': 0.60,
+                # vs truly_random (15% build rate): expect ~40-55% WR
+                'truly_random': 0.35,
+                # vs weighted_random: expect ~25-35% WR
+                'weighted_random': 0.22,
+                # vs rule-based random (85% build rate): expect ~20-25% WR
+                'random': 0.20,
+                'very_weak': 0.15,
+                'weak': 0.10,
+                'medium': 0.05,
+                'strong': 0.02,
             }
         else:
             # 4-player mode: 25% baseline, lower thresholds
@@ -1057,29 +1061,27 @@ class CurriculumTrainerV3:
             # - Very low VP targets (3 VP = just build 1 settlement)
             # - Gradual difficulty increase only after agent learns to build
             phases = [
-                # Phase 0: Learn to build ANYTHING vs passive opponent
-                # VP threshold 2.2 chosen so WR threshold (38%) is the binding constraint:
-                # at 38% WR avg_vp = 0.38*3 + 0.62*2 = 2.38 > 2.2, so WR gates progression.
-                ('passive', None, 1.0, 3, 2.2, "1v1 Passive 3VP"),   # Just build 1 thing!
-                ('passive', None, 1.0, 4, 2.4, "1v1 Passive 4VP"),   # Build 2 things (WR ~22%)
-                ('passive', None, 1.0, 5, 2.6, "1v1 Passive 5VP"),   # Build 3 things (WR ~15%)
-                # Phase 1: Introduce truly_random (15% build chance)
-                # VP thresholds ~50% of VP-to-win - gradual progression
-                ('truly_random', 'passive', 0.5, 5, 3.0, "1v1 TrulyRandom/Passive"),
-                ('truly_random', None, 1.0, 6, 3.5, "1v1 TrulyRandom 6VP"),    # 58% of 6VP
-                ('truly_random', None, 1.0, 7, 4.0, "1v1 TrulyRandom 7VP"),    # 57% of 7VP
-                ('truly_random', None, 1.0, 8, 4.5, "1v1 TrulyRandom 8VP"),    # 56% of 8VP
-                ('truly_random', None, 1.0, 9, 5.0, "1v1 TrulyRandom 9VP"),    # 55% of 9VP
-                ('truly_random', None, 1.0, 10, 4.5, "1v1 TrulyRandom 10VP"),  # 45% of 10VP (lowered - agent caps at ~4.5 VP at 10% WR)
+                # ALL phases at 10VP - a 3VP game is fundamentally different from a 10VP game.
+                # Low-VP phases teach wrong strategies (1 city wins!) that must be unlearned.
+                # Progression is purely by opponent difficulty.
+                #
+                # VP threshold formula for 10VP games (rough): avg_vp ≈ WR*5 + 5
+                # (winner gets 10, loser averages ~5 at game end)
+                #
+                # Phase 0: Learn to build vs passive (never builds, never ends turn strategically)
+                # Expect 80%+ WR → avg_vp ~9. Threshold 7.5 ensures real learning.
+                ('passive', None, 1.0, 10, 7.5, "1v1 Passive"),
+                # Phase 1: Mix in truly_random (15% build chance)
+                # Expect 55-65% WR → avg_vp ~7.5-8.3. Thresholds reflect real 10VP play.
+                ('truly_random', 'passive', 0.5, 10, 6.5, "1v1 TrulyRandom/Passive"),
+                ('truly_random', None, 1.0, 10, 6.0, "1v1 TrulyRandom"),
                 # Phase 2: WeightedRandom bridge (catanatron-style weighted actions)
-                # Bridges gap between truly_random (15% build) and random (85% build)
-                ('weighted_random', 'truly_random', 0.5, 10, 5.2, "1v1 WeightedRandom/TrulyRandom"),
-                ('weighted_random', None, 1.0, 10, 5.5, "1v1 WeightedRandom 10VP"),
-                # Phase 3: Transition to rule-based random (85% build)
+                ('weighted_random', 'truly_random', 0.5, 10, 5.5, "1v1 WeightedRandom/TrulyRandom"),
+                ('weighted_random', None, 1.0, 10, 5.5, "1v1 WeightedRandom"),
+                # Phase 3: Rule-based random (85% build rate)
                 ('random', 'weighted_random', 0.5, 10, 5.0, "1v1 Random/WeightedRandom"),
-                ('random', None, 1.0, 10, 5.5, "1v1 Random 10VP"),
+                ('random', None, 1.0, 10, 5.5, "1v1 Random"),
                 # Phase 4: Opponent difficulty progression
-                # VP thresholds decrease as opponents get harder (they steal VP)
                 ('very_weak', 'random', 0.5, 10, 5.0, "1v1 VeryWeak/Random"),
                 ('weak', 'very_weak', 0.5, 10, 4.5, "1v1 Weak/VeryWeak"),
                 ('medium', 'weak', 0.5, 10, 4.0, "1v1 Medium/Weak"),
@@ -1339,41 +1341,27 @@ if __name__ == "__main__":
         if args.num_players == 2:
             # MUST match the actual phases used in train() method!
             phases = [
-                # Phase 0-2: Learn to build ANYTHING vs passive opponent
-                # VP thresholds calibrated so WR threshold (38%) is the binding constraint.
-                # At 38% WR in a 3VP game: avg_vp = 0.38*3 + 0.62*2 = 2.38 > 2.2 ✓
-                ('passive', None, 1.0, 3, 2.2, "1v1 Passive 3VP"),
-                ('passive', None, 1.0, 4, 2.4, "1v1 Passive 4VP"),
-                ('passive', None, 1.0, 5, 2.6, "1v1 Passive 5VP"),
-                # Phase 3-8: Introduce truly_random (15% build chance)
-                # VP thresholds ~50-55% of VP-to-win - gradual progression
-                ('truly_random', 'passive', 0.5, 5, 3.0, "1v1 TrulyRandom/Passive"),
-                ('truly_random', None, 1.0, 6, 3.5, "1v1 TrulyRandom 6VP"),    # 58% of 6VP
-                ('truly_random', None, 1.0, 7, 4.0, "1v1 TrulyRandom 7VP"),    # 57% of 7VP
-                ('truly_random', None, 1.0, 8, 4.5, "1v1 TrulyRandom 8VP"),    # 56% of 8VP
-                ('truly_random', None, 1.0, 9, 5.0, "1v1 TrulyRandom 9VP"),    # 55% of 9VP
-                ('truly_random', None, 1.0, 10, 4.5, "1v1 TrulyRandom 10VP"),  # 45% of 10VP (lowered - agent caps at ~4.5 VP at 10% WR)
-                # Phase 9-10: WeightedRandom bridge (catanatron-style weighted actions)
-                ('weighted_random', 'truly_random', 0.5, 10, 5.2, "1v1 WeightedRandom/TrulyRandom"),
-                ('weighted_random', None, 1.0, 10, 5.5, "1v1 WeightedRandom 10VP"),
-                # Phase 11-12: Transition to rule-based random (85% build)
+                # ALL phases at 10VP - a 3VP game is fundamentally different from a 10VP game.
+                ('passive', None, 1.0, 10, 7.5, "1v1 Passive"),
+                ('truly_random', 'passive', 0.5, 10, 6.5, "1v1 TrulyRandom/Passive"),
+                ('truly_random', None, 1.0, 10, 6.0, "1v1 TrulyRandom"),
+                ('weighted_random', 'truly_random', 0.5, 10, 5.5, "1v1 WeightedRandom/TrulyRandom"),
+                ('weighted_random', None, 1.0, 10, 5.5, "1v1 WeightedRandom"),
                 ('random', 'weighted_random', 0.5, 10, 5.0, "1v1 Random/WeightedRandom"),
-                ('random', None, 1.0, 10, 5.5, "1v1 Random 10VP"),
-                # Phase 13-17: Opponent difficulty progression
-                # Lower VP thresholds as opponents get harder (they steal VP too)
+                ('random', None, 1.0, 10, 5.5, "1v1 Random"),
                 ('very_weak', 'random', 0.5, 10, 5.0, "1v1 VeryWeak/Random"),
                 ('weak', 'very_weak', 0.5, 10, 4.5, "1v1 Weak/VeryWeak"),
                 ('medium', 'weak', 0.5, 10, 4.0, "1v1 Medium/Weak"),
                 ('strong', 'medium', 0.5, 10, 3.5, "1v1 Strong/Medium"),
                 ('strong', None, 1.0, 10, 999, "1v1 Strong FINAL"),
             ]
-            print("\n1v1 OPTIMIZED Curriculum Phases (v4 - calibrated VP thresholds):")
+            print("\n1v1 OPTIMIZED Curriculum Phases (v5 - 10VP throughout):")
             print("-" * 70)
-            print("  Phase 0-2:  Learn to build vs Passive (never builds)")
-            print("  Phase 3-8:  TrulyRandom opponent (5VP->6VP->7VP->8VP->9VP->10VP)")
-            print("  Phase 9-10: WeightedRandom bridge (catanatron-style weighted actions)")
-            print("  Phase 11-12: Rule-based Random (VP thresh ~50-55%)")
-            print("  Phase 13-17: Difficulty progression (VP thresh decreases)")
+            print("  Phase 0:   Passive opponent (never builds)")
+            print("  Phase 1-2: TrulyRandom (15% build rate)")
+            print("  Phase 3-4: WeightedRandom bridge")
+            print("  Phase 5-6: Rule-based Random (85% build rate)")
+            print("  Phase 7-11: Difficulty progression")
             print("-" * 70)
         else:
             phases = [
