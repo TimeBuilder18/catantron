@@ -98,6 +98,10 @@ def play_weighted_random_turn(game, player_id):
         if game.players.index(current_after) != player_id:
             break
 
+    # Force end turn if the loop exhausted without ending the turn
+    if game.players.index(game.get_current_player()) == player_id and game.can_end_turn():
+        game.end_turn()
+
     return True
 
 
