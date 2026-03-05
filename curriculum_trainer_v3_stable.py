@@ -1025,9 +1025,9 @@ class CurriculumTrainerV3:
                 'weighted_random': 0.22,
                 # vs rule-based random (85% build rate): expect ~20-25% WR
                 'random': 0.20,
-                'very_weak': 0.15,
-                'weak': 0.10,
-                'medium': 0.05,
+                'very_weak': 0.28,
+                'weak': 0.20,
+                'medium': 0.12,
                 'strong': 0.02,
             }
         else:
@@ -1090,9 +1090,9 @@ class CurriculumTrainerV3:
                 ('weighted_random', 'truly_random', 0.5, 10, 5.5, "1v1 WeightedRandom/TrulyRandom"),
                 ('weighted_random', None, 1.0, 10, 5.5, "1v1 WeightedRandom"),
                 # Phase 3: Opponent difficulty progression (skip rule-based random - weaker than weighted_random)
-                ('very_weak', 'weighted_random', 0.5, 10, 5.0, "1v1 VeryWeak/WeightedRandom"),
-                ('weak', 'very_weak', 0.5, 10, 4.5, "1v1 Weak/VeryWeak"),
-                ('medium', 'weak', 0.5, 10, 4.0, "1v1 Medium/Weak"),
+                ('very_weak', 'weighted_random', 0.5, 10, 6.2, "1v1 VeryWeak/WeightedRandom"),
+                ('weak', 'very_weak', 0.5, 10, 5.5, "1v1 Weak/VeryWeak"),
+                ('medium', 'weak', 0.5, 10, 5.0, "1v1 Medium/Weak"),
                 ('strong', 'medium', 0.5, 10, 3.5, "1v1 Strong/Medium"),
                 ('strong', None, 1.0, 10, 999, "1v1 Strong FINAL"),
             ]
@@ -1332,7 +1332,7 @@ if __name__ == "__main__":
     parser.add_argument('--learning-rate', type=float, default=5e-4)
     parser.add_argument('--train-frequency', type=int, default=5)
     parser.add_argument('--train-steps', type=int, default=15)
-    parser.add_argument('--min-games-per-phase', type=int, default=1000,
+    parser.add_argument('--min-games-per-phase', type=int, default=2000,
                         help='Minimum games before curriculum can advance')
     parser.add_argument('--model', type=str, default=None,
                         help='Path to existing model to continue training')
@@ -1371,9 +1371,9 @@ if __name__ == "__main__":
                 ('truly_random', None, 1.0, 10, 6.0, "1v1 TrulyRandom"),
                 ('weighted_random', 'truly_random', 0.5, 10, 5.5, "1v1 WeightedRandom/TrulyRandom"),
                 ('weighted_random', None, 1.0, 10, 5.5, "1v1 WeightedRandom"),
-                ('very_weak', 'weighted_random', 0.5, 10, 5.0, "1v1 VeryWeak/WeightedRandom"),
-                ('weak', 'very_weak', 0.5, 10, 4.5, "1v1 Weak/VeryWeak"),
-                ('medium', 'weak', 0.5, 10, 4.0, "1v1 Medium/Weak"),
+                ('very_weak', 'weighted_random', 0.5, 10, 6.2, "1v1 VeryWeak/WeightedRandom"),
+                ('weak', 'very_weak', 0.5, 10, 5.5, "1v1 Weak/VeryWeak"),
+                ('medium', 'weak', 0.5, 10, 5.0, "1v1 Medium/Weak"),
                 ('strong', 'medium', 0.5, 10, 3.5, "1v1 Strong/Medium"),
                 ('strong', None, 1.0, 10, 999, "1v1 Strong FINAL"),
             ]
