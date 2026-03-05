@@ -558,7 +558,7 @@ class CurriculumTrainerV3:
 
         done = False
         moves = 0
-        max_moves = 500
+        max_moves = 800
 
         while not done and moves < max_moves:
             game = env.game_env.game
