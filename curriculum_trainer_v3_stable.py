@@ -1158,7 +1158,7 @@ class CurriculumTrainerV3:
 
         # Per-phase linear entropy decay
         phase_start_entropy = self.current_entropy_coef
-        entropy_decay_games = 1000  # games to decay from phase_start_entropy to min
+        entropy_decay_games = 1500  # games to decay from phase_start_entropy to min
 
         # Stagnation detection
         stagnation_wr_history = []  # list of (phase_game_count, recent_wr)
@@ -1363,7 +1363,7 @@ class CurriculumTrainerV3:
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--total-games', type=int, default=10000)
+    parser.add_argument('--total-games', type=int, default=200000)
     parser.add_argument('--batch-size', type=int, default=None)
     parser.add_argument('--learning-rate', type=float, default=5e-4)
     parser.add_argument('--train-frequency', type=int, default=5)
