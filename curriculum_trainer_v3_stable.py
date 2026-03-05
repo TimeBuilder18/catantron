@@ -1019,8 +1019,8 @@ class CurriculumTrainerV3:
                 # All phases at 10VP now - thresholds reflect realistic 10VP win rates.
                 # vs passive (never builds): agent should comfortably win 60%+
                 'passive': 0.60,
-                # vs truly_random (15% build rate): expect ~40-55% WR
-                'truly_random': 0.35,
+                # vs truly_random (15% build rate): expect ~50-60% WR (opponent barely builds)
+                'truly_random': 0.50,
                 # vs weighted_random: expect ~25-35% WR
                 'weighted_random': 0.22,
                 # vs rule-based random (85% build rate): expect ~20-25% WR
@@ -1083,9 +1083,9 @@ class CurriculumTrainerV3:
                 # Expect 80%+ WR → avg_vp ~9. Threshold 7.5 ensures real learning.
                 ('passive', None, 1.0, 10, 7.5, "1v1 Passive"),
                 # Phase 1: Mix in truly_random (15% build chance)
-                # Expect 55-65% WR → avg_vp ~7.5-8.3. Thresholds reflect real 10VP play.
-                ('truly_random', 'passive', 0.5, 10, 6.5, "1v1 TrulyRandom/Passive"),
-                ('truly_random', None, 1.0, 10, 6.0, "1v1 TrulyRandom"),
+                # Expect 55-65% WR → avg_vp ~7.5-8.3. Raised thresholds to ensure mastery.
+                ('truly_random', 'passive', 0.5, 10, 7.0, "1v1 TrulyRandom/Passive"),
+                ('truly_random', None, 1.0, 10, 7.0, "1v1 TrulyRandom"),
                 # Phase 2: WeightedRandom bridge (catanatron-style weighted actions)
                 ('weighted_random', 'truly_random', 0.5, 10, 5.5, "1v1 WeightedRandom/TrulyRandom"),
                 ('weighted_random', None, 1.0, 10, 5.5, "1v1 WeightedRandom"),
