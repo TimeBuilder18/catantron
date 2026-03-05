@@ -1146,6 +1146,10 @@ class CurriculumTrainerV3:
             start_phase = 0
         if start_phase > 0:
             print(f"  ► Starting from phase {start_phase}: {phases[start_phase][5]}")
+            # Boost entropy when jumping into a harder phase mid-training.
+            # Without this the coef stays at the base 0.05 and collapses quickly.
+            self.current_entropy_coef = self.max_entropy_coef
+            print(f"  ► Entropy coef boosted to {self.current_entropy_coef:.3f} for non-zero start phase")
 
         current_phase = start_phase
         phase_game_count = 0
