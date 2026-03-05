@@ -1028,7 +1028,7 @@ class CurriculumTrainerV3:
                 'very_weak': 0.28,
                 'weak': 0.20,
                 'medium': 0.12,
-                'strong': 0.02,
+                'strong': 0.15,
             }
         else:
             # 4-player mode: 25% baseline, lower thresholds
@@ -1093,7 +1093,7 @@ class CurriculumTrainerV3:
                 ('very_weak', 'weighted_random', 0.5, 10, 6.2, "1v1 VeryWeak/WeightedRandom"),
                 ('weak', 'very_weak', 0.5, 10, 5.5, "1v1 Weak/VeryWeak"),
                 ('medium', 'weak', 0.5, 10, 5.0, "1v1 Medium/Weak"),
-                ('strong', 'medium', 0.5, 10, 3.5, "1v1 Strong/Medium"),
+                ('strong', 'medium', 0.5, 10, 5.5, "1v1 Strong/Medium"),
                 ('strong', None, 1.0, 10, 999, "1v1 Strong FINAL"),
             ]
         else:
@@ -1410,7 +1410,7 @@ if __name__ == "__main__":
                 ('very_weak', 'weighted_random', 0.5, 10, 6.2, "1v1 VeryWeak/WeightedRandom"),
                 ('weak', 'very_weak', 0.5, 10, 5.5, "1v1 Weak/VeryWeak"),
                 ('medium', 'weak', 0.5, 10, 5.0, "1v1 Medium/Weak"),
-                ('strong', 'medium', 0.5, 10, 3.5, "1v1 Strong/Medium"),
+                ('strong', 'medium', 0.5, 10, 5.5, "1v1 Strong/Medium"),
                 ('strong', None, 1.0, 10, 999, "1v1 Strong FINAL"),
             ]
             print("\n1v1 OPTIMIZED Curriculum Phases (v5 - 10VP throughout):")
