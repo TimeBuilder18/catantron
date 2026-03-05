@@ -1355,7 +1355,7 @@ if __name__ == "__main__":
         if args.num_players == 2:
             # MUST match the actual phases used in train() method!
             phases = [
-                # ALL phases at 10VP - a 3VP game is fundamentally different from a 10VP game.
+                ('passive', None, 1.0, 6, 5.0, "1v1 Passive 6VP"),
                 ('passive', None, 1.0, 10, 7.5, "1v1 Passive"),
                 ('truly_random', 'passive', 0.5, 10, 6.5, "1v1 TrulyRandom/Passive"),
                 ('truly_random', None, 1.0, 10, 6.0, "1v1 TrulyRandom"),

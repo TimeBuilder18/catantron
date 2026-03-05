@@ -91,7 +91,7 @@ class PBRSFixedRewardWrapper:
 
         road_bonus      = {'early': 12, 'mid':  6, 'late':  3}[phase]
         settle_bonus    = {'early': 25, 'mid': 15, 'late': 10}[phase]
-        city_bonus      = {'early': 10, 'mid': 12, 'late': 10}[phase]
+        city_bonus      = 12  # Always good regardless of phase
         dev_card_bonus  = {'early':  5, 'mid':  8, 'late': 10}[phase]
 
         if info.get('built_city'):
