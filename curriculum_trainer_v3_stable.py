@@ -936,8 +936,12 @@ class CurriculumTrainerV3:
         entropy_penalty = self._compute_smooth_entropy_penalty(total_entropy.item())
         entropy_penalty_tensor = torch.tensor(entropy_penalty, device=self.device)
 
-        # Value loss (raw returns; value_weight=0.1 keeps this from drowning policy gradient)
-        value_loss = F.mse_loss(value, returns)
+        # Value loss: normalize returns to keep MSE ~O(1) so it doesn't swamp policy gradient.
+        # Raw returns range -200..300 → MSE 500-2000 which crushes policy signal even with small value_weight.
+        returns_mean = returns.mean()
+        returns_std = returns.std() + 1e-8
+        value_loss = F.mse_loss((value - returns_mean) / returns_std,
+                                 (returns - returns_mean) / returns_std)
 
         # Approximate KL divergence for monitoring (action head)
         kl_div = 0.5 * ((action_ratio - 1) ** 2).mean()
@@ -1210,7 +1214,7 @@ class CurriculumTrainerV3:
                         if self.diag_could_build_city > 0:
                             take_rate = self.diag_took_build_city / self.diag_could_build_city * 100
                             success_rate = self.diag_city_built / max(1, self.diag_took_build_city) * 100
-                            print(f"    └─ CITY: opportunities={self.diag_could_build_city}, "
+                            print(f"    └─ CITY: agent_turns_could_build={self.diag_could_build_city}, "
                                   f"taken={self.diag_took_build_city} ({take_rate:.0f}%), "
                                   f"built={self.diag_city_built} ({success_rate:.0f}% success)")
                         # Reset counters
