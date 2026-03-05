@@ -1145,7 +1145,7 @@ class CurriculumTrainerV3:
             print(f"Warning: start_phase {start_phase} out of range, using 0")
             start_phase = 0
         if start_phase > 0:
-            print(f"  ► Starting from phase {start_phase}: {phases[start_phase][3]}")
+            print(f"  ► Starting from phase {start_phase}: {phases[start_phase][5]}")
 
         current_phase = start_phase
         phase_game_count = 0
@@ -1243,9 +1243,18 @@ class CurriculumTrainerV3:
                               f"timeouts={truncated_since_log} (last ~10 games)")
 
             # Check for curriculum advancement
-            if (phase_game_count >= min_games_per_phase and
-                current_phase < len(phases) - 1 and
-                self.should_advance_curriculum(mix_prob, primary_ai, secondary_ai, vp_threshold)):
+            force_advance = (phase_game_count >= min_games_per_phase * 5 and
+                             current_phase < len(phases) - 1)
+            if force_advance:
+                with self._phase_lock:
+                    recent_wr = np.mean(list(self.phase_wins)[-50:]) * 100 if len(self.phase_wins) >= 10 else 0
+                    recent_vp = np.mean(list(self.phase_vps)[-50:]) if len(self.phase_vps) >= 10 else 0
+                print(f"\n  ⚠ FORCED ADVANCE from {phase_name} after {phase_game_count} games "
+                      f"(stuck: WR={recent_wr:.1f}%, VP={recent_vp:.1f})")
+            if (force_advance or
+                (phase_game_count >= min_games_per_phase and
+                 current_phase < len(phases) - 1 and
+                 self.should_advance_curriculum(mix_prob, primary_ai, secondary_ai, vp_threshold))):
 
                 with self._phase_lock:
                     print(f"\n  ★ ADVANCING from {phase_name} to {phases[current_phase + 1][5]}")
