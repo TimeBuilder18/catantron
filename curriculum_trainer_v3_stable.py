@@ -1368,7 +1368,7 @@ if __name__ == "__main__":
     parser.add_argument('--learning-rate', type=float, default=5e-4)
     parser.add_argument('--train-frequency', type=int, default=5)
     parser.add_argument('--train-steps', type=int, default=15)
-    parser.add_argument('--min-games-per-phase', type=int, default=3000,
+    parser.add_argument('--min-games-per-phase', type=int, default=2000,
                         help='Minimum games before curriculum can advance')
     parser.add_argument('--model', type=str, default=None,
                         help='Path to existing model to continue training')
