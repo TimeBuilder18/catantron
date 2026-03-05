@@ -481,6 +481,7 @@ class CurriculumTrainerV3:
         # (VP cap at 4 = only upgrading 2 initial settlements to cities)
         self.diag_settlements_at_end = deque(maxlen=100)
         self.diag_wins_last_log = 0  # How many times win_bonus fired since last log
+        self.diag_truncated_last_log = 0  # How many games timed out (hit max_moves)
 
         print(f"Batch size: {self.batch_size}")
         print(f"Buffer size: {self.buffer_size}")
@@ -693,6 +694,8 @@ class CurriculumTrainerV3:
             self.diag_settlements_at_end.append(settlements_count)
             if winner_id == 0:
                 self.diag_wins_last_log += 1
+            if winner_id is None:  # No winner = game timed out (hit max_moves)
+                self.diag_truncated_last_log += 1
 
         return winner_id, my_vp, sum(episode_rewards)
 
@@ -1072,7 +1075,11 @@ class CurriculumTrainerV3:
                 # VP threshold formula for 10VP games (rough): avg_vp ≈ WR*5 + 5
                 # (winner gets 10, loser averages ~5 at game end)
                 #
-                # Phase 0: Learn to build vs passive (never builds, never ends turn strategically)
+                # Phase 0a: Warmup at 6VP — agent needs just 4 more VP beyond 2 initial.
+                # Even an untrained agent can win here, providing clean win/loss signal.
+                # Expect 70%+ WR quickly. Threshold 5.0 = clear mastery before moving on.
+                ('passive', None, 1.0, 6, 5.0, "1v1 Passive 6VP"),
+                # Phase 0b: Full 10VP vs passive. Agent now knows "building = winning".
                 # Expect 80%+ WR → avg_vp ~9. Threshold 7.5 ensures real learning.
                 ('passive', None, 1.0, 10, 7.5, "1v1 Passive"),
                 # Phase 1: Mix in truly_random (15% build chance)
@@ -1228,9 +1235,12 @@ class CurriculumTrainerV3:
                     if self.diag_settlements_at_end:
                         avg_setts = np.mean(list(self.diag_settlements_at_end)[-50:])
                         wins_since_log = self.diag_wins_last_log
+                        truncated_since_log = self.diag_truncated_last_log
                         self.diag_wins_last_log = 0
+                        self.diag_truncated_last_log = 0
                         print(f"    └─ SETTLE: avg_at_end={avg_setts:.1f} | "
-                              f"win_bonus_fired={wins_since_log} (last ~10 games)")
+                              f"win_bonus_fired={wins_since_log} | "
+                              f"timeouts={truncated_since_log} (last ~10 games)")
 
             # Check for curriculum advancement
             if (phase_game_count >= min_games_per_phase and
