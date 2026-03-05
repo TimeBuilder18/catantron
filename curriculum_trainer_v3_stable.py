@@ -28,7 +28,73 @@ from pbrs_fixed_reward_wrapper import PBRSFixedRewardWrapper
 from network_wrapper import NetworkWrapper
 from game_system import ResourceType
 from catanatron_opponent import play_weighted_random_turn
-from rule_based_ai import score_vertex
+from rule_based_ai import score_vertex, score_edge
+
+
+# Resource order matches catan_env_pytorch.py trade_give/get index mapping
+_RESOURCE_ORDER = [ResourceType.WOOD, ResourceType.BRICK, ResourceType.WHEAT,
+                   ResourceType.SHEEP, ResourceType.ORE]
+
+
+def _bc_vertex_prefs(game, vertex_mask, player, temperature=2.0):
+    """Soft-label vertex preferences using Strong AI scoring. Returns (54,) prob array."""
+    all_vertices = game.game_board.vertices
+    existing = player.settlements[0].position if len(player.settlements) == 1 else None
+    scores = np.full(54, -1e9, dtype=np.float32)
+    for i, v in enumerate(all_vertices[:54]):
+        if vertex_mask[i] > 0:
+            try:
+                scores[i] = score_vertex(v, game_board=game.game_board,
+                                         consider_diversity=True, consider_expansion=True,
+                                         existing_settlement=existing)
+            except Exception:
+                scores[i] = 0.0
+    valid = vertex_mask[:54] > 0
+    if not valid.any():
+        return np.ones(54, dtype=np.float32) / 54
+    scores[~valid] = -1e9
+    scores -= scores[valid].max()  # numerical stability
+    exp_s = np.exp(scores / temperature)
+    exp_s[~valid] = 0.0
+    return exp_s / (exp_s.sum() + 1e-8)
+
+
+def _bc_edge_prefs(game, edge_mask, player, temperature=2.0):
+    """Soft-label edge preferences using Strong AI scoring. Returns (72,) prob array."""
+    all_edges = game.game_board.edges
+    scores = np.full(72, -1e9, dtype=np.float32)
+    for i, e in enumerate(all_edges[:72]):
+        if edge_mask[i] > 0:
+            try:
+                scores[i] = float(score_edge(e, player, game))
+            except Exception:
+                scores[i] = 0.0
+    valid = edge_mask[:72] > 0
+    if not valid.any():
+        return np.ones(72, dtype=np.float32) / 72
+    scores[~valid] = -1e9
+    scores -= scores[valid].max()
+    exp_s = np.exp(scores / temperature)
+    exp_s[~valid] = 0.0
+    return exp_s / (exp_s.sum() + 1e-8)
+
+
+def _bc_trade_get_idx(player_resources):
+    """Index (0-4) of the resource the Strong AI would most want to receive in a trade."""
+    res = player_resources
+    # Priority 1: finish a city
+    if res.get(ResourceType.WHEAT, 0) >= 2 and res.get(ResourceType.ORE, 0) < 3:
+        return 4  # ORE
+    if res.get(ResourceType.ORE, 0) >= 3 and res.get(ResourceType.WHEAT, 0) < 2:
+        return 2  # WHEAT
+    # Priority 2: finish a settlement
+    for idx, rt in enumerate(_RESOURCE_ORDER):
+        if rt in (ResourceType.WOOD, ResourceType.BRICK,
+                  ResourceType.WHEAT, ResourceType.SHEEP):
+            if res.get(rt, 0) < 1:
+                return idx
+    # Fallback: whichever of wood/brick we have less of
+    return 0 if res.get(ResourceType.WOOD, 0) < res.get(ResourceType.BRICK, 0) else 1
 
 
 def get_device():
@@ -371,7 +437,13 @@ class PrioritizedReplayBuffer:
                 'old_trade_get_log_probs': np.array([self.buffer[i].get('old_trade_get_log_prob', 0.0) for i in indices]),
                 'action_masks': np.array([self.buffer[i].get('action_mask', np.ones(14)) for i in indices]),
                 'vertex_masks': np.array([self.buffer[i].get('vertex_mask', np.ones(54)) for i in indices]),
-                'edge_masks': np.array([self.buffer[i].get('edge_mask', np.ones(72)) for i in indices])
+                'edge_masks': np.array([self.buffer[i].get('edge_mask', np.ones(72)) for i in indices]),
+                'bc_vertex_probs': np.array([self.buffer[i].get('bc_vertex_probs', np.ones(54) / 54) for i in indices]),
+                'bc_edge_probs': np.array([self.buffer[i].get('bc_edge_probs', np.ones(72) / 72) for i in indices]),
+                'bc_trade_get_idx': np.array([self.buffer[i].get('bc_trade_get_idx', 0) for i in indices]),
+                'needs_vertex': np.array([self.buffer[i].get('needs_vertex', 0.0) for i in indices]),
+                'needs_edge': np.array([self.buffer[i].get('needs_edge', 0.0) for i in indices]),
+                'needs_trade': np.array([self.buffer[i].get('needs_trade', 0.0) for i in indices]),
             }
 
     def add_batch(self, experiences):
@@ -401,13 +473,14 @@ class CurriculumTrainerV3:
 
     def __init__(self, model_path=None, learning_rate=5e-4, batch_size=None, reward_mode='pbrs_fixed',
                  lr_decay=1.0, value_weight=0.1, entropy_decay=1.0, num_parallel_games=8,
-                 buffer_size=200000, num_players=4):
+                 buffer_size=200000, num_players=4, bc_coef=0.1):
         self.device = get_device()
         self.reward_mode = reward_mode
         self.lr_decay = lr_decay  # Learning rate decay per 1000 games
         self.value_weight = value_weight  # Weight for value loss (reduced from 0.25; returns are now normalized so value loss ~1.0)
         self.entropy_decay = entropy_decay  # Entropy coefficient decay per 1000 games
         self.num_players = num_players  # 2 for 1v1, 4 for standard
+        self.bc_coef = bc_coef          # Behavioral cloning coefficient (annealed to 0 over training)
 
         # Auto-tune settings for 1v1 mode (faster games = can run more in parallel)
         if self.num_players == 2:
@@ -495,6 +568,7 @@ class CurriculumTrainerV3:
         print(f"Base entropy coef: {self.entropy_coef}")
         print(f"Entropy decay: {self.entropy_decay} per 1000 games")
         print(f"Max KL divergence: {self.max_kl}")
+        print(f"BC coef (imitation): {self.bc_coef}")
 
     def _compute_smooth_entropy_penalty(self, entropy):
         """Smooth quadratic penalty instead of hard floor"""
@@ -555,6 +629,13 @@ class CurriculumTrainerV3:
         episode_action_masks = []
         episode_vertex_masks = []
         episode_edge_masks = []
+        # Behavioral cloning targets: Strong AI's preferred vertex/edge/trade
+        episode_bc_vertex_probs = []
+        episode_bc_edge_probs = []
+        episode_bc_trade_get_idx = []
+        episode_needs_vertex = []
+        episode_needs_edge = []
+        episode_needs_trade = []
 
         done = False
         moves = 0
@@ -584,6 +665,36 @@ class CurriculumTrainerV3:
                 episode_action_masks.append(obs['action_mask'].copy())
                 episode_vertex_masks.append(obs['vertex_mask'].copy())
                 episode_edge_masks.append(obs['edge_mask'].copy())
+
+                # Behavioral cloning targets from Strong AI heuristic
+                # action_id: 1=place_settlement, 2=place_road, 3=build_settlement,
+                #             4=build_city, 5=build_road, 9=trade_with_bank
+                _needs_v = action_id in (1, 3, 4)
+                _needs_e = action_id in (2, 5)
+                _needs_t = action_id == 9
+                episode_needs_vertex.append(float(_needs_v))
+                episode_needs_edge.append(float(_needs_e))
+                episode_needs_trade.append(float(_needs_t))
+                if _needs_v and self.bc_coef > 0:
+                    _game = env.game_env.game
+                    _player = _game.players[0]
+                    episode_bc_vertex_probs.append(
+                        _bc_vertex_prefs(_game, obs['vertex_mask'], _player))
+                else:
+                    episode_bc_vertex_probs.append(np.ones(54, dtype=np.float32) / 54)
+                if _needs_e and self.bc_coef > 0:
+                    _game = env.game_env.game
+                    _player = _game.players[0]
+                    episode_bc_edge_probs.append(
+                        _bc_edge_prefs(_game, obs['edge_mask'], _player))
+                else:
+                    episode_bc_edge_probs.append(np.ones(72, dtype=np.float32) / 72)
+                if _needs_t and self.bc_coef > 0:
+                    _player = env.game_env.game.players[0]
+                    episode_bc_trade_get_idx.append(
+                        _bc_trade_get_idx(_player.resources))
+                else:
+                    episode_bc_trade_get_idx.append(0)
 
                 # DIAGNOSTIC: Track city building opportunities and actions
                 # Action 4 = build_city
@@ -667,7 +778,13 @@ class CurriculumTrainerV3:
                 'old_trade_get_log_prob': trade_get_log_prob,
                 'action_mask': episode_action_masks[i],
                 'vertex_mask': episode_vertex_masks[i],
-                'edge_mask': episode_edge_masks[i]
+                'edge_mask': episode_edge_masks[i],
+                'bc_vertex_probs': episode_bc_vertex_probs[i],
+                'bc_edge_probs': episode_bc_edge_probs[i],
+                'bc_trade_get_idx': episode_bc_trade_get_idx[i],
+                'needs_vertex': episode_needs_vertex[i],
+                'needs_edge': episode_needs_edge[i],
+                'needs_trade': episode_needs_trade[i],
             })
 
         # Add to buffer (thread-safe)
@@ -823,6 +940,16 @@ class CurriculumTrainerV3:
         vertex_masks = torch.FloatTensor(batch['vertex_masks']).to(self.device)
         edge_masks = torch.FloatTensor(batch['edge_masks']).to(self.device)
 
+        # Behavioral cloning tensors (may be absent in old buffer data)
+        batch_extra = {}
+        if 'bc_vertex_probs' in batch and self.bc_coef > 0:
+            batch_extra['bc_vertex_probs'] = torch.FloatTensor(batch['bc_vertex_probs']).to(self.device)
+            batch_extra['bc_edge_probs'] = torch.FloatTensor(batch['bc_edge_probs']).to(self.device)
+            batch_extra['bc_trade_get_idx'] = torch.LongTensor(batch['bc_trade_get_idx']).to(self.device)
+            batch_extra['needs_vertex'] = torch.FloatTensor(batch['needs_vertex']).to(self.device)
+            batch_extra['needs_edge'] = torch.FloatTensor(batch['needs_edge']).to(self.device)
+            batch_extra['needs_trade'] = torch.FloatTensor(batch['needs_trade']).to(self.device)
+
         self.network.train()
 
         if self.use_amp:
@@ -833,7 +960,8 @@ class CurriculumTrainerV3:
                     old_action_log_probs, old_vertex_log_probs, old_edge_log_probs,
                     action_masks, vertex_masks, edge_masks,
                     trade_give_idx, trade_get_idx,
-                    old_trade_give_log_probs, old_trade_get_log_probs
+                    old_trade_give_log_probs, old_trade_get_log_probs,
+                    batch_extra=batch_extra
                 )
         else:
             loss_dict = self._compute_loss(
@@ -842,7 +970,8 @@ class CurriculumTrainerV3:
                 old_action_log_probs, old_vertex_log_probs, old_edge_log_probs,
                 action_masks, vertex_masks, edge_masks,
                 trade_give_idx, trade_get_idx,
-                old_trade_give_log_probs, old_trade_get_log_probs
+                old_trade_give_log_probs, old_trade_get_log_probs,
+                batch_extra=batch_extra
             )
 
         loss = loss_dict['total_loss']
@@ -881,8 +1010,11 @@ class CurriculumTrainerV3:
                        old_action_log_probs, old_vertex_log_probs, old_edge_log_probs,
                        action_masks=None, vertex_masks=None, edge_masks=None,
                        trade_give_idx=None, trade_get_idx=None,
-                       old_trade_give_log_probs=None, old_trade_get_log_probs=None):
+                       old_trade_give_log_probs=None, old_trade_get_log_probs=None,
+                       batch_extra=None):
         """Compute loss with PROPER PPO for ALL heads including trade heads."""
+        if batch_extra is None:
+            batch_extra = {}
         # CRITICAL FIX: Pass masks to forward() so probabilities match what was used during gameplay
         action_probs, vertex_probs, edge_probs, trade_give_probs, trade_get_probs, value = self.network.forward(
             obs, action_masks, vertex_masks, edge_masks
@@ -967,6 +1099,39 @@ class CurriculumTrainerV3:
             tget_surr2 = torch.clamp(tget_ratio, 1 - clip_ratio, 1 + clip_ratio) * advantages
             trade_get_policy_loss = -torch.min(tget_surr1, tget_surr2).mean()
 
+        # ========== BEHAVIORAL CLONING AUXILIARY LOSS ==========
+        # Guides vertex/edge/trade heads toward Strong AI's heuristic choices.
+        # Applied only on steps where each sub-head was actually used.
+        # bc_coef is annealed to 0 over the first 50% of training.
+        bc_loss = torch.tensor(0.0, device=obs.device)
+        if self.bc_coef > 0 and 'bc_vertex_probs' in batch_extra:
+            bc_vertex_probs = batch_extra['bc_vertex_probs']   # (B, 54)
+            bc_edge_probs = batch_extra['bc_edge_probs']       # (B, 72)
+            bc_trade_get_idx = batch_extra['bc_trade_get_idx'] # (B,)
+            needs_v = batch_extra['needs_vertex']              # (B,)
+            needs_e = batch_extra['needs_edge']                # (B,)
+            needs_t = batch_extra['needs_trade']               # (B,)
+
+            # Vertex: cross-entropy loss against Strong's soft labels
+            v_log = torch.log(vertex_probs + 1e-8)  # (B, 54)
+            v_ce = -(bc_vertex_probs * v_log).sum(dim=1)  # (B,)
+            n_v = needs_v.sum() + 1e-8
+            bc_vertex_loss = (v_ce * needs_v).sum() / n_v
+
+            # Edge: cross-entropy loss against Strong's soft labels
+            e_log = torch.log(edge_probs + 1e-8)  # (B, 72)
+            e_ce = -(bc_edge_probs * e_log).sum(dim=1)  # (B,)
+            n_e = needs_e.sum() + 1e-8
+            bc_edge_loss = (e_ce * needs_e).sum() / n_e
+
+            # Trade-get: NLL loss against Strong's one-hot resource choice
+            tg_log = torch.log(trade_get_probs + 1e-8)  # (B, 5)
+            tg_nll = -tg_log.gather(1, bc_trade_get_idx.unsqueeze(1)).squeeze(1)  # (B,)
+            n_t = needs_t.sum() + 1e-8
+            bc_trade_loss = (tg_nll * needs_t).sum() / n_t
+
+            bc_loss = self.bc_coef * (bc_vertex_loss + bc_edge_loss + 0.3 * bc_trade_loss)
+
         # ========== COMBINED LOSS ==========
         # All heads now have proper PPO including trade heads!
         total_loss = (
@@ -979,6 +1144,7 @@ class CurriculumTrainerV3:
             + self.current_entropy_coef * entropy_penalty_tensor
             + self.value_weight * value_loss
             + self.adaptive_kl_coef * torch.clamp(kl_div - self.max_kl, min=0.0)
+            + bc_loss
         )
 
         return {
@@ -992,7 +1158,8 @@ class CurriculumTrainerV3:
             'vertex_entropy': vertex_entropy.item(),
             'edge_entropy': edge_entropy.item(),
             'entropy_penalty': entropy_penalty,
-            'kl': kl_div.item()
+            'kl': kl_div.item(),
+            'bc_loss': bc_loss.item() if isinstance(bc_loss, torch.Tensor) else float(bc_loss),
         }
 
     def should_advance_curriculum(self, mix_prob, primary_ai, secondary_ai, vp_threshold):
@@ -1337,6 +1504,10 @@ class CurriculumTrainerV3:
                                                      self.current_entropy_coef * self.entropy_decay)
                     if self.current_entropy_coef != old_ec:
                         print(f"    Entropy decay: {old_ec:.3f} → {self.current_entropy_coef:.3f}")
+                # Anneal BC coef to 0 over the first 50% of total training
+                if self.bc_coef > 0:
+                    bc_half = total_games * 0.5
+                    self.bc_coef = max(0.0, self.bc_coef * (1.0 - (1000 / bc_half)))
 
         self.save(f"{save_path}_final.pt")
 
@@ -1391,6 +1562,9 @@ if __name__ == "__main__":
                         help='List all curriculum phases and exit')
     parser.add_argument('--num-players', type=int, default=4, choices=[2, 3, 4],
                         help='Number of players: 2 for 1v1 training, 4 for standard (default: 4)')
+    parser.add_argument('--bc-coef', type=float, default=0.1,
+                        help='Behavioral cloning coefficient: guides vertex/edge/trade heads toward '
+                             'Strong AI choices. Annealed to 0 over first 50%% of training. (default: 0.1)')
     parser.add_argument('--save-path', type=str, default='models/curriculum_v3_stable',
                         help='Path prefix for saving models (default: models/curriculum_v3_stable)')
     args = parser.parse_args()
@@ -1477,7 +1651,8 @@ if __name__ == "__main__":
         entropy_decay=args.entropy_decay,
         num_parallel_games=args.parallel_games,
         buffer_size=args.buffer_size,
-        num_players=args.num_players
+        num_players=args.num_players,
+        bc_coef=args.bc_coef
     )
     trainer.train(
         total_games=args.total_games,
