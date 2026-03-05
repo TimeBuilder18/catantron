@@ -1089,11 +1089,8 @@ class CurriculumTrainerV3:
                 # Phase 2: WeightedRandom bridge (catanatron-style weighted actions)
                 ('weighted_random', 'truly_random', 0.5, 10, 5.5, "1v1 WeightedRandom/TrulyRandom"),
                 ('weighted_random', None, 1.0, 10, 5.5, "1v1 WeightedRandom"),
-                # Phase 3: Rule-based random (85% build rate)
-                ('random', 'weighted_random', 0.5, 10, 5.0, "1v1 Random/WeightedRandom"),
-                ('random', None, 1.0, 10, 5.5, "1v1 Random"),
-                # Phase 4: Opponent difficulty progression
-                ('very_weak', 'random', 0.5, 10, 5.0, "1v1 VeryWeak/Random"),
+                # Phase 3: Opponent difficulty progression (skip rule-based random - weaker than weighted_random)
+                ('very_weak', 'weighted_random', 0.5, 10, 5.0, "1v1 VeryWeak/WeightedRandom"),
                 ('weak', 'very_weak', 0.5, 10, 4.5, "1v1 Weak/VeryWeak"),
                 ('medium', 'weak', 0.5, 10, 4.0, "1v1 Medium/Weak"),
                 ('strong', 'medium', 0.5, 10, 3.5, "1v1 Strong/Medium"),
@@ -1374,9 +1371,7 @@ if __name__ == "__main__":
                 ('truly_random', None, 1.0, 10, 6.0, "1v1 TrulyRandom"),
                 ('weighted_random', 'truly_random', 0.5, 10, 5.5, "1v1 WeightedRandom/TrulyRandom"),
                 ('weighted_random', None, 1.0, 10, 5.5, "1v1 WeightedRandom"),
-                ('random', 'weighted_random', 0.5, 10, 5.0, "1v1 Random/WeightedRandom"),
-                ('random', None, 1.0, 10, 5.5, "1v1 Random"),
-                ('very_weak', 'random', 0.5, 10, 5.0, "1v1 VeryWeak/Random"),
+                ('very_weak', 'weighted_random', 0.5, 10, 5.0, "1v1 VeryWeak/WeightedRandom"),
                 ('weak', 'very_weak', 0.5, 10, 4.5, "1v1 Weak/VeryWeak"),
                 ('medium', 'weak', 0.5, 10, 4.0, "1v1 Medium/Weak"),
                 ('strong', 'medium', 0.5, 10, 3.5, "1v1 Strong/Medium"),
@@ -1387,8 +1382,7 @@ if __name__ == "__main__":
             print("  Phase 0:   Passive opponent (never builds)")
             print("  Phase 1-2: TrulyRandom (15% build rate)")
             print("  Phase 3-4: WeightedRandom bridge")
-            print("  Phase 5-6: Rule-based Random (85% build rate)")
-            print("  Phase 7-11: Difficulty progression")
+            print("  Phase 5-9: Difficulty progression (VeryWeak → Strong)")
             print("-" * 70)
         else:
             phases = [
