@@ -1330,7 +1330,7 @@ class CurriculumTrainerV3:
         # Stagnation detection
         stagnation_wr_history = []  # list of (phase_game_count, recent_wr)
         last_stagnation_check = 0
-        stagnation_lr_cuts = 0      # resets each phase; max 2 cuts per phase
+        stagnation_lr_cuts = 0      # resets each phase; max 4 cuts per phase
 
         while game_num < total_games:
             primary_ai, secondary_ai, mix_prob, vp_to_win, vp_threshold, phase_name = phases[current_phase]
@@ -1424,22 +1424,28 @@ class CurriculumTrainerV3:
             target_ec = phase_start_entropy + (self.min_entropy_coef - phase_start_entropy) * progress
             self.current_entropy_coef = max(self.min_entropy_coef, target_ec)
 
-            # Stagnation detection: if WR improves < 2% over 500 games, cut LR by 50%
+            # Stagnation detection: if WR fails to improve by 5% over 2000 games, cut LR by 50%
+            # Uses 4 readings (each 500 games apart) to smooth out WR noise (±6-8% variance).
             if (phase_game_count - last_stagnation_check >= 500 and
-                    len(self.phase_wins) >= 50 and stagnation_lr_cuts < 2):
+                    len(self.phase_wins) >= 50 and stagnation_lr_cuts < 4):
                 with self._phase_lock:
                     current_wr = np.mean(list(self.phase_wins)[-50:])
                 stagnation_wr_history.append((phase_game_count, current_wr))
                 last_stagnation_check = phase_game_count
-                if len(stagnation_wr_history) >= 2:
-                    prev_wr = stagnation_wr_history[-2][1]
-                    if current_wr - prev_wr < 0.02:
+                if len(stagnation_wr_history) >= 4:
+                    window_wrs = [wr for _, wr in stagnation_wr_history[-4:]]
+                    baseline_wr = window_wrs[0]
+                    best_recent_wr = max(window_wrs[1:])
+                    if best_recent_wr - baseline_wr < 0.05:
                         stagnation_lr_cuts += 1
                         for pg in self.optimizer.param_groups:
                             pg['lr'] = max(1e-5, pg['lr'] * 0.5)
                         new_lr = self.optimizer.param_groups[0]['lr']
-                        print(f"\n  ⚡ STAGNATION detected: WR {prev_wr*100:.1f}% → {current_wr*100:.1f}% "
-                              f"over 500 games. LR cut to {new_lr:.2e} (cut {stagnation_lr_cuts}/2)")
+                        print(f"\n  ⚡ STAGNATION detected: best WR {best_recent_wr*100:.1f}% vs "
+                              f"baseline {baseline_wr*100:.1f}% over 2000 games. "
+                              f"LR cut to {new_lr:.2e} (cut {stagnation_lr_cuts}/4)")
+                        # Keep only the most recent reading so the window slides forward
+                        stagnation_wr_history = [stagnation_wr_history[-1]]
 
             # Check for curriculum advancement
             force_advance = (phase_game_count >= min_games_per_phase * 5 and
