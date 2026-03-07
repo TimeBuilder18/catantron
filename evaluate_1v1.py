@@ -53,20 +53,25 @@ def evaluate_model(model_path, opponent_type='random', num_games=100, num_parall
                 moves += 1
 
                 with torch.no_grad():
-                    ap, vpp, ep, _, _, _ = network.forward(
+                    ap, vpp, ep, tgive, tget, _ = network.forward(
                         torch.FloatTensor(obs['observation']).unsqueeze(0).to(device),
                         torch.FloatTensor(obs['action_mask']).unsqueeze(0).to(device),
                         torch.FloatTensor(obs['vertex_mask']).unsqueeze(0).to(device),
                         torch.FloatTensor(obs['edge_mask']).unsqueeze(0).to(device),
                     )
 
-                action_id = int(torch.argmax(ap[0]).item())
-                vertex_id = int(torch.argmax(vpp[0]).item())
-                edge_id   = int(torch.argmax(ep[0]).item())
+                action_id   = int(torch.argmax(ap[0]).item())
+                vertex_id   = int(torch.argmax(vpp[0]).item())
+                edge_id     = int(torch.argmax(ep[0]).item())
+                give_idx    = int(torch.argmax(tgive[0]).item())
+                get_idx     = int(torch.argmax(tget[0]).item())
+                # Don't trade a resource for itself
+                if give_idx == get_idx:
+                    get_idx = (give_idx + 1) % 5
 
                 obs, _, terminated, truncated, info = env.step(
                     action_id, vertex_id, edge_id,
-                    trade_give_idx=0, trade_get_idx=0
+                    trade_give_idx=give_idx, trade_get_idx=get_idx
                 )
                 if terminated or truncated:
                     winner = game.check_victory_conditions()

@@ -72,7 +72,7 @@ def debug_game(opponent_type='strong', model_path=None, max_moves=800):
                 import torch
                 device = next(network.parameters()).device
                 with torch.no_grad():
-                    ap, vpp, ep, _, _, _ = network.forward(
+                    ap, vpp, ep, tgive, tget, _ = network.forward(
                         torch.FloatTensor(obs['observation']).unsqueeze(0).to(device),
                         torch.FloatTensor(obs['action_mask']).unsqueeze(0).to(device),
                         torch.FloatTensor(obs['vertex_mask']).unsqueeze(0).to(device),
@@ -81,16 +81,21 @@ def debug_game(opponent_type='strong', model_path=None, max_moves=800):
                 action_id = int(torch.argmax(ap[0]).item())
                 vertex_id = int(torch.argmax(vpp[0]).item())
                 edge_id   = int(torch.argmax(ep[0]).item())
+                give_idx  = int(torch.argmax(tgive[0]).item())
+                get_idx   = int(torch.argmax(tget[0]).item())
+                if give_idx == get_idx:
+                    get_idx = (give_idx + 1) % 5
             else:
                 # Pick first valid action
                 valid = [i for i, m in enumerate(action_mask) if m]
                 action_id = valid[0] if valid else 7
-                vertex_id, edge_id = 0, 0
+                vertex_id, edge_id, give_idx, get_idx = 0, 0, 0, 1
 
             p0_actions[ACTION_NAMES[action_id] if action_id < len(ACTION_NAMES) else str(action_id)] += 1
 
             obs, _, terminated, truncated, info = env.step(
-                action_id, vertex_id, edge_id, trade_give_idx=0, trade_get_idx=0
+                action_id, vertex_id, edge_id,
+                trade_give_idx=give_idx, trade_get_idx=get_idx
             )
             if terminated or truncated:
                 winner = game.check_victory_conditions()
