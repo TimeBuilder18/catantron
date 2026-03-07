@@ -101,6 +101,9 @@ def evaluate_model(model_path, opponent_type='random', num_games=100, num_parall
                 winner = game.check_victory_conditions()
                 if winner is not None:
                     done = True
+                else:
+                    # Refresh obs so model sees updated state (was missing - caused 0% WR)
+                    obs = env._get_obs()
 
         my_vp = env.game_env.game.players[0].calculate_victory_points()
         winner = env.game_env.game.check_victory_conditions()
