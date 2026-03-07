@@ -26,17 +26,25 @@ from curriculum_trainer_v3_stable import play_opponent_turn
 # Core game loop (mirrors the trainer exactly)
 # ──────────────────────────────────────────────────────────────────────────────
 
+ACTION_NAMES = {
+    0: 'end_turn', 1: 'place_sett', 2: 'place_road',
+    3: 'build_sett', 4: 'build_city', 5: 'build_road',
+    6: 'buy_dev', 7: 'use_knight', 8: 'use_road_build',
+    9: 'trade_bank', 10: 'end_turn2',
+}
+
+
 def _play_game(network, device, opponent_type, victory_points=10):
     """
-    Play one full game. Returns (outcome, model_vp, opp_vp, num_moves).
-    outcome: 'model_win' | 'opp_win' | 'timeout'
+    Play one full game. Returns a stats dict with outcome, VP, structures, actions.
     """
     env = CatanEnv(player_id=0, victory_points_to_win=victory_points, num_players=2)
     obs, _ = env.reset()
 
-    done     = False
-    moves    = 0          # model-only move counter (matches trainer definition)
-    MAX_MOVES = 3000      # 800 was too low: model does many trades/turn → only ~80 real turns
+    done      = False
+    moves     = 0          # model-only move counter (matches trainer definition)
+    MAX_MOVES = 3000       # 800 was too low: model does many trades/turn → only ~80 real turns
+    action_counts = {}     # action_id → count
 
     while not done and moves < MAX_MOVES:
         game       = env.game_env.game
@@ -69,6 +77,8 @@ def _play_game(network, device, opponent_type, victory_points=10):
             get_idx   = _sample(tget)
             if give_idx == get_idx:            # never trade a resource for itself
                 get_idx = (give_idx + 1) % 5
+
+            action_counts[action_id] = action_counts.get(action_id, 0) + 1
 
             obs, _, terminated, truncated, _ = env.step(
                 action_id, vertex_id, edge_id,
@@ -104,10 +114,33 @@ def _play_game(network, device, opponent_type, victory_points=10):
     if not done:
         outcome = 'timeout'
 
-    game    = env.game_env.game
-    model_vp = game.players[0].calculate_victory_points()
-    opp_vp   = game.players[1].calculate_victory_points()
-    return outcome, model_vp, opp_vp, moves
+    game  = env.game_env.game
+    mp    = game.players[0]
+    op    = game.players[1]
+    return {
+        'outcome':        outcome,
+        'model_vp':       mp.calculate_victory_points(),
+        'opp_vp':         op.calculate_victory_points(),
+        'moves':          moves,
+        # structures
+        'model_sett':     len(mp.settlements),
+        'model_cities':   len(mp.cities),
+        'model_roads':    len(mp.roads),
+        'opp_sett':       len(op.settlements),
+        'opp_cities':     len(op.cities),
+        'opp_roads':      len(op.roads),
+        # bonuses
+        'model_knights':  mp.knights_played,
+        'model_largest':  int(mp.has_largest_army),
+        'model_longest':  int(mp.has_longest_road),
+        'opp_knights':    op.knights_played,
+        'opp_largest':    int(op.has_largest_army),
+        'opp_longest':    int(op.has_longest_road),
+        # dev cards remaining in hand
+        'model_dev_cards': sum(mp.development_cards.values()),
+        # action distribution
+        'action_counts':  action_counts,
+    }
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -121,7 +154,15 @@ def evaluate(model_path, opponent_type, num_games=100, num_parallel=8, verbose=T
     network.eval()
 
     counters = {'model_win': 0, 'opp_win': 0, 'timeout': 0}
-    model_vps, opp_vps, lengths = [], [], []
+    lists = {k: [] for k in (
+        'model_vp', 'opp_vp', 'moves',
+        'model_sett', 'model_cities', 'model_roads',
+        'opp_sett', 'opp_cities', 'opp_roads',
+        'model_knights', 'model_largest', 'model_longest',
+        'opp_knights', 'opp_largest', 'opp_longest',
+        'model_dev_cards',
+    )}
+    combined_actions = {}
     lock = threading.Lock()
     done_count = 0
     t0 = time.time()
@@ -131,16 +172,17 @@ def evaluate(model_path, opponent_type, num_games=100, num_parallel=8, verbose=T
 
         for fut in as_completed(futures):
             try:
-                outcome, mvp, ovp, nmoves = fut.result()
+                g = fut.result()
             except Exception:
                 traceback.print_exc()
                 continue
 
             with lock:
-                counters[outcome] += 1
-                model_vps.append(mvp)
-                opp_vps.append(ovp)
-                lengths.append(nmoves)
+                counters[g['outcome']] += 1
+                for k in lists:
+                    lists[k].append(g[k])
+                for aid, cnt in g['action_counts'].items():
+                    combined_actions[aid] = combined_actions.get(aid, 0) + cnt
                 done_count += 1
 
                 if verbose and done_count % 10 == 0:
@@ -151,23 +193,47 @@ def evaluate(model_path, opponent_type, num_games=100, num_parallel=8, verbose=T
                           f"OppWin {counters['opp_win']:3d}  TO {counters['timeout']:3d}  "
                           f"{speed:.1f} g/min")
 
+    def avg(k): return float(np.mean(lists[k])) if lists[k] else 0
+    def pct(k): return float(np.mean(lists[k])) * 100 if lists[k] else 0
+
     total = done_count or 1
+    total_actions = sum(combined_actions.values()) or 1
+    action_pcts = {ACTION_NAMES.get(aid, str(aid)): cnt / total_actions * 100
+                   for aid, cnt in sorted(combined_actions.items())}
+
     return {
-        'opponent':      opponent_type,
-        'games':         total,
+        'opponent':         opponent_type,
+        'games':            total,
         # Win rates
-        'win_rate':      counters['model_win'] / total * 100,
-        'opp_win_rate':  counters['opp_win']   / total * 100,
-        'timeout_rate':  counters['timeout']    / total * 100,
+        'win_rate':         counters['model_win'] / total * 100,
+        'opp_win_rate':     counters['opp_win']   / total * 100,
+        'timeout_rate':     counters['timeout']    / total * 100,
         # VP
-        'model_avg_vp':  float(np.mean(model_vps)) if model_vps else 0,
-        'model_std_vp':  float(np.std(model_vps))  if model_vps else 0,
-        'opp_avg_vp':    float(np.mean(opp_vps))   if opp_vps   else 0,
+        'model_avg_vp':     avg('model_vp'),
+        'model_std_vp':     float(np.std(lists['model_vp'])) if lists['model_vp'] else 0,
+        'opp_avg_vp':       avg('opp_vp'),
         # Game length
-        'avg_moves':     float(np.mean(lengths))   if lengths   else 0,
-        'max_moves':     int(max(lengths))          if lengths   else 0,
+        'avg_moves':        avg('moves'),
+        'max_moves':        int(max(lists['moves'])) if lists['moves'] else 0,
+        # Structures
+        'model_avg_sett':   avg('model_sett'),
+        'model_avg_cities': avg('model_cities'),
+        'model_avg_roads':  avg('model_roads'),
+        'opp_avg_sett':     avg('opp_sett'),
+        'opp_avg_cities':   avg('opp_cities'),
+        'opp_avg_roads':    avg('opp_roads'),
+        # Bonuses
+        'model_avg_knights': avg('model_knights'),
+        'model_largest_pct': pct('model_largest'),
+        'model_longest_pct': pct('model_longest'),
+        'opp_avg_knights':   avg('opp_knights'),
+        'opp_largest_pct':   pct('opp_largest'),
+        'opp_longest_pct':   pct('opp_longest'),
+        'model_avg_dev':    avg('model_dev_cards'),
+        # Actions
+        'action_pcts':      action_pcts,
         # Speed
-        'games_per_min': total / (time.time() - t0) * 60,
+        'games_per_min':    total / (time.time() - t0) * 60,
     }
 
 
@@ -179,43 +245,62 @@ OPPONENTS = ['truly_random', 'weighted_random', 'random', 'very_weak', 'weak', '
 
 
 def _print_result(r):
-    print(f"\n  Win Rate  : {r['win_rate']:6.1f}%  (model wins)")
+    print(f"\n  ── Outcomes ──────────────────────────────")
+    print(f"  Win Rate  : {r['win_rate']:6.1f}%  (model wins)")
     print(f"  Opp Win   : {r['opp_win_rate']:6.1f}%")
     print(f"  Timeout   : {r['timeout_rate']:6.1f}%")
+    print(f"\n  ── Victory Points ────────────────────────")
     print(f"  Model VP  : {r['model_avg_vp']:.2f} ± {r['model_std_vp']:.2f}")
     print(f"  Opp VP    : {r['opp_avg_vp']:.2f}")
+    print(f"\n  ── Structures (avg at game end) ──────────")
+    print(f"  {'':16}  {'Model':>7}  {'Opp':>7}")
+    print(f"  {'Settlements':16}  {r['model_avg_sett']:>7.2f}  {r['opp_avg_sett']:>7.2f}")
+    print(f"  {'Cities':16}  {r['model_avg_cities']:>7.2f}  {r['opp_avg_cities']:>7.2f}")
+    print(f"  {'Roads':16}  {r['model_avg_roads']:>7.2f}  {r['opp_avg_roads']:>7.2f}")
+    print(f"\n  ── Bonuses ───────────────────────────────")
+    print(f"  {'':16}  {'Model':>7}  {'Opp':>7}")
+    print(f"  {'Knights played':16}  {r['model_avg_knights']:>7.2f}  {r['opp_avg_knights']:>7.2f}")
+    print(f"  {'Largest Army %':16}  {r['model_largest_pct']:>6.1f}%  {r['opp_largest_pct']:>6.1f}%")
+    print(f"  {'Longest Road %':16}  {r['model_longest_pct']:>6.1f}%  {r['opp_longest_pct']:>6.1f}%")
+    print(f"  {'Dev cards (hand)':16}  {r['model_avg_dev']:>7.2f}")
+    print(f"\n  ── Action Distribution ───────────────────")
+    for name, pct in sorted(r['action_pcts'].items(), key=lambda x: -x[1]):
+        bar = '█' * int(pct / 2)
+        print(f"  {name:<16}  {pct:5.1f}%  {bar}")
+    print(f"\n  ── Game Length ───────────────────────────")
     print(f"  Avg moves : {r['avg_moves']:.1f}  (max {r['max_moves']})")
     print(f"  Speed     : {r['games_per_min']:.1f} games/min")
 
 
 def benchmark(model_path, num_games=50, num_parallel=8):
-    print(f"\n{'='*70}")
+    HDR = f"{'Opponent':<16} {'WR%':>7} {'OppW%':>7} {'TO%':>5} {'MVP':>6} {'OVP':>6} {'Sett':>5} {'City':>5} {'Road':>5} {'Knt':>5} {'Len':>6}"
+    SEP = '-' * len(HDR)
+
+    print(f"\n{'='*len(HDR)}")
     print(f"BENCHMARK  {model_path}")
-    print(f"{'='*70}")
-    print(f"{'Opponent':<16} {'WR%':>7} {'OppW%':>7} {'TO%':>6} "
-          f"{'ModelVP':>8} {'OppVP':>7} {'AvgLen':>8}")
-    print(f"{'-'*70}")
+    print(f"{'='*len(HDR)}")
+    print(HDR)
+    print(SEP)
 
     all_results = {}
     for opp in OPPONENTS:
         print(f"\n  vs {opp.upper()} …")
         r = evaluate(model_path, opp, num_games, num_parallel, verbose=True)
         all_results[opp] = r
-        print(f"  {opp:<14} {r['win_rate']:>6.1f}% {r['opp_win_rate']:>6.1f}% "
-              f"{r['timeout_rate']:>5.1f}% {r['model_avg_vp']:>8.2f} "
-              f"{r['opp_avg_vp']:>7.2f} {r['avg_moves']:>8.1f}")
+        _print_result(r)
 
-    print(f"\n{'='*70}")
+    print(f"\n{'='*len(HDR)}")
     print("SUMMARY")
-    print(f"{'='*70}")
-    print(f"{'Opponent':<16} {'WR%':>7} {'OppW%':>7} {'TO%':>6} "
-          f"{'ModelVP':>8} {'OppVP':>7} {'AvgLen':>8}")
-    print(f"{'-'*70}")
+    print(f"{'='*len(HDR)}")
+    print(HDR)
+    print(SEP)
     for opp, r in all_results.items():
         print(f"{opp:<16} {r['win_rate']:>6.1f}% {r['opp_win_rate']:>6.1f}% "
-              f"{r['timeout_rate']:>5.1f}% {r['model_avg_vp']:>8.2f} "
-              f"{r['opp_avg_vp']:>7.2f} {r['avg_moves']:>8.1f}")
-    print(f"{'='*70}")
+              f"{r['timeout_rate']:>4.1f}% {r['model_avg_vp']:>6.2f} {r['opp_avg_vp']:>6.2f} "
+              f"{r['model_avg_sett']:>5.2f} {r['model_avg_cities']:>5.2f} "
+              f"{r['model_avg_roads']:>5.2f} {r['model_avg_knights']:>5.2f} "
+              f"{r['avg_moves']:>6.1f}")
+    print(f"{'='*len(HDR)}")
     return all_results
 
 
