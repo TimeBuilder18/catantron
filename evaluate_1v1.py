@@ -3,10 +3,6 @@
 1v1 Model Evaluation Script
 
 Benchmarks a trained model against different AI difficulties in 1v1 mode.
-Useful for:
-- Tracking training progress
-- Comparing models
-- Identifying which opponent types the model struggles with
 """
 
 import argparse
@@ -15,26 +11,12 @@ import numpy as np
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 
-from catan_env_pytorch import CatanEnv
-from pbrs_fixed_reward_wrapper import PBRSFixedRewardWrapper
+from simplified_reward_wrapper import SimplifiedRewardWrapper
 from network_wrapper import NetworkWrapper
 from curriculum_trainer_v3_stable import play_opponent_turn
 
 
 def evaluate_model(model_path, opponent_type='random', num_games=100, num_parallel=8, verbose=True):
-    """
-    Evaluate a model against a specific opponent type in 1v1.
-
-    Args:
-        model_path: Path to the trained model
-        opponent_type: 'truly_random', 'weighted_random', 'random', 'very_weak', 'weak', 'medium', or 'strong'
-        num_games: Number of games to play
-        num_parallel: Number of games to run in parallel
-        verbose: Print progress
-
-    Returns:
-        dict with win_rate, avg_vp, avg_game_length, std_vp
-    """
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     network_wrapper = NetworkWrapper(model_path=model_path, device=device)
     network = network_wrapper.policy
@@ -42,14 +24,21 @@ def evaluate_model(model_path, opponent_type='random', num_games=100, num_parall
 
     results = {'wins': 0, 'losses': 0, 'vps': [], 'lengths': []}
 
+    def safe_probs(probs):
+        probs = np.nan_to_num(probs, nan=0.0, posinf=0.0, neginf=0.0)
+        if probs.sum() <= 0:
+            probs = np.ones_like(probs) / len(probs)
+        else:
+            probs = probs / probs.sum()
+        return probs
+
     def play_single_game():
-        """Play a single 1v1 game and return (won, vp, length)"""
-        env = PBRSFixedRewardWrapper(player_id=0, victory_points_to_win=10, num_players=2)
+        env = SimplifiedRewardWrapper(player_id=0, reward_mode='pbrs_fixed', victory_points_to_win=10, num_players=2)
         obs, _ = env.reset()
 
         done = False
         moves = 0
-        max_moves = 500
+        max_moves = 2000
 
         while not done and moves < max_moves:
             game = env.game_env.game
@@ -57,7 +46,6 @@ def evaluate_model(model_path, opponent_type='random', num_games=100, num_parall
             current_id = game.players.index(current)
 
             if current_id == 0:
-                # Model's turn
                 moves += 1
                 with torch.no_grad():
                     observation = torch.FloatTensor(obs['observation']).unsqueeze(0).to(device)
@@ -69,49 +57,36 @@ def evaluate_model(model_path, opponent_type='random', num_games=100, num_parall
                         observation, action_mask, vertex_mask, edge_mask
                     )
 
-                    ap = action_probs.cpu().numpy()[0]
-                    vp = vertex_probs.cpu().numpy()[0]
-                    ep = edge_probs.cpu().numpy()[0]
-
-                # Safe probability normalization
-                def safe_probs(probs):
-                    probs = np.nan_to_num(probs, nan=0.0, posinf=0.0, neginf=0.0)
-                    if probs.sum() <= 0:
-                        probs = np.ones_like(probs) / len(probs)
-                    else:
-                        probs = probs / probs.sum()
-                    return probs
-
-                ap = safe_probs(ap)
-                vp_probs = safe_probs(vp)
-                ep = safe_probs(ep)
+                    ap = safe_probs(action_probs.cpu().numpy()[0])
+                    vp_p = safe_probs(vertex_probs.cpu().numpy()[0])
+                    ep = safe_probs(edge_probs.cpu().numpy()[0])
 
                 action_id = np.random.choice(len(ap), p=ap)
-                vertex_id = np.random.choice(len(vp_probs), p=vp_probs)
+                vertex_id = np.random.choice(len(vp_p), p=vp_p)
                 edge_id = np.random.choice(len(ep), p=ep)
 
-                obs, reward, terminated, truncated, info = env.step(
+                obs, _, terminated, truncated, _ = env.step(
                     action_id, vertex_id, edge_id,
                     trade_give_idx=0, trade_get_idx=0
                 )
                 done = terminated or truncated
             else:
-                # Opponent's turn
-                play_opponent_turn(game, current_id, 1.0, opponent_type, None)
+                success = play_opponent_turn(game, current_id, 1.0, opponent_type, None)
+                if not success and game.can_end_turn():
+                    game.end_turn()
+                if game.waiting_for_discards:
+                    env.game_env._handle_automatic_discards()
+                obs = env._get_obs()
                 winner = game.check_victory_conditions()
                 if winner is not None:
                     done = True
-                else:
-                    # Refresh obs so model sees updated state (was missing - caused 0% WR)
-                    obs = env._get_obs()
 
-        my_vp = env.game_env.game.players[0].calculate_victory_points()
-        winner = env.game_env.game.check_victory_conditions()
+        game = env.game_env.game
+        my_vp = game.players[0].calculate_victory_points()
+        winner = game.check_victory_conditions()
         won = (winner is not None and game.players.index(winner) == 0)
-
         return won, my_vp, moves
 
-    # Run games in parallel
     start_time = time.time()
     games_completed = 0
 
@@ -152,17 +127,6 @@ def evaluate_model(model_path, opponent_type='random', num_games=100, num_parall
 
 
 def full_benchmark(model_path, num_games=50, num_parallel=8):
-    """
-    Run a full benchmark against all opponent types.
-
-    Args:
-        model_path: Path to the trained model
-        num_games: Number of games per opponent type
-        num_parallel: Number of parallel games
-
-    Returns:
-        dict mapping opponent type to results
-    """
     opponents = ['truly_random', 'weighted_random', 'random', 'very_weak', 'weak', 'medium', 'strong']
     all_results = {}
 
@@ -171,22 +135,20 @@ def full_benchmark(model_path, num_games=50, num_parallel=8):
     print("=" * 70)
     print(f"Model: {model_path}")
     print(f"Games per opponent: {num_games}")
-    print(f"Parallel games: {num_parallel}")
     print("=" * 70 + "\n")
 
     for opponent in opponents:
-        print(f"\nBenchmarking vs {opponent.upper()}...")
+        print(f"\nEvaluating vs {opponent.upper()}...")
         result = evaluate_model(model_path, opponent, num_games, num_parallel, verbose=True)
         all_results[opponent] = result
 
-    # Print summary
     print("\n" + "=" * 70)
     print("BENCHMARK RESULTS")
     print("=" * 70)
-    print(f"{'Opponent':<12} {'Win Rate':>10} {'Avg VP':>8} {'Std VP':>8} {'Avg Len':>8}")
+    print(f"{'Opponent':<16} {'Win Rate':>10} {'Avg VP':>8} {'Std VP':>8} {'Avg Len':>8}")
     print("-" * 70)
     for opponent, result in all_results.items():
-        print(f"{opponent:<12} {result['win_rate']:>9.1f}% {result['avg_vp']:>8.2f} {result['std_vp']:>8.2f} {result['avg_length']:>8.1f}")
+        print(f"{opponent:<16} {result['win_rate']:>9.1f}% {result['avg_vp']:>8.2f} {result['std_vp']:>8.2f} {result['avg_length']:>8.1f}")
     print("=" * 70)
 
     return all_results
@@ -194,15 +156,11 @@ def full_benchmark(model_path, num_games=50, num_parallel=8):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate a model in 1v1 mode")
-    parser.add_argument('--model', type=str, required=True,
-                        help='Path to the trained model')
+    parser.add_argument('--model', type=str, required=True, help='Path to trained model')
     parser.add_argument('--opponent', type=str, default='all',
-                        choices=['truly_random', 'weighted_random', 'random', 'very_weak', 'weak', 'medium', 'strong', 'all'],
-                        help='Opponent type to evaluate against (default: all)')
-    parser.add_argument('--games', type=int, default=50,
-                        help='Number of games to play (default: 50)')
-    parser.add_argument('--parallel', type=int, default=8,
-                        help='Number of parallel games (default: 8)')
+                        choices=['truly_random', 'weighted_random', 'random', 'very_weak', 'weak', 'medium', 'strong', 'all'])
+    parser.add_argument('--games', type=int, default=50)
+    parser.add_argument('--parallel', type=int, default=8)
     args = parser.parse_args()
 
     if args.opponent == 'all':
@@ -211,7 +169,7 @@ if __name__ == "__main__":
         print(f"\nEvaluating vs {args.opponent.upper()}...")
         result = evaluate_model(args.model, args.opponent, args.games, args.parallel)
         print(f"\nResults:")
-        print(f"  Win Rate: {result['win_rate']:.1f}%")
-        print(f"  Avg VP: {result['avg_vp']:.2f} +/- {result['std_vp']:.2f}")
+        print(f"  Win Rate:        {result['win_rate']:.1f}%")
+        print(f"  Avg VP:          {result['avg_vp']:.2f} +/- {result['std_vp']:.2f}")
         print(f"  Avg Game Length: {result['avg_length']:.1f} moves")
-        print(f"  Speed: {result['games_per_min']:.1f} games/min")
+        print(f"  Speed:           {result['games_per_min']:.1f} games/min")
