@@ -809,10 +809,10 @@ def main():
                 print("Testing model output...")
                 with torch.no_grad():
                     action_probs, vertex_probs, edge_probs, _, _, value = network.policy.forward(
-                        torch.FloatTensor(obs['observation']).unsqueeze(0),
-                        torch.FloatTensor(obs['action_mask']).unsqueeze(0),
-                        torch.FloatTensor(obs['vertex_mask']).unsqueeze(0),
-                        torch.FloatTensor(obs['edge_mask']).unsqueeze(0)
+                        torch.FloatTensor(obs['observation']).unsqueeze(0).to(device),
+                        torch.FloatTensor(obs['action_mask']).unsqueeze(0).to(device),
+                        torch.FloatTensor(obs['vertex_mask']).unsqueeze(0).to(device),
+                        torch.FloatTensor(obs['edge_mask']).unsqueeze(0).to(device)
                     )
 
                     # Check for NaN in any output
@@ -860,7 +860,7 @@ def main():
 
         running = True
         moves = 0
-        max_moves = 500
+        max_moves = 3000
         last_move_time = pygame.time.get_ticks()
 
         while running and moves < max_moves:
@@ -886,27 +886,26 @@ def main():
                     moves += 1
                     if network:
                         try:
-                            # Get action from network
-                            action_probs, vertex_probs, edge_probs, _, _, _ = network.policy.forward(
-                                torch.FloatTensor(obs['observation']).unsqueeze(0),
-                                torch.FloatTensor(obs['action_mask']).unsqueeze(0),
-                                torch.FloatTensor(obs['vertex_mask']).unsqueeze(0),
-                                torch.FloatTensor(obs['edge_mask']).unsqueeze(0)
-                            )
+                            # Get action from network (greedy argmax — zero entropy)
+                            with torch.no_grad():
+                                action_probs, vertex_probs, edge_probs, trade_give_probs, trade_get_probs, _ = network.policy.forward(
+                                    torch.FloatTensor(obs['observation']).unsqueeze(0).to(device),
+                                    torch.FloatTensor(obs['action_mask']).unsqueeze(0).to(device),
+                                    torch.FloatTensor(obs['vertex_mask']).unsqueeze(0).to(device),
+                                    torch.FloatTensor(obs['edge_mask']).unsqueeze(0).to(device)
+                                )
 
-                            # Sample actions
-                            action_dist = torch.distributions.Categorical(action_probs)
-                            action_id = action_dist.sample().item()
-
-                            vertex_dist = torch.distributions.Categorical(vertex_probs)
-                            vertex_id = vertex_dist.sample().item()
-
-                            edge_dist = torch.distributions.Categorical(edge_probs)
-                            edge_id = edge_dist.sample().item()
+                            action_id  = int(torch.argmax(action_probs[0]).item())
+                            vertex_id  = int(torch.argmax(vertex_probs[0]).item())
+                            edge_id    = int(torch.argmax(edge_probs[0]).item())
+                            give_idx   = int(torch.argmax(trade_give_probs[0]).item())
+                            get_idx    = int(torch.argmax(trade_get_probs[0]).item())
+                            if give_idx == get_idx:
+                                get_idx = (give_idx + 1) % 5
 
                             # Step environment
                             next_obs, reward, terminated, truncated, info = game_env.step(
-                                action_id, vertex_id, edge_id, 0, 0
+                                action_id, vertex_id, edge_id, give_idx, get_idx
                             )
                             obs = next_obs
 
@@ -930,13 +929,20 @@ def main():
                     if not success and game.can_end_turn():
                         game.end_turn()
 
-                    # Update observation for player 0 after opponent turn
-                    # game_env.env is CatanEnv, which has _get_obs() method
+                    # Handle auto-discards after 7 roll (rule-based AI doesn't do this)
+                    if game.waiting_for_discards:
+                        _auto_discard_for_game(game, 0)
+                        if game.waiting_for_discards:   # force-clear if still stuck
+                            game.waiting_for_discards = False
+                            game.players_must_discard  = []
+                            game.players_discarded     = set()
+
+                    # Refresh observation for player 0
                     obs = game_env.env._get_obs()
 
                     winner = game.check_victory_conditions()
                     if winner:
-                        print(f"\n{winner.name} WINS with {winner.victory_points} VP!")
+                        print(f"\n{winner.name} WINS with {winner.calculate_victory_points()} VP!")
                         running = False
 
             # Draw everything
