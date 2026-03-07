@@ -44,12 +44,9 @@ ACTION_NAMES = {
 }
 
 
-def _sample(probs):
-    p = probs.cpu().numpy()[0]
-    p = np.nan_to_num(p, nan=0.0, posinf=0.0, neginf=0.0)
-    s = p.sum()
-    p = p / s if s > 0 else np.ones_like(p) / len(p)
-    return int(np.random.choice(len(p), p=p))
+def _greedy(probs):
+    """Argmax — zero entropy, always picks the highest-probability action."""
+    return int(torch.argmax(probs[0]).item())
 
 
 def res_str(player):
@@ -106,11 +103,11 @@ def watch(model_path, opponent_type, victory_points, delay):
                     torch.FloatTensor(obs['edge_mask']).unsqueeze(0).to(device),
                 )
 
-            action_id = _sample(ap)
-            vertex_id = _sample(vpp)
-            edge_id   = _sample(ep)
-            give_idx  = _sample(tgive)
-            get_idx   = _sample(tget)
+            action_id = _greedy(ap)
+            vertex_id = _greedy(vpp)
+            edge_id   = _greedy(ep)
+            give_idx  = _greedy(tgive)
+            get_idx   = _greedy(tget)
             if give_idx == get_idx:
                 get_idx = (give_idx + 1) % 5
 
