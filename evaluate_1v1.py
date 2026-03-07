@@ -27,10 +27,20 @@ from curriculum_trainer_v3_stable import play_opponent_turn
 # ──────────────────────────────────────────────────────────────────────────────
 
 ACTION_NAMES = {
-    0: 'end_turn', 1: 'place_sett', 2: 'place_road',
-    3: 'build_sett', 4: 'build_city', 5: 'build_road',
-    6: 'buy_dev', 7: 'use_knight', 8: 'use_road_build',
-    9: 'trade_bank', 10: 'end_turn2',
+    0:  'roll_dice',
+    1:  'place_sett',
+    2:  'place_road',
+    3:  'build_sett',
+    4:  'build_city',
+    5:  'build_road',
+    6:  'buy_dev',
+    7:  'end_turn',
+    8:  'wait',
+    9:  'trade_bank',
+    10: 'do_nothing',
+    11: 'play_knight',
+    12: 'play_monopoly',
+    13: 'play_year_plenty',
 }
 
 
