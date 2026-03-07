@@ -13,6 +13,7 @@ For MCTS/AlphaZero/PPO, simpler rewards work better!
 
 import numpy as np
 from catan_env_pytorch import CatanEnv
+from game_system import PortType
 
 
 class SimplifiedRewardWrapper:
@@ -32,11 +33,16 @@ class SimplifiedRewardWrapper:
         self.player_id = player_id
         self.last_vp = 0
         self.victory_points_to_win = victory_points_to_win
+        # Shaping state (reset each game)
+        self._produced_resources = set()   # resource types currently in production
+        self._port_access = set()          # port types player currently has access to
 
     def reset(self):
         """Reset environment"""
         obs, info = self.env.reset()
         self.last_vp = obs.get('my_victory_points', 0)
+        self._produced_resources = set()
+        self._port_access = set()
         return obs, info
 
     def step(self, action_id, vertex_id=None, edge_id=None, trade_give_idx=None, trade_get_idx=None):
@@ -82,11 +88,22 @@ class SimplifiedRewardWrapper:
             if info.get('built_city'):
                 reward += 20.0
 
+            # Settlement quality bonus (pip score + diversity + port + blocking)
+            player = self.env.game_env.game.players[self.player_id]
+            action_name_tmp = info.get('action_name', '')
+            if info.get('built_settlement') or action_name_tmp == 'place_settlement':
+                reward += self._settlement_shaping(player)
+
             # Road bonus: roads are prerequisite for settlement expansion → more cities.
             # Without this, agent never learns to build roads and VP caps at ~4
             # (2 initial settlements upgraded to cities → stuck, no new settlement spots).
             if info.get('action_name') == 'build_road' and info.get('success', False):
-                reward += 2.0  # Reduced from 4.0: road chain 2+10+30=42 over 3 actions (14/action) vs city 30/action
+                reward += 2.0  # base
+                reward += self._road_expansion_shaping(player)  # quality bonus
+
+            # Effective trade: reward trades that create a build opportunity
+            if info.get('bank_trade') and info.get('success') and info.get('trade_led_to_build_opportunity'):
+                reward += 2.0
 
             # Dev card play rewards
             action_name = info.get('action_name', '')
@@ -166,6 +183,150 @@ class SimplifiedRewardWrapper:
 
         else:
             raise ValueError(f"Unknown reward mode: {self.reward_mode}")
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Reward shaping helpers
+    # ──────────────────────────────────────────────────────────────────────
+
+    _PIP_MAP = {2:1, 3:2, 4:3, 5:4, 6:5, 8:5, 9:4, 10:3, 11:2, 12:1}
+
+    def _vertex_pip_and_resources(self, vertex):
+        """Return (pip_score, set_of_resources) for a board vertex."""
+        pips = 0
+        resources = set()
+        for tile in vertex.adjacent_tiles:
+            if tile.number:
+                pips += self._PIP_MAP.get(tile.number, 0)
+            if tile.resource and tile.resource != 'desert':
+                resources.add(tile.resource)
+        return pips, resources
+
+    def _settlement_shaping(self, player):
+        """
+        Bonus for a newly placed/built settlement.
+        Rewards:
+          - Pip quality    : up to +4  (proportional to production pips at vertex)
+          - Diversification: up to +3  (each new resource type added to production)
+          - Port access    : +5 for 2:1 port, +2.5 for 3:1 port
+          - Blocking opp   : +2  (settled on vertex reachable by opponent roads)
+        """
+        if not player.settlements:
+            return 0.0
+        game = self.env.game_env.game
+        new_vertex = player.settlements[-1].position
+        pips, res_set = self._vertex_pip_and_resources(new_vertex)
+
+        # Pip quality (max ~15 pips for a perfect vertex)
+        reward = min(pips / 15.0, 1.0) * 4.0
+
+        # Resource diversification: bonus for each new type entering production
+        new_types = res_set - self._produced_resources
+        reward += len(new_types) * 1.0
+        self._produced_resources |= res_set
+
+        # Port access
+        for port in game.game_board.ports:
+            if port.vertex1 == new_vertex or port.vertex2 == new_vertex:
+                if port.port_type == PortType.GENERIC:
+                    bonus = 2.5
+                else:
+                    bonus = 5.0   # 2:1 specific port — big reward
+                pt_key = (port.port_type, id(port))
+                if pt_key not in self._port_access:
+                    self._port_access.add(pt_key)
+                    reward += bonus
+
+        # Blocking: +2 if any opponent road reaches an adjacent vertex of this settlement
+        for adj in new_vertex.adjacent_vertices:
+            for edge in adj.connected_edges:
+                if edge.structure and edge.structure.player != player:
+                    reward += 2.0
+                    break
+
+        return reward
+
+    def _road_expansion_shaping(self, player):
+        """
+        Bonus for a newly built road based on expansion value.
+        Rewards:
+          - Frontier quality: up to +3 (pip score of best new reachable vertex opened)
+          - Toward port      : +2 if road moves toward a port vertex
+          - Diversification  : +1 if best new vertex adds a new resource type
+        """
+        if not player.roads:
+            return 0.0
+        game = self.env.game_env.game
+
+        # Build set of all vertices already occupied or too close (distance-rule)
+        occupied = set()
+        for v in game.game_board.vertices:
+            if v.structure is not None:
+                occupied.add(id(v))
+                for adj in v.adjacent_vertices:
+                    occupied.add(id(adj))  # distance-1 rule
+
+        # Collect vertices reachable from player road endpoints
+        player_road_vertices = set()
+        for road in player.roads:
+            for v in (road.position.vertex1, road.position.vertex2) if hasattr(road, 'position') else ():
+                player_road_vertices.add(v)
+
+        # Look at the two endpoints of the newest road
+        newest_road = player.roads[-1]
+        endpoints = [newest_road.position.vertex1, newest_road.position.vertex2]
+
+        # Find port vertices
+        port_vertices = set()
+        for port in game.game_board.ports:
+            port_vertices.add(id(port.vertex1))
+            port_vertices.add(id(port.vertex2))
+
+        best_pips = 0
+        best_new_resources = set()
+        toward_port = False
+
+        for v in endpoints:
+            if id(v) in occupied:
+                continue   # already blocked
+            pips, res = self._vertex_pip_and_resources(v)
+            if pips > best_pips:
+                best_pips = pips
+                best_new_resources = res
+            if id(v) in port_vertices:
+                toward_port = True
+            # Also check one step further
+            for adj in v.adjacent_vertices:
+                if id(adj) in occupied:
+                    continue
+                pips2, res2 = self._vertex_pip_and_resources(adj)
+                if pips2 > best_pips:
+                    best_pips = pips2
+                    best_new_resources = res2
+                if id(adj) in port_vertices:
+                    toward_port = True
+
+        reward = min(best_pips / 15.0, 1.0) * 3.0
+        if toward_port:
+            reward += 2.0
+        new_types = best_new_resources - self._produced_resources
+        if new_types:
+            reward += 1.0
+
+        return reward
+
+    def _port_access_shaping(self, player):
+        """Bonus for newly gained port access (city upgrading a settlement already at port)."""
+        game = self.env.game_env.game
+        reward = 0.0
+        all_buildings = list(player.settlements) + list(player.cities)
+        for building in all_buildings:
+            for port in game.game_board.ports:
+                if port.vertex1 == building.position or port.vertex2 == building.position:
+                    pt_key = (port.port_type, id(port))
+                    if pt_key not in self._port_access:
+                        self._port_access.add(pt_key)
+                        reward += 5.0 if port.port_type != PortType.GENERIC else 2.5
+        return reward
 
     def __getattr__(self, name):
         """Delegate attribute access to underlying env"""
