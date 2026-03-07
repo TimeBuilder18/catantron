@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
 """
-1v1 Model Evaluation Script
-
-Benchmarks a trained model against different AI difficulties in 1v1 mode.
+1v1 Model Evaluation Script - evaluates a trained model vs AI opponents.
 """
 
 import argparse
+import traceback
 import torch
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 
-from simplified_reward_wrapper import SimplifiedRewardWrapper
+from catan_env_pytorch import CatanEnv
 from network_wrapper import NetworkWrapper
 from curriculum_trainer_v3_stable import play_opponent_turn
 
@@ -22,23 +21,28 @@ def evaluate_model(model_path, opponent_type='random', num_games=100, num_parall
     network = network_wrapper.policy
     network.eval()
 
-    results = {'wins': 0, 'losses': 0, 'vps': [], 'lengths': []}
+    results = {
+        'model_wins': 0, 'opp_wins': 0, 'timeouts': 0,
+        'vps': [], 'lengths': []
+    }
+    _lock = __import__('threading').Lock()
 
     def safe_probs(probs):
         probs = np.nan_to_num(probs, nan=0.0, posinf=0.0, neginf=0.0)
-        if probs.sum() <= 0:
-            probs = np.ones_like(probs) / len(probs)
-        else:
-            probs = probs / probs.sum()
-        return probs
+        s = probs.sum()
+        if s <= 0:
+            return np.ones_like(probs) / len(probs)
+        return probs / s
 
     def play_single_game():
-        env = SimplifiedRewardWrapper(player_id=0, reward_mode='vp_only', victory_points_to_win=10, num_players=2)
+        # Use CatanEnv directly — same as what the trainer wraps
+        env = CatanEnv(player_id=0, victory_points_to_win=10, num_players=2)
         obs, _ = env.reset()
 
         done = False
         moves = 0
-        max_moves = 2000
+        max_moves = 800  # Match trainer's max_moves
+        outcome = 'timeout'  # 'model_win', 'opp_win', 'timeout'
 
         while not done and moves < max_moves:
             game = env.game_env.game
@@ -47,82 +51,99 @@ def evaluate_model(model_path, opponent_type='random', num_games=100, num_parall
 
             if current_id == 0:
                 moves += 1
-                with torch.no_grad():
-                    observation = torch.FloatTensor(obs['observation']).unsqueeze(0).to(device)
-                    action_mask = torch.FloatTensor(obs['action_mask']).unsqueeze(0).to(device)
-                    vertex_mask = torch.FloatTensor(obs['vertex_mask']).unsqueeze(0).to(device)
-                    edge_mask = torch.FloatTensor(obs['edge_mask']).unsqueeze(0).to(device)
 
-                    action_probs, vertex_probs, edge_probs, _, _, _ = network.forward(
-                        observation, action_mask, vertex_mask, edge_mask
+                with torch.no_grad():
+                    ap, vpp, ep, _, _, _ = network.forward(
+                        torch.FloatTensor(obs['observation']).unsqueeze(0).to(device),
+                        torch.FloatTensor(obs['action_mask']).unsqueeze(0).to(device),
+                        torch.FloatTensor(obs['vertex_mask']).unsqueeze(0).to(device),
+                        torch.FloatTensor(obs['edge_mask']).unsqueeze(0).to(device),
                     )
 
-                    ap = safe_probs(action_probs.cpu().numpy()[0])
-                    vp_p = safe_probs(vertex_probs.cpu().numpy()[0])
-                    ep = safe_probs(edge_probs.cpu().numpy()[0])
+                action_id = int(torch.argmax(ap[0]).item())
+                vertex_id = int(torch.argmax(vpp[0]).item())
+                edge_id   = int(torch.argmax(ep[0]).item())
 
-                action_id = np.random.choice(len(ap), p=ap)
-                vertex_id = np.random.choice(len(vp_p), p=vp_p)
-                edge_id = np.random.choice(len(ep), p=ep)
-
-                obs, _, terminated, truncated, _ = env.step(
+                obs, _, terminated, truncated, info = env.step(
                     action_id, vertex_id, edge_id,
                     trade_give_idx=0, trade_get_idx=0
                 )
-                done = terminated or truncated
+                if terminated or truncated:
+                    winner = game.check_victory_conditions()
+                    if winner is not None and game.players.index(winner) == 0:
+                        outcome = 'model_win'
+                    else:
+                        outcome = 'opp_win'
+                    done = True
+
             else:
                 success = play_opponent_turn(game, current_id, 1.0, opponent_type, None)
                 if not success and game.can_end_turn():
                     game.end_turn()
+
+                # Handle discards after 7 is rolled (opponent doesn't go through env.step)
                 if game.waiting_for_discards:
                     env.game_env._handle_automatic_discards()
+                    # Safety: if discards still pending, force-clear
+                    if game.waiting_for_discards:
+                        game.waiting_for_discards = False
+                        game.players_must_discard = []
+                        game.players_discarded = set()
+
+                # Refresh observation for model
                 obs = env._get_obs()
+
                 winner = game.check_victory_conditions()
                 if winner is not None:
+                    outcome = 'model_win' if game.players.index(winner) == 0 else 'opp_win'
                     done = True
 
-        game = env.game_env.game
-        my_vp = game.players[0].calculate_victory_points()
-        winner = game.check_victory_conditions()
-        won = (winner is not None and game.players.index(winner) == 0)
-        return won, my_vp, moves
+        my_vp = env.game_env.game.players[0].calculate_victory_points()
+        return outcome, my_vp, moves
 
     start_time = time.time()
-    games_completed = 0
+    games_done = 0
 
     with ThreadPoolExecutor(max_workers=num_parallel) as executor:
         futures = [executor.submit(play_single_game) for _ in range(num_games)]
 
         for future in as_completed(futures):
             try:
-                won, vp, length = future.result()
-                if won:
-                    results['wins'] += 1
-                else:
-                    results['losses'] += 1
-                results['vps'].append(vp)
-                results['lengths'].append(length)
-                games_completed += 1
+                outcome, vp, length = future.result()
+                with _lock:
+                    if outcome == 'model_win':
+                        results['model_wins'] += 1
+                    elif outcome == 'opp_win':
+                        results['opp_wins'] += 1
+                    else:
+                        results['timeouts'] += 1
+                    results['vps'].append(vp)
+                    results['lengths'].append(length)
+                    games_done += 1
 
-                if verbose and games_completed % 10 == 0:
+                if verbose and games_done % 10 == 0:
                     elapsed = time.time() - start_time
-                    speed = games_completed / elapsed * 60
-                    wr = results['wins'] / games_completed * 100
-                    print(f"  Progress: {games_completed}/{num_games} | WR: {wr:.1f}% | Speed: {speed:.1f} g/min")
-            except Exception as e:
-                print(f"  Warning: Game failed: {e}")
+                    speed = games_done / elapsed * 60
+                    wr = results['model_wins'] / games_done * 100
+                    print(f"  Progress: {games_done}/{num_games} | "
+                          f"WR: {wr:.1f}% | OppWin: {results['opp_wins']} | "
+                          f"TO: {results['timeouts']} | Speed: {speed:.1f} g/min")
+            except Exception:
+                traceback.print_exc()
 
     total_time = time.time() - start_time
 
     return {
         'opponent': opponent_type,
         'games': num_games,
-        'win_rate': results['wins'] / num_games * 100,
-        'avg_vp': np.mean(results['vps']),
-        'std_vp': np.std(results['vps']),
-        'avg_length': np.mean(results['lengths']),
+        'win_rate': results['model_wins'] / num_games * 100,
+        'opp_win_rate': results['opp_wins'] / num_games * 100,
+        'timeout_rate': results['timeouts'] / num_games * 100,
+        'avg_vp': float(np.mean(results['vps'])) if results['vps'] else 0,
+        'std_vp': float(np.std(results['vps'])) if results['vps'] else 0,
+        'avg_length': float(np.mean(results['lengths'])) if results['lengths'] else 0,
         'time_seconds': total_time,
-        'games_per_min': num_games / total_time * 60
+        'games_per_min': num_games / total_time * 60,
     }
 
 
@@ -130,35 +151,37 @@ def full_benchmark(model_path, num_games=50, num_parallel=8):
     opponents = ['truly_random', 'weighted_random', 'random', 'very_weak', 'weak', 'medium', 'strong']
     all_results = {}
 
-    print("\n" + "=" * 70)
+    print("\n" + "=" * 75)
     print("1v1 MODEL BENCHMARK")
-    print("=" * 70)
+    print("=" * 75)
     print(f"Model: {model_path}")
-    print(f"Games per opponent: {num_games}")
-    print("=" * 70 + "\n")
+    print(f"Games per opponent: {num_games} | Parallel: {num_parallel}")
+    print("=" * 75 + "\n")
 
-    for opponent in opponents:
-        print(f"\nEvaluating vs {opponent.upper()}...")
-        result = evaluate_model(model_path, opponent, num_games, num_parallel, verbose=True)
-        all_results[opponent] = result
+    for opp in opponents:
+        print(f"\nEvaluating vs {opp.upper()}...")
+        r = evaluate_model(model_path, opp, num_games, num_parallel, verbose=True)
+        all_results[opp] = r
 
-    print("\n" + "=" * 70)
+    print("\n" + "=" * 75)
     print("BENCHMARK RESULTS")
-    print("=" * 70)
-    print(f"{'Opponent':<16} {'Win Rate':>10} {'Avg VP':>8} {'Std VP':>8} {'Avg Len':>8}")
-    print("-" * 70)
-    for opponent, result in all_results.items():
-        print(f"{opponent:<16} {result['win_rate']:>9.1f}% {result['avg_vp']:>8.2f} {result['std_vp']:>8.2f} {result['avg_length']:>8.1f}")
-    print("=" * 70)
+    print("=" * 75)
+    print(f"{'Opponent':<16} {'WR%':>7} {'OppWR%':>8} {'TO%':>6} {'AvgVP':>7} {'AvgLen':>8}")
+    print("-" * 75)
+    for opp, r in all_results.items():
+        print(f"{opp:<16} {r['win_rate']:>6.1f}% {r['opp_win_rate']:>7.1f}% "
+              f"{r['timeout_rate']:>5.1f}% {r['avg_vp']:>7.2f} {r['avg_length']:>8.1f}")
+    print("=" * 75)
 
     return all_results
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate a model in 1v1 mode")
-    parser.add_argument('--model', type=str, required=True, help='Path to trained model')
+    parser.add_argument('--model', type=str, required=True)
     parser.add_argument('--opponent', type=str, default='all',
-                        choices=['truly_random', 'weighted_random', 'random', 'very_weak', 'weak', 'medium', 'strong', 'all'])
+                        choices=['truly_random', 'weighted_random', 'random',
+                                 'very_weak', 'weak', 'medium', 'strong', 'all'])
     parser.add_argument('--games', type=int, default=50)
     parser.add_argument('--parallel', type=int, default=8)
     args = parser.parse_args()
@@ -167,9 +190,11 @@ if __name__ == "__main__":
         full_benchmark(args.model, args.games, args.parallel)
     else:
         print(f"\nEvaluating vs {args.opponent.upper()}...")
-        result = evaluate_model(args.model, args.opponent, args.games, args.parallel)
+        r = evaluate_model(args.model, args.opponent, args.games, args.parallel)
         print(f"\nResults:")
-        print(f"  Win Rate:        {result['win_rate']:.1f}%")
-        print(f"  Avg VP:          {result['avg_vp']:.2f} +/- {result['std_vp']:.2f}")
-        print(f"  Avg Game Length: {result['avg_length']:.1f} moves")
-        print(f"  Speed:           {result['games_per_min']:.1f} games/min")
+        print(f"  Model Win Rate:  {r['win_rate']:.1f}%")
+        print(f"  Opp Win Rate:    {r['opp_win_rate']:.1f}%")
+        print(f"  Timeout Rate:    {r['timeout_rate']:.1f}%")
+        print(f"  Avg VP:          {r['avg_vp']:.2f} +/- {r['std_vp']:.2f}")
+        print(f"  Avg Game Length: {r['avg_length']:.1f} moves")
+        print(f"  Speed:           {r['games_per_min']:.1f} games/min")
