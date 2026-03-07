@@ -639,7 +639,7 @@ class CurriculumTrainerV3:
 
         done = False
         moves = 0
-        max_moves = 800
+        max_moves = 3000   # raised from 800: model does many trades/turn → 800 = only ~80 real turns, games always timed out → no win signal → plateau
 
         while not done and moves < max_moves:
             game = env.game_env.game

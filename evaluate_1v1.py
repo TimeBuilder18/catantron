@@ -36,7 +36,7 @@ def _play_game(network, device, opponent_type, victory_points=10):
 
     done     = False
     moves    = 0          # model-only move counter (matches trainer definition)
-    MAX_MOVES = 800       # same as trainer
+    MAX_MOVES = 3000      # 800 was too low: model does many trades/turn → only ~80 real turns
 
     while not done and moves < MAX_MOVES:
         game       = env.game_env.game
