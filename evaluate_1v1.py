@@ -33,7 +33,7 @@ def evaluate_model(model_path, opponent_type='random', num_games=100, num_parall
         return probs
 
     def play_single_game():
-        env = SimplifiedRewardWrapper(player_id=0, reward_mode='pbrs_fixed', victory_points_to_win=10, num_players=2)
+        env = SimplifiedRewardWrapper(player_id=0, reward_mode='vp_only', victory_points_to_win=10, num_players=2)
         obs, _ = env.reset()
 
         done = False
