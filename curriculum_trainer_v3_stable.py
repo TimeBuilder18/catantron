@@ -20,6 +20,8 @@ import os
 import time
 import random
 import threading
+import queue
+import contextlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from catan_env_pytorch import CatanEnv
@@ -465,6 +467,92 @@ class PrioritizedReplayBuffer:
             return len(self.buffer)
 
 
+class CentralInferenceServer:
+    """Batches inference requests from parallel game threads into single GPU forward passes.
+
+    Each game thread calls infer(obs) and blocks. The server collects all pending
+    requests, runs one batched forward pass, then unblocks all callers.
+    This converts N batch-size-1 GPU calls into one batch-size-N call, giving the
+    GPU real work to do and eliminating GIL serialization overhead.
+    """
+
+    def __init__(self, network, device, max_batch_wait_ms=2.0):
+        self.network = network
+        self.device = device
+        self.use_amp = (device.type == 'cuda')
+        self._max_batch_wait = max_batch_wait_ms / 1000.0
+        self._request_queue = queue.Queue()
+        self._running = False
+        self._thread = None
+
+    def start(self):
+        self._running = True
+        self._thread = threading.Thread(target=self._inference_loop, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._running = False
+        self._request_queue.put(None)  # unblock the inference thread
+        if self._thread:
+            self._thread.join(timeout=2.0)
+
+    def infer(self, obs):
+        """Submit obs dict, block until result returned. Returns (ap, vp, ep, tgp, tgetp)."""
+        event = threading.Event()
+        holder = [None]
+        self._request_queue.put((obs, event, holder))
+        event.wait()
+        return holder[0]
+
+    def _inference_loop(self):
+        while self._running:
+            # Block waiting for the first request
+            try:
+                first = self._request_queue.get(timeout=0.05)
+            except queue.Empty:
+                continue
+            if first is None:
+                break
+
+            batch = [first]
+            # Drain remaining queued requests (up to max_batch_wait)
+            deadline = time.monotonic() + self._max_batch_wait
+            while time.monotonic() < deadline:
+                try:
+                    item = self._request_queue.get_nowait()
+                    if item is None:
+                        self._running = False
+                        break
+                    batch.append(item)
+                except queue.Empty:
+                    break
+
+            obs_list = [item[0] for item in batch]
+            observations = torch.from_numpy(
+                np.stack([o['observation'] for o in obs_list])).float().to(self.device)
+            action_masks = torch.from_numpy(
+                np.stack([o['action_mask'] for o in obs_list])).float().to(self.device)
+            vertex_masks = torch.from_numpy(
+                np.stack([o['vertex_mask'] for o in obs_list])).float().to(self.device)
+            edge_masks = torch.from_numpy(
+                np.stack([o['edge_mask'] for o in obs_list])).float().to(self.device)
+
+            ctx = torch.amp.autocast('cuda') if self.use_amp else contextlib.nullcontext()
+            with torch.inference_mode(), ctx:
+                ap, vp, ep, tgp, tgetp, _ = self.network(
+                    observations, action_masks, vertex_masks, edge_masks)
+
+            aps = ap.cpu().numpy()
+            vps = vp.cpu().numpy()
+            eps = ep.cpu().numpy()
+            tgps = tgp.cpu().numpy()
+            tgetps = tgetp.cpu().numpy()
+
+            for i, (_, event, holder) in enumerate(batch):
+                holder[0] = (aps[i], vps[i], eps[i], tgps[i], tgetps[i])
+                event.set()
+
+
 class CurriculumTrainerV3:
     """Stable curriculum trainer with entropy collapse prevention
 
@@ -504,8 +592,19 @@ class CurriculumTrainerV3:
         self.network_wrapper = NetworkWrapper(model_path=model_path, device=str(self.device))
         self.network = self.network_wrapper.policy
 
+        # torch.compile: fuses kernels and eliminates Python overhead (~20-40% faster on CUDA)
+        if self.device.type == 'cuda':
+            try:
+                self.network = torch.compile(self.network, mode='reduce-overhead')
+                print("torch.compile enabled (reduce-overhead mode)")
+            except Exception as e:
+                print(f"torch.compile unavailable, skipping: {e}")
+
+        # Central inference server (started/stopped around play_games_parallel)
+        self._inference_server = None
+
         self.base_lr = learning_rate
-        self.optimizer = torch.optim.Adam(self.network.parameters(), lr=learning_rate)
+        self.optimizer = torch.optim.Adam(self.network_wrapper.policy.parameters(), lr=learning_rate)
 
         # Replay buffer with recency bias (size configurable for large batch training)
         self.replay_buffer = PrioritizedReplayBuffer(max_size=buffer_size, recency_bias=0.7)
@@ -837,21 +936,30 @@ class CurriculumTrainerV3:
         """
         results = []
 
-        with ThreadPoolExecutor(max_workers=num_games) as executor:
-            futures = [
-                executor.submit(
-                    self.play_game, mix_prob, primary_ai, secondary_ai, victory_points_to_win
-                )
-                for _ in range(num_games)
-            ]
+        # Start centralized batched inference: all game threads share one GPU forward pass
+        server = CentralInferenceServer(self.network, self.device)
+        self._inference_server = server
+        server.start()
 
-            for future in as_completed(futures):
-                try:
-                    result = future.result()
-                    results.append(result)
-                except Exception as e:
-                    print(f"  Warning: Game failed with error: {e}")
-                    results.append((None, 0, 0))
+        try:
+            with ThreadPoolExecutor(max_workers=num_games) as executor:
+                futures = [
+                    executor.submit(
+                        self.play_game, mix_prob, primary_ai, secondary_ai, victory_points_to_win
+                    )
+                    for _ in range(num_games)
+                ]
+
+                for future in as_completed(futures):
+                    try:
+                        result = future.result()
+                        results.append(result)
+                    except Exception as e:
+                        print(f"  Warning: Game failed with error: {e}")
+                        results.append((None, 0, 0))
+        finally:
+            server.stop()
+            self._inference_server = None
 
         return results
 
@@ -865,21 +973,26 @@ class CurriculumTrainerV3:
             edge_probs: probability distribution over edges
             log_prob: log probability of chosen action
         """
-        with torch.no_grad():
-            observation = torch.FloatTensor(obs['observation']).unsqueeze(0).to(self.device)
-            action_mask = torch.FloatTensor(obs['action_mask']).unsqueeze(0).to(self.device)
-            vertex_mask = torch.FloatTensor(obs['vertex_mask']).unsqueeze(0).to(self.device)
-            edge_mask = torch.FloatTensor(obs['edge_mask']).unsqueeze(0).to(self.device)
+        if self._inference_server is not None:
+            # Batched path: submit to central server and block until result ready
+            ap, vp, ep, tgp, tgetp = self._inference_server.infer(obs)
+        else:
+            # Fallback single-step path (used outside play_games_parallel)
+            ctx = torch.amp.autocast('cuda') if self.use_amp else contextlib.nullcontext()
+            with torch.inference_mode(), ctx:
+                observation = torch.from_numpy(obs['observation']).float().unsqueeze(0).to(self.device)
+                action_mask = torch.from_numpy(obs['action_mask']).float().unsqueeze(0).to(self.device)
+                vertex_mask = torch.from_numpy(obs['vertex_mask']).float().unsqueeze(0).to(self.device)
+                edge_mask = torch.from_numpy(obs['edge_mask']).float().unsqueeze(0).to(self.device)
 
-            action_probs, vertex_probs, edge_probs, trade_give_probs, trade_get_probs, _ = self.network.forward(
-                observation, action_mask, vertex_mask, edge_mask
-            )
+                action_probs, vertex_probs, edge_probs, trade_give_probs, trade_get_probs, _ = self.network(
+                    observation, action_mask, vertex_mask, edge_mask)
 
-            ap = action_probs.cpu().numpy()[0]
-            vp = vertex_probs.cpu().numpy()[0]
-            ep = edge_probs.cpu().numpy()[0]
-            tgp = trade_give_probs.cpu().numpy()[0]  # trade give probs
-            tgetp = trade_get_probs.cpu().numpy()[0]  # trade get probs
+                ap = action_probs.cpu().numpy()[0]
+                vp = vertex_probs.cpu().numpy()[0]
+                ep = edge_probs.cpu().numpy()[0]
+                tgp = trade_give_probs.cpu().numpy()[0]
+                tgetp = trade_get_probs.cpu().numpy()[0]
 
         def safe_probs(probs):
             probs = np.nan_to_num(probs, nan=0.0, posinf=0.0, neginf=0.0)
@@ -993,12 +1106,12 @@ class CurriculumTrainerV3:
         if self.use_amp:
             self.scaler.scale(loss).backward()
             self.scaler.unscale_(self.optimizer)
-            torch.nn.utils.clip_grad_norm_(self.network.parameters(), self.current_grad_norm)
+            torch.nn.utils.clip_grad_norm_(self.network_wrapper.policy.parameters(), self.current_grad_norm)
             self.scaler.step(self.optimizer)
             self.scaler.update()
         else:
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.network.parameters(), self.current_grad_norm)
+            torch.nn.utils.clip_grad_norm_(self.network_wrapper.policy.parameters(), self.current_grad_norm)
             self.optimizer.step()
 
         # Adapt hyperparameters based on this step's metrics
@@ -1028,7 +1141,7 @@ class CurriculumTrainerV3:
         if batch_extra is None:
             batch_extra = {}
         # CRITICAL FIX: Pass masks to forward() so probabilities match what was used during gameplay
-        action_probs, vertex_probs, edge_probs, trade_give_probs, trade_get_probs, value = self.network.forward(
+        action_probs, vertex_probs, edge_probs, trade_give_probs, trade_get_probs, value = self.network(
             obs, action_masks, vertex_masks, edge_masks
         )
         value = value.squeeze()
@@ -1543,7 +1656,7 @@ class CurriculumTrainerV3:
 
     def save(self, path):
         torch.save({
-            'model_state_dict': self.network.state_dict(),
+            'model_state_dict': self.network_wrapper.policy.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
             'games_played': self.games_played,
             'entropy_coef': self.current_entropy_coef,
