@@ -665,6 +665,7 @@ class CurriculumTrainerV3:
         # Gradient clipping - FIXED, no adaptation
         self.base_grad_norm = 0.5
         self.current_grad_norm = 0.5
+        self._last_actual_grad_norm = 0.0  # actual pre-clip norm, updated each train step
 
         # Curriculum tracking (thread-safe)
         self.phase_wins = deque(maxlen=100)
@@ -1133,12 +1134,14 @@ class CurriculumTrainerV3:
         if self.use_amp:
             self.scaler.scale(loss).backward()
             self.scaler.unscale_(self.optimizer)
-            torch.nn.utils.clip_grad_norm_(self.network_wrapper.policy.parameters(), self.current_grad_norm)
+            actual_norm = torch.nn.utils.clip_grad_norm_(self.network_wrapper.policy.parameters(), self.current_grad_norm)
+            self._last_actual_grad_norm = actual_norm.item()
             self.scaler.step(self.optimizer)
             self.scaler.update()
         else:
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.network_wrapper.policy.parameters(), self.current_grad_norm)
+            actual_norm = torch.nn.utils.clip_grad_norm_(self.network_wrapper.policy.parameters(), self.current_grad_norm)
+            self._last_actual_grad_norm = actual_norm.item()
             self.optimizer.step()
 
         # Adapt hyperparameters based on this step's metrics
@@ -1153,7 +1156,7 @@ class CurriculumTrainerV3:
             'entropy_penalty': loss_dict['entropy_penalty'],
             'kl': loss_dict.get('kl', 0.0),
             'entropy_coef': self.current_entropy_coef,
-            'grad_norm': self.current_grad_norm,
+            'grad_norm': self._last_actual_grad_norm,  # actual pre-clip norm, not clip limit
             'lr': self.optimizer.param_groups[0]['lr']
         }
 
@@ -1480,7 +1483,10 @@ class CurriculumTrainerV3:
 
         # Per-phase linear entropy decay
         phase_start_entropy = self.current_entropy_coef
-        entropy_decay_games = 1500  # games to decay from phase_start_entropy to min
+        # Scale decay window with total budget: at least 2000 games, at most 20% of total.
+        # Old hardcoded 1500 caused entropy to hit minimum after 1.5% of a 100k-game run,
+        # leaving 98.5k games with zero exploration (root cause of the plateau).
+        entropy_decay_games = max(2000, total_games // 5)
 
         # Stagnation detection
         stagnation_wr_history = []  # list of (phase_game_count, recent_wr)
@@ -1581,7 +1587,11 @@ class CurriculumTrainerV3:
 
             # Stagnation detection: if WR fails to improve by 5% over 2000 games, cut LR by 50%
             # Uses 4 readings (each 500 games apart) to smooth out WR noise (±6-8% variance).
-            if (phase_game_count - last_stagnation_check >= 500 and
+            # Disabled in the final phase: self-play WR naturally oscillates around 50% regardless
+            # of true skill improvement, so cutting LR here only hurts learning.
+            is_final_phase = (current_phase == len(phases) - 1)
+            if (not is_final_phase and
+                    phase_game_count - last_stagnation_check >= 500 and
                     len(self.phase_wins) >= 50 and stagnation_lr_cuts < 4):
                 with self._phase_lock:
                     current_wr = np.mean(list(self.phase_wins)[-50:])
