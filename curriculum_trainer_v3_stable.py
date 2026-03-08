@@ -473,7 +473,7 @@ class CurriculumTrainerV3:
     """
 
     def __init__(self, model_path=None, learning_rate=5e-4, batch_size=None, reward_mode='pbrs_fixed',
-                 lr_decay=1.0, value_weight=0.1, entropy_decay=1.0, num_parallel_games=8,
+                 lr_decay=1.0, value_weight=0.5, entropy_decay=1.0, num_parallel_games=8,
                  buffer_size=200000, num_players=4, bc_coef=0.1, self_play_pool=None):
         self.device = get_device()
         self.reward_mode = reward_mode
@@ -537,8 +537,8 @@ class CurriculumTrainerV3:
         self.adaptive_kl_coef = 1.0
 
         # Gradient clipping - FIXED, no adaptation
-        self.base_grad_norm = 1.0
-        self.current_grad_norm = 1.0
+        self.base_grad_norm = 0.5
+        self.current_grad_norm = 0.5
 
         # Curriculum tracking (thread-safe)
         self.phase_wins = deque(maxlen=100)
@@ -1569,8 +1569,8 @@ if __name__ == "__main__":
                         help='Reward mode: sparse, vp_only, simplified, or pbrs_fixed (default)')
     parser.add_argument('--lr-decay', type=float, default=1.0,
                         help='Learning rate decay multiplier per 1000 games (default: 1.0 = no decay, try 0.95 for fine-tuning)')
-    parser.add_argument('--value-weight', type=float, default=0.1,
-                        help='Weight for value loss (default: 0.1; higher values risk value overfitting and killing policy gradient)')
+    parser.add_argument('--value-weight', type=float, default=0.5,
+                        help='Weight for value loss (default: 0.5; raised from 0.1 to fix plateau where value head was not converging)')
     parser.add_argument('--entropy-decay', type=float, default=1.0,
                         help='Entropy coefficient decay per 1000 games (default: 1.0 = no decay, try 0.95 to reduce exploration over time)')
     parser.add_argument('--parallel-games', type=int, default=8,
