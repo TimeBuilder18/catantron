@@ -502,7 +502,10 @@ class CentralInferenceServer:
         holder = [None]
         self._request_queue.put((obs, event, holder))
         event.wait()
-        return holder[0]
+        result = holder[0]
+        if isinstance(result, Exception):
+            raise result
+        return result
 
     def _inference_loop(self):
         while self._running:
@@ -527,30 +530,41 @@ class CentralInferenceServer:
                 except queue.Empty:
                     break
 
-            obs_list = [item[0] for item in batch]
-            observations = torch.from_numpy(
-                np.stack([o['observation'] for o in obs_list])).float().to(self.device)
-            action_masks = torch.from_numpy(
-                np.stack([o['action_mask'] for o in obs_list])).float().to(self.device)
-            vertex_masks = torch.from_numpy(
-                np.stack([o['vertex_mask'] for o in obs_list])).float().to(self.device)
-            edge_masks = torch.from_numpy(
-                np.stack([o['edge_mask'] for o in obs_list])).float().to(self.device)
+            try:
+                obs_list = [item[0] for item in batch]
+                observations = torch.from_numpy(
+                    np.stack([o['observation'] for o in obs_list])).float().to(self.device)
+                action_masks = torch.from_numpy(
+                    np.stack([o['action_mask'] for o in obs_list])).float().to(self.device)
+                vertex_masks = torch.from_numpy(
+                    np.stack([o['vertex_mask'] for o in obs_list])).float().to(self.device)
+                edge_masks = torch.from_numpy(
+                    np.stack([o['edge_mask'] for o in obs_list])).float().to(self.device)
 
-            ctx = torch.amp.autocast('cuda') if self.use_amp else contextlib.nullcontext()
-            with torch.inference_mode(), ctx:
-                ap, vp, ep, tgp, tgetp, _ = self.network(
-                    observations, action_masks, vertex_masks, edge_masks)
+                ctx = torch.amp.autocast('cuda') if self.use_amp else contextlib.nullcontext()
+                with torch.inference_mode(), ctx:
+                    ap, vp, ep, tgp, tgetp, _ = self.network(
+                        observations, action_masks, vertex_masks, edge_masks)
 
-            aps = ap.cpu().numpy()
-            vps = vp.cpu().numpy()
-            eps = ep.cpu().numpy()
-            tgps = tgp.cpu().numpy()
-            tgetps = tgetp.cpu().numpy()
+                aps = ap.cpu().numpy()
+                vps = vp.cpu().numpy()
+                eps = ep.cpu().numpy()
+                tgps = tgp.cpu().numpy()
+                tgetps = tgetp.cpu().numpy()
 
-            for i, (_, event, holder) in enumerate(batch):
-                holder[0] = (aps[i], vps[i], eps[i], tgps[i], tgetps[i])
-                event.set()
+                for i, (_, event, holder) in enumerate(batch):
+                    holder[0] = (aps[i], vps[i], eps[i], tgps[i], tgetps[i])
+                    event.set()
+
+            except Exception as e:
+                # Unblock all waiting threads before propagating (prevents infinite hang)
+                print(f"[CentralInferenceServer] Error in inference loop: {e}")
+                for _, event, holder in batch:
+                    if holder[0] is None:
+                        holder[0] = e  # signal error to caller
+                        event.set()
+                self._running = False
+                raise
 
 
 class CurriculumTrainerV3:
@@ -592,13 +606,26 @@ class CurriculumTrainerV3:
         self.network_wrapper = NetworkWrapper(model_path=model_path, device=str(self.device))
         self.network = self.network_wrapper.policy
 
-        # torch.compile: fuses kernels and eliminates Python overhead (~20-40% faster on CUDA)
+        # torch.compile: fuses kernels for faster inference (~20-40% on CUDA).
+        # We do a warmup forward pass immediately to surface Triton/backend errors
+        # before training starts (compile() itself doesn't raise, first call does).
         if self.device.type == 'cuda':
             try:
-                self.network = torch.compile(self.network, mode='reduce-overhead')
+                compiled = torch.compile(self.network, mode='reduce-overhead')
+                # Warmup: tiny dummy batch to detect Triton missing / backend errors now
+                _d = self.device
+                with torch.inference_mode():
+                    compiled(
+                        torch.zeros(1, 427, device=_d),
+                        torch.zeros(1, 14, device=_d),
+                        torch.zeros(1, 54, device=_d),
+                        torch.zeros(1, 72, device=_d),
+                    )
+                self.network = compiled
                 print("torch.compile enabled (reduce-overhead mode)")
             except Exception as e:
-                print(f"torch.compile unavailable, skipping: {e}")
+                print(f"torch.compile unavailable ({type(e).__name__}), skipping")
+                self.network = self.network_wrapper.policy
 
         # Central inference server (started/stopped around play_games_parallel)
         self._inference_server = None
