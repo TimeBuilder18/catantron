@@ -247,69 +247,71 @@ class SimplifiedRewardWrapper:
 
     def _road_expansion_shaping(self, player):
         """
-        Bonus for a newly built road based on expansion value.
+        Bonus for a newly built road based on the best settlement spot reachable
+        from its frontier via BFS (depth ≤ 4 edge steps).
+
+        Score decays with distance so the model learns to build the road *closest*
+        to a good spot first, not just any road pointing vaguely that way.
+
         Rewards:
-          - Frontier quality: up to +3 (pip score of best new reachable vertex opened)
-          - Toward port      : +2 if road moves toward a port vertex
-          - Diversification  : +1 if best new vertex adds a new resource type
+          - Best reachable pip vertex : up to +4.0  (discounted by distance)
+          - Toward port               : +2.0
+          - Adds new resource type    : +1.0
         """
+        from collections import deque
+
         if not player.roads:
             return 0.0
         game = self.env.game_env.game
 
-        # Build set of all vertices already occupied or too close (distance-rule)
+        # Vertices blocked by Catan distance rule (no two settlements within 1 edge)
         occupied = set()
         for v in game.game_board.vertices:
             if v.structure is not None:
                 occupied.add(id(v))
                 for adj in v.adjacent_vertices:
-                    occupied.add(id(adj))  # distance-1 rule
+                    occupied.add(id(adj))
 
-        # Collect vertices reachable from player road endpoints
-        player_road_vertices = set()
-        for road in player.roads:
-            for v in (road.position.vertex1, road.position.vertex2) if hasattr(road, 'position') else ():
-                player_road_vertices.add(v)
-
-        # Look at the two endpoints of the newest road
-        newest_road = player.roads[-1]
-        endpoints = [newest_road.position.vertex1, newest_road.position.vertex2]
-
-        # Find port vertices
+        # Port vertices for toward-port bonus
         port_vertices = set()
         for port in game.game_board.ports:
             port_vertices.add(id(port.vertex1))
             port_vertices.add(id(port.vertex2))
 
-        best_pips = 0
-        best_new_resources = set()
+        # BFS from each endpoint of the newest road
+        newest_road = player.roads[-1]
+        endpoints = [newest_road.position.vertex1, newest_road.position.vertex2]
+
+        MAX_DEPTH = 4
+        best_score = 0.0
+        best_resources = set()
         toward_port = False
 
-        for v in endpoints:
-            if id(v) in occupied:
-                continue   # already blocked
-            pips, res = self._vertex_pip_and_resources(v)
-            if pips > best_pips:
-                best_pips = pips
-                best_new_resources = res
-            if id(v) in port_vertices:
-                toward_port = True
-            # Also check one step further
-            for adj in v.adjacent_vertices:
-                if id(adj) in occupied:
-                    continue
-                pips2, res2 = self._vertex_pip_and_resources(adj)
-                if pips2 > best_pips:
-                    best_pips = pips2
-                    best_new_resources = res2
-                if id(adj) in port_vertices:
+        for start in endpoints:
+            queue = deque([(start, 0)])
+            visited = {id(start)}
+            while queue:
+                v, depth = queue.popleft()
+                if id(v) not in occupied:
+                    pips, res = self._vertex_pip_and_resources(v)
+                    # Distance discount: 1.0 at depth 0 → 0.5 at depth MAX_DEPTH
+                    discount = 1.0 - (depth / (MAX_DEPTH + 1)) * 0.5
+                    score = pips * discount
+                    if score > best_score:
+                        best_score = score
+                        best_resources = res
+                if id(v) in port_vertices:
                     toward_port = True
+                if depth < MAX_DEPTH:
+                    for adj in v.adjacent_vertices:
+                        if id(adj) not in visited:
+                            visited.add(id(adj))
+                            queue.append((adj, depth + 1))
 
-        reward = min(best_pips / 15.0, 1.0) * 3.0
+        reward = min(best_score / 15.0, 1.0) * 4.0
         if toward_port:
             reward += 2.0
-        new_types = best_new_resources - self._produced_resources
-        if new_types:
+        if best_resources - self._produced_resources:
             reward += 1.0
 
         return reward
