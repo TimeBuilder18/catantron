@@ -12,9 +12,10 @@ Result: PBRS helps learning but doesn't dominate
 
 import numpy as np
 from catan_env_pytorch import CatanEnv
+from reward_shaping_mixin import PositionalRewardMixin
 
 
-class PBRSFixedRewardWrapper:
+class PBRSFixedRewardWrapper(PositionalRewardMixin):
     """PBRS with correct scaling - shaping helps but doesn't dominate"""
 
     def __init__(self, player_id=0, victory_points_to_win=10, num_players=4):
@@ -30,12 +31,12 @@ class PBRSFixedRewardWrapper:
 
     def reset(self):
         obs, info = self.env.reset()
-        # Calculate initial potential
         player = self.env.game_env.game.players[self.player_id]
         self.last_potential = self._calculate_scaled_potential(player)
         self.last_vp = obs.get('my_victory_points', 0)
         self.last_has_largest_army = player.has_largest_army
         self.last_has_longest_road = player.has_longest_road
+        self._shaping_reset()
         return obs, info
 
     def _calculate_scaled_potential(self, player):
@@ -94,14 +95,28 @@ class PBRSFixedRewardWrapper:
         city_bonus      = {'early': 12, 'mid': 15, 'late': 13}[phase]
         dev_card_bonus  = {'early':  5, 'mid':  8, 'late': 10}[phase]
 
+        player = self.env.game_env.game.players[self.player_id]
+
         if info.get('built_city'):
             base_reward += city_bonus
 
         if info.get('built_settlement'):
             base_reward += settle_bonus
+            # Positional quality: pip score, diversity, port access, blocking
+            base_reward += self._settlement_shaping(player)
+
+        action_name_step = info.get('action_name', '')
+        if action_name_step == 'place_settlement' and info.get('success', True):
+            base_reward += self._settlement_shaping(player)
 
         if info.get('action_name') == 'build_road' and info.get('success', False):
             base_reward += road_bonus
+            # Directional quality: BFS toward best reachable settlement spot
+            base_reward += self._road_expansion_shaping(player)
+
+        # Effective trade: reward trades that open a build opportunity
+        if info.get('bank_trade') and info.get('success') and info.get('trade_led_to_build_opportunity'):
+            base_reward += 2.0
 
         if info.get('action_name') == 'buy_dev_card' and info.get('success', False):
             base_reward += dev_card_bonus

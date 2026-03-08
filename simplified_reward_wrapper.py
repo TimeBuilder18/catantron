@@ -13,9 +13,10 @@ For MCTS/AlphaZero/PPO, simpler rewards work better!
 
 import numpy as np
 from catan_env_pytorch import CatanEnv
+from reward_shaping_mixin import PositionalRewardMixin
 
 
-class SimplifiedRewardWrapper:
+class SimplifiedRewardWrapper(PositionalRewardMixin):
     """Wraps CatanEnv with simplified rewards for better learning"""
 
     def __init__(self, player_id=0, reward_mode='vp_only', victory_points_to_win=10, num_players=4):
@@ -32,11 +33,11 @@ class SimplifiedRewardWrapper:
         self.player_id = player_id
         self.last_vp = 0
         self.victory_points_to_win = victory_points_to_win
-
     def reset(self):
         """Reset environment"""
         obs, info = self.env.reset()
         self.last_vp = obs.get('my_victory_points', 0)
+        self._shaping_reset()
         return obs, info
 
     def step(self, action_id, vertex_id=None, edge_id=None, trade_give_idx=None, trade_get_idx=None):
@@ -82,11 +83,22 @@ class SimplifiedRewardWrapper:
             if info.get('built_city'):
                 reward += 20.0
 
+            # Settlement quality bonus (pip score + diversity + port + blocking)
+            player = self.env.game_env.game.players[self.player_id]
+            action_name_tmp = info.get('action_name', '')
+            if info.get('built_settlement') or action_name_tmp == 'place_settlement':
+                reward += self._settlement_shaping(player)
+
             # Road bonus: roads are prerequisite for settlement expansion → more cities.
             # Without this, agent never learns to build roads and VP caps at ~4
             # (2 initial settlements upgraded to cities → stuck, no new settlement spots).
             if info.get('action_name') == 'build_road' and info.get('success', False):
-                reward += 2.0  # Reduced from 4.0: road chain 2+10+30=42 over 3 actions (14/action) vs city 30/action
+                reward += 2.0  # base
+                reward += self._road_expansion_shaping(player)  # quality bonus
+
+            # Effective trade: reward trades that create a build opportunity
+            if info.get('bank_trade') and info.get('success') and info.get('trade_led_to_build_opportunity'):
+                reward += 2.0
 
             # Dev card play rewards
             action_name = info.get('action_name', '')
