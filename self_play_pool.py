@@ -228,8 +228,8 @@ class SelfPlayPool:
             em_t  = torch.FloatTensor(obs['edge_mask']).unsqueeze(0).to(self.device)
 
             with torch.no_grad():
-                result = policy.select_action(obs_t, am_t, vm_t, em_t)
-            # select_action returns: action, vertex, edge, tg, tk, lp_a, lp_v, lp_e, lp_tg, lp_tk, value, entropy
+                result = policy.get_action_and_value(obs_t, am_t, vm_t, em_t)
+            # get_action_and_value returns: action, vertex, edge, tg, tk, lp_a, lp_v, lp_e, lp_tg, lp_tk, value, entropy
             action_id = int(result[0].item())
             vertex_id = int(result[1].item())
             edge_id   = int(result[2].item())
