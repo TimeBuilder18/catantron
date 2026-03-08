@@ -104,7 +104,11 @@ class SelfPlayPool:
     # ── discovery & loading ──────────────────────────────────────────────────
 
     def _discover(self) -> list:
-        return sorted(glob.glob(self.checkpoint_glob))
+        # Support comma-separated patterns, e.g. "models/run1_game*.pt,models/run2_game*.pt"
+        paths = set()
+        for pattern in self.checkpoint_glob.split(','):
+            paths.update(glob.glob(pattern.strip()))
+        return sorted(paths)
 
     def _sample_paths(self, all_paths: list) -> list:
         """Return a list of `pool_size` paths with recency bias."""
