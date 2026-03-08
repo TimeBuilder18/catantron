@@ -1612,14 +1612,17 @@ if __name__ == "__main__":
                 ('weak', 'very_weak', 0.5, 10, 5.5, "1v1 Weak/VeryWeak"),
                 ('medium', 'weak', 0.5, 10, 5.0, "1v1 Medium/Weak"),
                 ('strong', 'medium', 0.5, 10, 5.5, "1v1 Strong/Medium"),
-                ('strong', None, 1.0, 10, 999, "1v1 Strong FINAL"),
+                ('strong', None, 1.0, 10, 5.5, "1v1 Strong"),
+                ('self_play', 'strong', 0.5, 10, 5.5, "1v1 SelfPlay/Strong"),
+                ('self_play', None, 1.0, 10, 999, "1v1 SelfPlay FINAL"),
             ]
             print("\n1v1 OPTIMIZED Curriculum Phases (v5 - 10VP throughout):")
             print("-" * 70)
-            print("  Phase 0:   Passive opponent (never builds)")
-            print("  Phase 1-2: TrulyRandom (15% build rate)")
-            print("  Phase 3-4: WeightedRandom bridge")
-            print("  Phase 5-9: Difficulty progression (VeryWeak → Strong)")
+            print("  Phase 0:    Passive opponent (never builds)")
+            print("  Phase 1-2:  TrulyRandom (15% build rate)")
+            print("  Phase 3-4:  WeightedRandom bridge")
+            print("  Phase 5-10: Difficulty progression (VeryWeak → Strong)")
+            print("  Phase 11-12: Self-play (past checkpoints as opponents)")
             print("-" * 70)
         else:
             phases = [
