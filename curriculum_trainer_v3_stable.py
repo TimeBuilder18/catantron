@@ -26,6 +26,7 @@ from catan_env_pytorch import CatanEnv
 from simplified_reward_wrapper import SimplifiedRewardWrapper
 from pbrs_fixed_reward_wrapper import PBRSFixedRewardWrapper
 from network_wrapper import NetworkWrapper
+from self_play_pool import SelfPlayPool
 from game_system import ResourceType
 from catanatron_opponent import play_weighted_random_turn
 from rule_based_ai import score_vertex, score_edge
@@ -473,7 +474,7 @@ class CurriculumTrainerV3:
 
     def __init__(self, model_path=None, learning_rate=5e-4, batch_size=None, reward_mode='pbrs_fixed',
                  lr_decay=1.0, value_weight=0.1, entropy_decay=1.0, num_parallel_games=8,
-                 buffer_size=200000, num_players=4, bc_coef=0.1):
+                 buffer_size=200000, num_players=4, bc_coef=0.1, self_play_pool=None):
         self.device = get_device()
         self.reward_mode = reward_mode
         self.lr_decay = lr_decay  # Learning rate decay per 1000 games
@@ -481,6 +482,7 @@ class CurriculumTrainerV3:
         self.entropy_decay = entropy_decay  # Entropy coefficient decay per 1000 games
         self.num_players = num_players  # 2 for 1v1, 4 for standard
         self.bc_coef = bc_coef          # Behavioral cloning coefficient (annealed to 0 over training)
+        self.self_play_pool = self_play_pool  # SelfPlayPool or None
 
         # Auto-tune settings for 1v1 mode (faster games = can run more in parallel)
         if self.num_players == 2:
@@ -720,9 +722,16 @@ class CurriculumTrainerV3:
                 obs = next_obs
                 done = terminated or truncated
             else:
-                success = play_opponent_turn(game, current_id, mix_prob, primary_ai, secondary_ai)
-                if not success and game.can_end_turn():
-                    game.end_turn()
+                # Self-play: use a past-checkpoint network as opponent
+                sp_used = False
+                if primary_ai == 'self_play' and self.self_play_pool is not None:
+                    sp_used = self.self_play_pool.play_turn(env, current_id)
+                if not sp_used:
+                    success = play_opponent_turn(game, current_id, mix_prob,
+                                                 'strong' if primary_ai == 'self_play' else primary_ai,
+                                                 secondary_ai)
+                    if not success and game.can_end_turn():
+                        game.end_turn()
 
                 # FIX: Handle auto-discards after opponent rolls 7
                 # This was being skipped because opponent doesn't go through env.step()
@@ -813,6 +822,9 @@ class CurriculumTrainerV3:
                 self.diag_wins_last_log += 1
             if winner_id is None:  # No winner = game timed out (hit max_moves)
                 self.diag_truncated_last_log += 1
+
+        if self.self_play_pool is not None:
+            self.self_play_pool.notify_game_done()
 
         return winner_id, my_vp, sum(episode_rewards)
 
@@ -1261,7 +1273,10 @@ class CurriculumTrainerV3:
                 ('weak', 'very_weak', 0.5, 10, 5.5, "1v1 Weak/VeryWeak"),
                 ('medium', 'weak', 0.5, 10, 5.0, "1v1 Medium/Weak"),
                 ('strong', 'medium', 0.5, 10, 5.5, "1v1 Strong/Medium"),
-                ('strong', None, 1.0, 10, 999, "1v1 Strong FINAL"),
+                ('strong', None, 1.0, 10, 5.5, "1v1 Strong"),
+                # Phase 4: Self-play — agent trains against its own past checkpoints
+                ('self_play', 'strong', 0.5, 10, 5.5, "1v1 SelfPlay/Strong"),
+                ('self_play', None, 1.0, 10, 999, "1v1 SelfPlay FINAL"),
             ]
         else:
             # === STANDARD 4-PLAYER CURRICULUM ===
@@ -1573,6 +1588,12 @@ if __name__ == "__main__":
                              'Strong AI choices. Annealed to 0 over first 50%% of training. (default: 0.1)')
     parser.add_argument('--save-path', type=str, default='models/curriculum_v3_stable',
                         help='Path prefix for saving models (default: models/curriculum_v3_stable)')
+    parser.add_argument('--self-play-pool', type=str, default=None,
+                        help='Glob pattern for past checkpoints to use as self-play opponents, '
+                             'e.g. "models/v3_overnight2_game*.pt".  When provided, self-play '
+                             'phases are appended automatically to the curriculum.')
+    parser.add_argument('--self-play-pool-size', type=int, default=8,
+                        help='Number of past-checkpoint networks to keep loaded for self-play (default: 8)')
     args = parser.parse_args()
 
     # List phases if requested
@@ -1647,6 +1668,15 @@ if __name__ == "__main__":
         print(f"    - Buffer size: {auto_buffer:,} (vs 200,000 default)")
         print("=" * 60 + "\n")
 
+    # Build self-play pool if requested
+    sp_pool = None
+    if args.self_play_pool:
+        sp_pool = SelfPlayPool(
+            checkpoint_glob=args.self_play_pool,
+            pool_size=args.self_play_pool_size,
+            device='cpu',   # keep GPU free for training
+        )
+
     trainer = CurriculumTrainerV3(
         model_path=args.model,
         batch_size=args.batch_size,
@@ -1658,7 +1688,8 @@ if __name__ == "__main__":
         num_parallel_games=args.parallel_games,
         buffer_size=args.buffer_size,
         num_players=args.num_players,
-        bc_coef=args.bc_coef
+        bc_coef=args.bc_coef,
+        self_play_pool=sp_pool,
     )
     trainer.train(
         total_games=args.total_games,
