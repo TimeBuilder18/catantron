@@ -580,7 +580,8 @@ class CurriculumTrainerV3:
 
     def __init__(self, model_path=None, learning_rate=5e-4, batch_size=None, reward_mode='pbrs_fixed',
                  lr_decay=1.0, value_weight=0.5, entropy_decay=1.0, num_parallel_games=8,
-                 buffer_size=200000, num_players=4, bc_coef=0.1, self_play_pool=None):
+                 buffer_size=200000, num_players=4, bc_coef=0.1, self_play_pool=None,
+                 specialist_mix_rate=0.0):
         self.device = get_device()
         self.reward_mode = reward_mode
         self.lr_decay = lr_decay  # Learning rate decay per 1000 games
@@ -589,6 +590,7 @@ class CurriculumTrainerV3:
         self.num_players = num_players  # 2 for 1v1, 4 for standard
         self.bc_coef = bc_coef          # Behavioral cloning coefficient (annealed to 0 over training)
         self.self_play_pool = self_play_pool  # SelfPlayPool or None
+        self.specialist_mix_rate = specialist_mix_rate  # Prob of specialist opponent per turn during self-play
 
         # Auto-tune settings for 1v1 mode (faster games = can run more in parallel)
         if self.num_players == 2:
@@ -854,9 +856,19 @@ class CurriculumTrainerV3:
                 done = terminated or truncated
             else:
                 # Self-play: use a past-checkpoint network as opponent
+                # (with optional specialist mixing to prevent blind spots)
                 sp_used = False
                 if primary_ai == 'self_play' and self.self_play_pool is not None:
-                    sp_used = self.self_play_pool.play_turn(env, current_id)
+                    if self.specialist_mix_rate > 0 and random.random() < self.specialist_mix_rate:
+                        specialist = random.choice([
+                            'city_rusher', 'road_blocker', 'dev_card_spammer',
+                            'balanced_aggressor', 'port_specialist',
+                        ])
+                        from specialist_ai import play_specialist_turn
+                        play_specialist_turn(game, current_id, strategy=specialist)
+                        sp_used = True
+                    else:
+                        sp_used = self.self_play_pool.play_turn(env, current_id)
                 if not sp_used:
                     success = play_opponent_turn(game, current_id, mix_prob,
                                                  'strong' if primary_ai == 'self_play' else primary_ai,
@@ -1758,6 +1770,9 @@ if __name__ == "__main__":
                              'phases are appended automatically to the curriculum.')
     parser.add_argument('--self-play-pool-size', type=int, default=8,
                         help='Number of past-checkpoint networks to keep loaded for self-play (default: 8)')
+    parser.add_argument('--specialist-mix-rate', type=float, default=0.0,
+                        help='During self-play, probability each opponent turn uses a random specialist AI (0.0-1.0). '
+                             'Prevents blind spots against strategies like dev-card spamming or balanced aggression.')
     args = parser.parse_args()
 
     # List phases if requested
@@ -1864,6 +1879,7 @@ if __name__ == "__main__":
         num_players=args.num_players,
         bc_coef=args.bc_coef,
         self_play_pool=sp_pool,
+        specialist_mix_rate=args.specialist_mix_rate,
     )
     trainer.train(
         total_games=args.total_games,
