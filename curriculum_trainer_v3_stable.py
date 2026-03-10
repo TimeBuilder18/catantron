@@ -370,6 +370,10 @@ def play_opponent_turn(game, player_id, mix_prob, primary_ai='medium', secondary
         return play_weighted_random_turn(game, player_id)
     elif chosen_ai == 'random':
         return play_random_turn(game, player_id)
+    elif chosen_ai in ('city_rusher', 'road_blocker', 'dev_card_spammer',
+                        'balanced_aggressor', 'port_specialist'):
+        from specialist_ai import play_specialist_turn
+        return play_specialist_turn(game, player_id, strategy=chosen_ai)
     else:
         return play_rule_based_turn(MinimalEnv(game), player_id, difficulty=chosen_ai)
 
@@ -1417,7 +1421,13 @@ class CurriculumTrainerV3:
                 ('medium', 'weak', 0.5, 10, 5.0, "1v1 Medium/Weak"),
                 ('strong', 'medium', 0.5, 10, 5.5, "1v1 Strong/Medium"),
                 ('strong', None, 1.0, 10, 5.5, "1v1 Strong"),
-                # Phase 4: Self-play — agent trains against its own past checkpoints
+                # Phase 4: Specialist diversity — expose agent to distinct strategies
+                ('city_rusher', 'strong', 0.5, 10, 5.5, "1v1 CityRusher/Strong"),
+                ('road_blocker', 'strong', 0.5, 10, 5.5, "1v1 RoadBlocker/Strong"),
+                ('dev_card_spammer', 'strong', 0.5, 10, 5.5, "1v1 DevCardSpammer/Strong"),
+                ('balanced_aggressor', 'strong', 0.5, 10, 5.5, "1v1 BalancedAggressor/Strong"),
+                ('port_specialist', 'strong', 0.5, 10, 5.5, "1v1 PortSpecialist/Strong"),
+                # Phase 5: Self-play — agent trains against its own past checkpoints
                 ('self_play', 'strong', 0.5, 10, 5.5, "1v1 SelfPlay/Strong"),
                 ('self_play', None, 1.0, 10, 999, "1v1 SelfPlay FINAL"),
             ]
@@ -1763,6 +1773,12 @@ if __name__ == "__main__":
                 ('medium', 'weak', 0.5, 10, 5.0, "1v1 Medium/Weak"),
                 ('strong', 'medium', 0.5, 10, 5.5, "1v1 Strong/Medium"),
                 ('strong', None, 1.0, 10, 5.5, "1v1 Strong"),
+                # Specialist diversity — expose agent to distinct strategies
+                ('city_rusher', 'strong', 0.5, 10, 5.5, "1v1 CityRusher/Strong"),
+                ('road_blocker', 'strong', 0.5, 10, 5.5, "1v1 RoadBlocker/Strong"),
+                ('dev_card_spammer', 'strong', 0.5, 10, 5.5, "1v1 DevCardSpammer/Strong"),
+                ('balanced_aggressor', 'strong', 0.5, 10, 5.5, "1v1 BalancedAggressor/Strong"),
+                ('port_specialist', 'strong', 0.5, 10, 5.5, "1v1 PortSpecialist/Strong"),
                 ('self_play', 'strong', 0.5, 10, 5.5, "1v1 SelfPlay/Strong"),
                 ('self_play', None, 1.0, 10, 999, "1v1 SelfPlay FINAL"),
             ]
@@ -1772,7 +1788,8 @@ if __name__ == "__main__":
             print("  Phase 1-2:  TrulyRandom (15% build rate)")
             print("  Phase 3-4:  WeightedRandom bridge")
             print("  Phase 5-10: Difficulty progression (VeryWeak → Strong)")
-            print("  Phase 11-12: Self-play (past checkpoints as opponents)")
+            print("  Phase 11-15: Specialist diversity (CityRusher, RoadBlocker, etc.)")
+            print("  Phase 16-17: Self-play (past checkpoints as opponents)")
             print("-" * 70)
         else:
             phases = [
