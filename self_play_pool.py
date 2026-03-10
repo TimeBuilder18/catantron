@@ -164,6 +164,20 @@ class SelfPlayPool:
 
     # ── public API ───────────────────────────────────────────────────────────
 
+    def add_checkpoint(self, path: str):
+        """Register a newly saved checkpoint so it can enter the pool on next refresh.
+
+        This is called by the training loop after saving a periodic checkpoint,
+        so self-play opponents include the agent's own recent checkpoints — not
+        just the initial seed pool.
+        """
+        with self._lock:
+            if path not in self.all_paths:
+                self.all_paths.append(path)
+                self.all_paths.sort()
+                print(f"[SelfPlayPool] Added checkpoint to pool: {path}  "
+                      f"(total candidates: {len(self.all_paths)})")
+
     def notify_game_done(self):
         """Call after each training game.  Triggers pool refresh periodically."""
         with self._lock:

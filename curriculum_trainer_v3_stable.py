@@ -1669,7 +1669,11 @@ class CurriculumTrainerV3:
             # Periodic saves, LR decay, and entropy decay (every 1000 games)
             if game_num // 1000 > last_save_game // 1000:
                 last_save_game = game_num
-                self.save(f"{save_path}_game{game_num}.pt")
+                ckpt_path = f"{save_path}_game{game_num}.pt"
+                self.save(ckpt_path)
+                # Register new checkpoint into self-play pool
+                if self.self_play_pool is not None:
+                    self.self_play_pool.add_checkpoint(ckpt_path)
                 # Apply LR decay
                 if self.lr_decay < 1.0:
                     for pg in self.optimizer.param_groups:
