@@ -517,6 +517,7 @@ class CentralInferenceServer:
         return result
 
     def _inference_loop(self):
+        _batch_count = 0
         while self._running:
             # Block waiting for the first request
             try:
@@ -565,6 +566,10 @@ class CentralInferenceServer:
                 for i, (_, event, holder) in enumerate(batch):
                     holder[0] = (aps[i], vps[i], eps[i], tgps[i], tgetps[i], svs[i])
                     event.set()
+
+                _batch_count += 1
+                if _batch_count % 500 == 0:
+                    print(f"  [INFER-DIAG] {_batch_count} batches processed, last batch_size={len(batch)}", flush=True)
 
             except Exception as e:
                 # Unblock all waiting threads before propagating (prevents infinite hang)
@@ -807,8 +812,17 @@ class CurriculumTrainerV3:
         done = False
         moves = 0
         max_moves = 3000   # raised from 800: model does many trades/turn → 800 = only ~80 real turns, games always timed out → no win signal → plateau
+        import time as _time
+        _game_start = _time.monotonic()
+        _last_progress = _game_start
 
         while not done and moves < max_moves:
+            _now = _time.monotonic()
+            if _now - _last_progress > 30.0:
+                _last_progress = _now
+                _elapsed_game = _now - _game_start
+                print(f"  [GAME-DIAG] {_elapsed_game:.0f}s elapsed, {moves} moves, thread={threading.current_thread().name}", flush=True)
+
             game = env.game_env.game
             current = game.get_current_player()
             current_id = game.players.index(current)
@@ -892,6 +906,7 @@ class CurriculumTrainerV3:
             else:
                 # Self-play: use a past-checkpoint network as opponent
                 # (with optional specialist mixing to prevent blind spots)
+                _opp_t0 = _time.monotonic()
                 sp_used = False
                 if primary_ai == 'self_play' and self.self_play_pool is not None:
                     if self.specialist_mix_rate > 0 and random.random() < self.specialist_mix_rate:
@@ -915,6 +930,10 @@ class CurriculumTrainerV3:
                 # This was being skipped because opponent doesn't go through env.step()
                 if game.waiting_for_discards:
                     env.game_env._handle_automatic_discards()
+
+                _opp_elapsed = _time.monotonic() - _opp_t0
+                if _opp_elapsed > 5.0:
+                    print(f"  [OPP-DIAG] opponent turn took {_opp_elapsed:.1f}s, sp_used={sp_used}", flush=True)
 
                 # FIX: Refresh observation after opponent turn so agent sees current state
                 obs = env._get_obs()
@@ -1158,6 +1177,7 @@ class CurriculumTrainerV3:
         Uses MCTS to select action + location, falls back to network for trades.
         Returns same format as _get_action so play_game works unchanged.
         """
+        import time as _time
         from game_state import GameState
 
         # Create a temporary GameState from the current env for MCTS to search
@@ -1166,7 +1186,11 @@ class CurriculumTrainerV3:
         temp_state = GameState(env=underlying_env)
 
         # MCTS search (uses copies internally, doesn't modify temp_state)
+        _t0 = _time.monotonic()
         best_action, mcts_probs = self._mcts.search(temp_state, temperature=1.0)
+        _elapsed = _time.monotonic() - _t0
+        if _elapsed > 2.0:
+            print(f"  [MCTS-DIAG] search took {_elapsed:.1f}s, action={best_action}, {len(mcts_probs)} probs", flush=True)
         action_id, vertex_id, edge_id = best_action
 
         # Get network's own probabilities (needed for PPO log_probs and entropy)
