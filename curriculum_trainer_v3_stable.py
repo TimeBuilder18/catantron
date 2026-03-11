@@ -678,6 +678,10 @@ class CurriculumTrainerV3:
         self.phase_vps = deque(maxlen=100)
         self._phase_lock = threading.Lock()
 
+        # AQS tracking (protected by _phase_lock)
+        from agent_quality_score import AgentQualityEvaluator
+        self.aqs_evaluator = AgentQualityEvaluator(window_size=200)
+
         # DIAGNOSTIC: Track city building attempts
         self.diag_could_build_city = 0
         self.diag_took_build_city = 0
@@ -954,6 +958,21 @@ class CurriculumTrainerV3:
         with self._phase_lock:
             self.phase_wins.append(1 if winner_id == 0 else 0)
             self.phase_vps.append(my_vp)
+            # AQS tracking
+            _p0 = env.game_env.game.players[0]
+            self.aqs_evaluator.record_game({
+                'won': winner_id == 0,
+                'agent_vp': my_vp,
+                'opponent_vp': env.game_env.game.players[1].calculate_victory_points(),
+                'agent_turns': moves,
+                'settlements_built': len(_p0.settlements) + len(_p0.cities),
+                'cities_built': len(_p0.cities),
+                'roads_built': len(_p0.roads),
+                'has_longest_road': _p0.has_longest_road,
+                'has_largest_army': _p0.has_largest_army,
+                'knights_played': _p0.knights_played,
+                'opponent_type': primary_ai,
+            })
 
         # Track settlement count at game end (diagnose expansion failure)
         # If this stays at 2.0, agent never builds new settlements beyond initial placements
@@ -1601,6 +1620,11 @@ class CurriculumTrainerV3:
                         print(f"    └─ SETTLE: avg_at_end={avg_setts:.1f} | "
                               f"win_bonus_fired={wins_since_log} | "
                               f"timeouts={truncated_since_log} (last ~10 games)")
+
+                    # AQS score
+                    if len(self.aqs_evaluator.results) >= 20:
+                        aqs = self.aqs_evaluator.calculate_aqs()
+                        print(f"    \u2514\u2500 AQS: {aqs:.0f}/1000")
 
             # Linear entropy decay within phase: high at start, min after entropy_decay_games
             progress = min(1.0, phase_game_count / entropy_decay_games)

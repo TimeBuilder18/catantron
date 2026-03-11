@@ -20,6 +20,54 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from catan_env_pytorch import CatanEnv
 from network_wrapper import NetworkWrapper
 from curriculum_trainer_v3_stable import play_opponent_turn
+from agent_quality_score import AgentQualityEvaluator
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# AQS helper functions
+# ──────────────────────────────────────────────────────────────────────────────
+
+DICE_PIPS = {2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 8: 5, 9: 4, 10: 3, 11: 2, 12: 1}
+
+
+def _calculate_pip_count(player):
+    """Sum pip values from all hexes adjacent to player's settlements and cities."""
+    pips = 0
+    seen_tiles = set()
+    for structure in player.settlements + player.cities:
+        for tile in structure.position.adjacent_tiles:
+            if id(tile) not in seen_tiles and tile.number and tile.resource and tile.resource != 'desert':
+                seen_tiles.add(id(tile))
+                pips += DICE_PIPS.get(tile.number, 0)
+    return pips
+
+
+def _calculate_resource_diversity(player):
+    """Count distinct resource types produced by player's settlements/cities."""
+    resources = set()
+    for structure in player.settlements + player.cities:
+        for tile in structure.position.adjacent_tiles:
+            if tile.resource and tile.resource != 'desert':
+                rt = tile.get_resource_type()
+                if rt:
+                    resources.add(rt)
+    return len(resources)
+
+
+def _calculate_port_access(player, game_board):
+    """Count how many ports the player has access to."""
+    return len(game_board.get_player_ports(player))
+
+
+def _estimate_resources_spent(player):
+    """Estimate total resources spent from structures built."""
+    settlements = len(player.settlements)
+    cities = len(player.cities)
+    roads = len(player.roads)
+    dev_cards = sum(player.development_cards.values()) + player.knights_played
+    paid_settlements = max(0, settlements + cities - 2)  # cities were settlements first
+    paid_roads = max(0, roads - 2)  # 2 initial roads are free
+    return (paid_settlements * 4) + (cities * 5) + (paid_roads * 2) + (dev_cards * 3)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -55,6 +103,8 @@ def _play_game(network, device, opponent_type, victory_points=10):
     moves     = 0          # model-only move counter (matches trainer definition)
     MAX_MOVES = 3000       # 800 was too low: model does many trades/turn → only ~80 real turns
     action_counts = {}     # action_id → count
+    bank_trade_count = 0   # AQS: count bank trades (action_id 9)
+    robber_placement_count = 0  # AQS: count robber placements (action_id 11)
 
     while not done and moves < MAX_MOVES:
         game       = env.game_env.game
@@ -89,6 +139,10 @@ def _play_game(network, device, opponent_type, victory_points=10):
                 get_idx = (give_idx + 1) % 5
 
             action_counts[action_id] = action_counts.get(action_id, 0) + 1
+            if action_id == 9:
+                bank_trade_count += 1
+            if action_id == 11:
+                robber_placement_count += 1
 
             obs, _, terminated, truncated, _ = env.step(
                 action_id, vertex_id, edge_id,
@@ -148,6 +202,15 @@ def _play_game(network, device, opponent_type, victory_points=10):
         'opp_longest':    int(op.has_longest_road),
         # dev cards remaining in hand
         'model_dev_cards': sum(mp.development_cards.values()),
+        # AQS fields
+        'dev_cards_bought':     sum(mp.development_cards.values()) + mp.knights_played,
+        'dev_cards_played':     mp.knights_played,
+        'total_resources_spent': _estimate_resources_spent(mp),
+        'bank_trades_made':     bank_trade_count,
+        'robber_placements':    robber_placement_count,
+        'pip_count':            _calculate_pip_count(mp),
+        'resource_diversity':   _calculate_resource_diversity(mp),
+        'port_access_count':    _calculate_port_access(mp, game.game_board),
         # action distribution
         'action_counts':  action_counts,
     }
@@ -171,6 +234,9 @@ def evaluate(model_path, opponent_type, num_games=100, num_parallel=8, verbose=T
         'model_knights', 'model_largest', 'model_longest',
         'opp_knights', 'opp_largest', 'opp_longest',
         'model_dev_cards',
+        'dev_cards_bought', 'dev_cards_played', 'total_resources_spent',
+        'bank_trades_made', 'robber_placements', 'pip_count',
+        'resource_diversity', 'port_access_count',
     )}
     combined_actions = {}
     lock = threading.Lock()
@@ -211,6 +277,32 @@ def evaluate(model_path, opponent_type, num_games=100, num_parallel=8, verbose=T
     action_pcts = {ACTION_NAMES.get(aid, str(aid)): cnt / total_actions * 100
                    for aid, cnt in sorted(combined_actions.items())}
 
+    # Calculate AQS
+    aqs_evaluator = AgentQualityEvaluator(window_size=num_games)
+    for i in range(len(lists['model_vp'])):
+        aqs_evaluator.record_game({
+            'won': lists['model_vp'][i] >= 10,
+            'agent_vp': lists['model_vp'][i],
+            'opponent_vp': lists['opp_vp'][i],
+            'agent_turns': lists['moves'][i],
+            'settlements_built': lists['model_sett'][i] + lists['model_cities'][i],
+            'cities_built': lists['model_cities'][i],
+            'roads_built': lists['model_roads'][i],
+            'has_longest_road': bool(lists['model_longest'][i]),
+            'has_largest_army': bool(lists['model_largest'][i]),
+            'knights_played': lists['model_knights'][i],
+            'opponent_type': opponent_type,
+            'dev_cards_bought': lists['dev_cards_bought'][i],
+            'dev_cards_played': lists['dev_cards_played'][i],
+            'total_resources_spent': lists['total_resources_spent'][i],
+            'bank_trades_made': lists['bank_trades_made'][i],
+            'robber_placements': lists['robber_placements'][i],
+            'pip_count': lists['pip_count'][i],
+            'resource_diversity': lists['resource_diversity'][i],
+            'port_access_count': lists['port_access_count'][i],
+        })
+    aqs_breakdown = aqs_evaluator.get_breakdown()
+
     return {
         'opponent':         opponent_type,
         'games':            total,
@@ -244,6 +336,10 @@ def evaluate(model_path, opponent_type, num_games=100, num_parallel=8, verbose=T
         'action_pcts':      action_pcts,
         # Speed
         'games_per_min':    total / (time.time() - t0) * 60,
+        # AQS
+        'aqs':              aqs_breakdown['aqs'],
+        'aqs_tier':         aqs_breakdown['tier'],
+        'aqs_breakdown':    aqs_breakdown,
     }
 
 
@@ -281,9 +377,19 @@ def _print_result(r):
     print(f"  Avg moves : {r['avg_moves']:.1f}  (max {r['max_moves']})")
     print(f"  Speed     : {r['games_per_min']:.1f} games/min")
 
+    if 'aqs' in r:
+        print(f"\n  ── Agent Quality Score ────────────────────")
+        print(f"  AQS         : {r['aqs']:.0f} / 1000  [{r['aqs_tier']}]")
+        if 'aqs_breakdown' in r:
+            for name, info in r['aqs_breakdown']['components'].items():
+                bar_len = int(info['score'] / 2)
+                bar = '\u2588' * bar_len + '\u2591' * (50 - bar_len)
+                print(f"  {name:15s} {bar} {info['score']:5.1f} "
+                      f"(x{info['weight']:.2f} = {info['weighted']:5.1f})")
+
 
 def benchmark(model_path, num_games=50, num_parallel=8):
-    HDR = f"{'Opponent':<16} {'WR%':>7} {'OppW%':>7} {'TO%':>5} {'MVP':>6} {'OVP':>6} {'Sett':>5} {'City':>5} {'Road':>5} {'Knt':>5} {'Len':>6}"
+    HDR = f"{'Opponent':<16} {'WR%':>7} {'AQS':>5} {'OppW%':>7} {'TO%':>5} {'MVP':>6} {'OVP':>6} {'Sett':>5} {'City':>5} {'Road':>5} {'Knt':>5} {'Len':>6}"
     SEP = '-' * len(HDR)
 
     print(f"\n{'='*len(HDR)}")
@@ -305,7 +411,7 @@ def benchmark(model_path, num_games=50, num_parallel=8):
     print(HDR)
     print(SEP)
     for opp, r in all_results.items():
-        print(f"{opp:<16} {r['win_rate']:>6.1f}% {r['opp_win_rate']:>6.1f}% "
+        print(f"{opp:<16} {r['win_rate']:>6.1f}% {r['aqs']:>5.0f} {r['opp_win_rate']:>6.1f}% "
               f"{r['timeout_rate']:>4.1f}% {r['model_avg_vp']:>6.2f} {r['opp_avg_vp']:>6.2f} "
               f"{r['model_avg_sett']:>5.2f} {r['model_avg_cities']:>5.2f} "
               f"{r['model_avg_roads']:>5.2f} {r['model_avg_knights']:>5.2f} "
