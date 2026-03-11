@@ -517,7 +517,6 @@ class CentralInferenceServer:
         return result
 
     def _inference_loop(self):
-        _batch_count = 0
         while self._running:
             # Block waiting for the first request
             try:
@@ -566,10 +565,6 @@ class CentralInferenceServer:
                 for i, (_, event, holder) in enumerate(batch):
                     holder[0] = (aps[i], vps[i], eps[i], tgps[i], tgetps[i], svs[i])
                     event.set()
-
-                _batch_count += 1
-                if _batch_count % 500 == 0:
-                    print(f"  [INFER-DIAG] {_batch_count} batches processed, last batch_size={len(batch)}", flush=True)
 
             except Exception as e:
                 # Unblock all waiting threads before propagating (prevents infinite hang)
@@ -811,20 +806,9 @@ class CurriculumTrainerV3:
 
         done = False
         moves = 0
-        # With MCTS, each move is ~15x slower, so cap max_moves lower to keep
-        # batch times reasonable (~2-4 min instead of 20+ min).
-        max_moves = 800 if (self.use_mcts and self._mcts is not None) else 3000
-        import time as _time
-        _game_start = _time.monotonic()
-        _last_progress = _game_start
+        max_moves = 3000   # raised from 800: model does many trades/turn → 800 = only ~80 real turns, games always timed out → no win signal → plateau
 
         while not done and moves < max_moves:
-            _now = _time.monotonic()
-            if _now - _last_progress > 30.0:
-                _last_progress = _now
-                _elapsed_game = _now - _game_start
-                print(f"  [GAME-DIAG] {_elapsed_game:.0f}s elapsed, {moves} moves, thread={threading.current_thread().name}", flush=True)
-
             game = env.game_env.game
             current = game.get_current_player()
             current_id = game.players.index(current)
@@ -833,7 +817,7 @@ class CurriculumTrainerV3:
                 moves += 1
 
                 # Skip expensive MCTS for trivial forced actions (roll_dice, end_turn, wait, do_nothing)
-                # These have only 1 legal action — MCTS adds 15 sims of overhead for zero benefit
+                # These have only 1 legal action — MCTS adds N sims of overhead for zero benefit
                 _action_mask = obs['action_mask']
                 _n_legal = int(_action_mask.sum())
                 _use_mcts_this_step = (self.use_mcts and self._mcts is not None and _n_legal > 1)
@@ -915,7 +899,6 @@ class CurriculumTrainerV3:
             else:
                 # Self-play: use a past-checkpoint network as opponent
                 # (with optional specialist mixing to prevent blind spots)
-                _opp_t0 = _time.monotonic()
                 sp_used = False
                 if primary_ai == 'self_play' and self.self_play_pool is not None:
                     if self.specialist_mix_rate > 0 and random.random() < self.specialist_mix_rate:
@@ -939,10 +922,6 @@ class CurriculumTrainerV3:
                 # This was being skipped because opponent doesn't go through env.step()
                 if game.waiting_for_discards:
                     env.game_env._handle_automatic_discards()
-
-                _opp_elapsed = _time.monotonic() - _opp_t0
-                if _opp_elapsed > 5.0:
-                    print(f"  [OPP-DIAG] opponent turn took {_opp_elapsed:.1f}s, sp_used={sp_used}", flush=True)
 
                 # FIX: Refresh observation after opponent turn so agent sees current state
                 obs = env._get_obs()
@@ -1186,7 +1165,6 @@ class CurriculumTrainerV3:
         Uses MCTS to select action + location, falls back to network for trades.
         Returns same format as _get_action so play_game works unchanged.
         """
-        import time as _time
         from game_state import GameState
 
         # Create a temporary GameState from the current env for MCTS to search
@@ -1195,11 +1173,7 @@ class CurriculumTrainerV3:
         temp_state = GameState(env=underlying_env)
 
         # MCTS search (uses copies internally, doesn't modify temp_state)
-        _t0 = _time.monotonic()
         best_action, mcts_probs = self._mcts.search(temp_state, temperature=1.0)
-        _elapsed = _time.monotonic() - _t0
-        if _elapsed > 2.0:
-            print(f"  [MCTS-DIAG] search took {_elapsed:.1f}s, action={best_action}, {len(mcts_probs)} probs", flush=True)
         action_id, vertex_id, edge_id = best_action
 
         # Get network's own probabilities (needed for PPO log_probs and entropy)
