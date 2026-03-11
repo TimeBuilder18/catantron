@@ -334,7 +334,7 @@ class FastTrainer:
                   f"VP: {avg_vp:.1f} | "
                   f"Buffer: {len(self.replay_buffer):6d} | "
                   f"Speed: {games_per_min:.1f} g/min | "
-                  f"[{mode}]")
+                  f"[{mode}]", flush=True)
 
             # Training
             if len(self.replay_buffer) >= self.batch_size:
@@ -347,12 +347,12 @@ class FastTrainer:
                 if losses:
                     avg_policy = np.mean([l['policy_loss'] for l in losses])
                     avg_value = np.mean([l['value_loss'] for l in losses])
-                    print(f"  └─ Training: policy={avg_policy:.4f}, value={avg_value:.4f}")
+                    print(f"  └─ Training: policy={avg_policy:.4f}, value={avg_value:.4f}", flush=True)
 
             # Save
             if game_num % 100 == 0:
                 self.save(f"{save_path}_game_{game_num}.pt")
-                print(f"  └─ Saved checkpoint")
+                print(f"  └─ Saved checkpoint", flush=True)
 
         self.save(f"{save_path}_final.pt")
 

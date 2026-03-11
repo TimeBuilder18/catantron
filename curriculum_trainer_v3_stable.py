@@ -11,6 +11,7 @@ Fixes entropy collapse with:
 7. Buffer prioritization for recent experiences
 """
 
+import sys
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -23,6 +24,10 @@ import threading
 import queue
 import contextlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# Force unbuffered stdout so training progress appears immediately
+if not sys.stdout.line_buffering:
+    sys.stdout.reconfigure(line_buffering=True)
 
 from catan_env_pytorch import CatanEnv
 from simplified_reward_wrapper import SimplifiedRewardWrapper
