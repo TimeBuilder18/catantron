@@ -811,7 +811,9 @@ class CurriculumTrainerV3:
 
         done = False
         moves = 0
-        max_moves = 3000   # raised from 800: model does many trades/turn → 800 = only ~80 real turns, games always timed out → no win signal → plateau
+        # With MCTS, each move is ~15x slower, so cap max_moves lower to keep
+        # batch times reasonable (~2-4 min instead of 20+ min).
+        max_moves = 800 if (self.use_mcts and self._mcts is not None) else 3000
         import time as _time
         _game_start = _time.monotonic()
         _last_progress = _game_start
@@ -829,7 +831,14 @@ class CurriculumTrainerV3:
 
             if current_id == 0:
                 moves += 1
-                if self.use_mcts and self._mcts is not None:
+
+                # Skip expensive MCTS for trivial forced actions (roll_dice, end_turn, wait, do_nothing)
+                # These have only 1 legal action — MCTS adds 15 sims of overhead for zero benefit
+                _action_mask = obs['action_mask']
+                _n_legal = int(_action_mask.sum())
+                _use_mcts_this_step = (self.use_mcts and self._mcts is not None and _n_legal > 1)
+
+                if _use_mcts_this_step:
                     action, action_probs, vertex_probs, edge_probs, log_prob = self._get_action_mcts(obs, env)
                 else:
                     action, action_probs, vertex_probs, edge_probs, log_prob = self._get_action(obs)
