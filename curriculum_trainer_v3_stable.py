@@ -506,7 +506,7 @@ class CentralInferenceServer:
             self._thread.join(timeout=2.0)
 
     def infer(self, obs):
-        """Submit obs dict, block until result returned. Returns (ap, vp, ep, tgp, tgetp)."""
+        """Submit obs dict, block until result returned. Returns (ap, vp, ep, tgp, tgetp, sv)."""
         event = threading.Event()
         holder = [None]
         self._request_queue.put((obs, event, holder))
@@ -552,7 +552,7 @@ class CentralInferenceServer:
 
                 ctx = torch.amp.autocast('cuda') if self.use_amp else contextlib.nullcontext()
                 with torch.inference_mode(), ctx:
-                    ap, vp, ep, tgp, tgetp, _ = self.network(
+                    ap, vp, ep, tgp, tgetp, sv = self.network(
                         observations, action_masks, vertex_masks, edge_masks)
 
                 aps = ap.cpu().numpy()
@@ -560,9 +560,10 @@ class CentralInferenceServer:
                 eps = ep.cpu().numpy()
                 tgps = tgp.cpu().numpy()
                 tgetps = tgetp.cpu().numpy()
+                svs = sv.cpu().numpy()
 
                 for i, (_, event, holder) in enumerate(batch):
-                    holder[0] = (aps[i], vps[i], eps[i], tgps[i], tgetps[i])
+                    holder[0] = (aps[i], vps[i], eps[i], tgps[i], tgetps[i], svs[i])
                     event.set()
 
             except Exception as e:
@@ -608,6 +609,13 @@ class CurriculumTrainerV3:
             # Smaller buffer for 1v1 - ensures policy trains on fresh data
             if buffer_size == 200000:  # Only override if using default
                 buffer_size = 50000  # Much smaller for 1v1 - less variance, fresher data
+
+        # MCTS is ~15x slower per move (15 sims each needing NN eval).
+        # Cap parallelism to avoid overwhelming the inference server.
+        if self.use_mcts and num_parallel_games > 8:
+            print(f"  MCTS mode: reducing parallel games {num_parallel_games} → 8 "
+                  f"(each move does {mcts_simulations} sims)")
+            num_parallel_games = 8
 
         # Store the (possibly auto-tuned) values
         self.num_parallel_games = num_parallel_games
@@ -1013,6 +1021,21 @@ class CurriculumTrainerV3:
 
         return winner_id, my_vp, sum(episode_rewards)
 
+    def _mcts_infer_via_server(self, obs):
+        """Bridge: route MCTS neural network calls through CentralInferenceServer.
+
+        MCTS expects fn(obs) -> (policy_dict, value_float).
+        CentralInferenceServer.infer(obs) -> (ap, vp, ep, tgp, tgetp) numpy arrays.
+        """
+        ap, vp, ep, tgp, tgetp, sv = self._inference_server.infer(obs)
+        policy = {
+            'action': ap,
+            'vertex': vp,
+            'edge': ep,
+        }
+        value = float(np.tanh(sv.flatten()[0]))
+        return policy, value
+
     def play_games_parallel(self, num_games, mix_prob=1.0, primary_ai='random',
                             secondary_ai=None, victory_points_to_win=10):
         """Play multiple games in parallel using ThreadPoolExecutor.
@@ -1026,6 +1049,10 @@ class CurriculumTrainerV3:
         server = CentralInferenceServer(self.network, self.device)
         self._inference_server = server
         server.start()
+
+        # Wire MCTS to use the batched inference server instead of individual GPU calls
+        if self._mcts is not None:
+            self._mcts.set_infer_fn(self._mcts_infer_via_server)
 
         try:
             with ThreadPoolExecutor(max_workers=num_games) as executor:
@@ -1044,6 +1071,9 @@ class CurriculumTrainerV3:
                         print(f"  Warning: Game failed with error: {e}")
                         results.append((None, 0, 0))
         finally:
+            # Disconnect MCTS from server before stopping
+            if self._mcts is not None:
+                self._mcts.set_infer_fn(None)
             server.stop()
             self._inference_server = None
 
@@ -1061,7 +1091,7 @@ class CurriculumTrainerV3:
         """
         if self._inference_server is not None:
             # Batched path: submit to central server and block until result ready
-            ap, vp, ep, tgp, tgetp = self._inference_server.infer(obs)
+            ap, vp, ep, tgp, tgetp, _sv = self._inference_server.infer(obs)
         else:
             # Fallback single-step path (used outside play_games_parallel)
             ctx = torch.amp.autocast('cuda') if self.use_amp else contextlib.nullcontext()
@@ -1141,7 +1171,7 @@ class CurriculumTrainerV3:
 
         # Get network's own probabilities (needed for PPO log_probs and entropy)
         if self._inference_server is not None:
-            ap, vp, ep, tgp, tgetp = self._inference_server.infer(obs)
+            ap, vp, ep, tgp, tgetp, _sv = self._inference_server.infer(obs)
         else:
             ctx = torch.amp.autocast('cuda') if self.use_amp else contextlib.nullcontext()
             with torch.inference_mode(), ctx:
@@ -1621,12 +1651,18 @@ class CurriculumTrainerV3:
         last_stagnation_check = 0
         stagnation_lr_cuts = 0      # resets each phase; max 4 cuts per phase
 
+        first_batch = True
         while game_num < total_games:
             primary_ai, secondary_ai, mix_prob, vp_to_win, vp_threshold, phase_name = phases[current_phase]
 
             # Determine how many games to play in this batch
             games_remaining = total_games - game_num
             batch_size = min(self.num_parallel_games, games_remaining)
+
+            if first_batch:
+                mcts_note = f" (MCTS {self.mcts_simulations} sims/move)" if self.use_mcts else ""
+                print(f"  ▶ Starting first batch: {batch_size} parallel games{mcts_note}...")
+                first_batch = False
 
             # Play games in parallel
             results = self.play_games_parallel(
@@ -1962,6 +1998,9 @@ if __name__ == "__main__":
     if args.num_players == 2:
         # Show auto-tuned values (must match logic in __init__ lines 393-399)
         auto_parallel = 32 if args.parallel_games == 8 else args.parallel_games
+        # MCTS caps parallelism (must match logic in __init__)
+        if args.mcts and auto_parallel > 8:
+            auto_parallel = 8
         auto_buffer = 50000 if args.buffer_size == 200000 else args.buffer_size
         print("\n" + "=" * 60)
         print("1v1 TRAINING MODE (Colonist-style)")

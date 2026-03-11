@@ -83,6 +83,15 @@ class MCTS:
         self.c_puct = c_puct
         self.dirichlet_alpha = dirichlet_alpha
         self.dirichlet_frac = dirichlet_frac
+        # Optional callable for batched inference: fn(obs) -> (policy_dict, value)
+        # When set, bypasses self.policy_network.evaluate() and routes through
+        # the CentralInferenceServer for much faster parallel MCTS.
+        self._infer_fn = None
+
+    def set_infer_fn(self, fn):
+        """Set a batched inference function: fn(obs_dict) -> (policy_dict, value).
+        This allows MCTS to route NN calls through CentralInferenceServer."""
+        self._infer_fn = fn
 
     def search(self, root_state, temperature=1.0):
         """
@@ -171,13 +180,16 @@ class MCTS:
 
     def _evaluate(self, node):
         """Get value estimate from neural network."""
-        if self.policy_network is None:
+        if self.policy_network is None and self._infer_fn is None:
             current_player = node.state.get_current_player()
             my_vp = node.state.get_victory_points(current_player)
             return (my_vp - 5) / 5.0
 
         obs = node.state.get_observation()
-        _, value = self.policy_network.evaluate(obs)
+        if self._infer_fn is not None:
+            _, value = self._infer_fn(obs)
+        else:
+            _, value = self.policy_network.evaluate(obs)
         return value
 
     def _get_priors(self, state, legal_actions):
@@ -188,12 +200,15 @@ class MCTS:
         the prior is: P(action_type) × P(vertex | action_type).
         This lets MCTS distinguish between good and bad locations.
         """
-        if self.policy_network is None:
+        if self.policy_network is None and self._infer_fn is None:
             n = len(legal_actions)
             return [1.0 / n] * n
 
         obs = state.get_observation()
-        policy, _ = self.policy_network.evaluate(obs)
+        if self._infer_fn is not None:
+            policy, _ = self._infer_fn(obs)
+        else:
+            policy, _ = self.policy_network.evaluate(obs)
 
         action_probs = policy['action']   # shape (14,)
         vertex_probs = policy['vertex']   # shape (54,)
