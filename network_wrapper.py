@@ -37,7 +37,7 @@ class NetworkWrapper:
             obs: Observation dict from GameState.get_observation()
 
         Returns:
-            policy: numpy array of action probabilities (14 actions)
+            policy: dict with 'action', 'vertex', 'edge' numpy arrays
             value: float in [-1, 1] estimating win probability
         """
         with torch.no_grad():
@@ -49,23 +49,20 @@ class NetworkWrapper:
 
             # Forward pass through network
             # Returns: action_probs, vertex_probs, edge_probs, trade_give, trade_get, value
-            result = self.policy.forward(
+            action_probs, vertex_probs, edge_probs, _, _, state_value = self.policy.forward(
                 observation,
                 action_mask,
                 vertex_mask,
                 edge_mask
             )
 
-            # Unpack results - your network returns 6 values
-            action_probs = result[0]
-            state_value = result[-1]  # Last one is value
-
             # Convert to numpy
-            policy = action_probs.cpu().numpy().flatten()
-            value = state_value.cpu().numpy().flatten()[0]
-
-            # Normalize value to [-1, 1] range (tanh-like)
-            value = np.tanh(value)
+            policy = {
+                'action': action_probs.cpu().numpy().flatten(),
+                'vertex': vertex_probs.cpu().numpy().flatten(),
+                'edge': edge_probs.cpu().numpy().flatten(),
+            }
+            value = np.tanh(state_value.cpu().numpy().flatten()[0])
 
             return policy, value
 

@@ -581,7 +581,7 @@ class CurriculumTrainerV3:
     def __init__(self, model_path=None, learning_rate=5e-4, batch_size=None, reward_mode='pbrs_fixed',
                  lr_decay=1.0, value_weight=0.5, entropy_decay=1.0, num_parallel_games=8,
                  buffer_size=200000, num_players=4, bc_coef=0.1, self_play_pool=None,
-                 specialist_mix_rate=0.0):
+                 specialist_mix_rate=0.0, use_mcts=False, mcts_simulations=30, mcts_c_puct=1.5):
         self.device = get_device()
         self.reward_mode = reward_mode
         self.lr_decay = lr_decay  # Learning rate decay per 1000 games
@@ -591,6 +591,9 @@ class CurriculumTrainerV3:
         self.bc_coef = bc_coef          # Behavioral cloning coefficient (annealed to 0 over training)
         self.self_play_pool = self_play_pool  # SelfPlayPool or None
         self.specialist_mix_rate = specialist_mix_rate  # Prob of specialist opponent per turn during self-play
+        self.use_mcts = use_mcts        # Use MCTS for action selection during data collection
+        self.mcts_simulations = mcts_simulations  # MCTS simulations per move
+        self.mcts_c_puct = mcts_c_puct  # MCTS exploration constant
 
         # Auto-tune settings for 1v1 mode (faster games = can run more in parallel)
         if self.num_players == 2:
@@ -709,6 +712,18 @@ class CurriculumTrainerV3:
         print(f"Max KL divergence: {self.max_kl}")
         print(f"BC coef (imitation): {self.bc_coef}")
 
+        # MCTS for improved action selection during data collection
+        self._mcts = None
+        if self.use_mcts:
+            from mcts import MCTS
+            # MCTS uses the NetworkWrapper for priors + value estimation
+            self._mcts = MCTS(
+                policy_network=self.network_wrapper,
+                num_simulations=self.mcts_simulations,
+                c_puct=self.mcts_c_puct,
+            )
+            print(f"MCTS enabled: {self.mcts_simulations} sims, c_puct={self.mcts_c_puct}")
+
     def _compute_smooth_entropy_penalty(self, entropy):
         """Smooth quadratic penalty instead of hard floor"""
         # Quadratic penalty below target, small bonus above
@@ -787,7 +802,10 @@ class CurriculumTrainerV3:
 
             if current_id == 0:
                 moves += 1
-                action, action_probs, vertex_probs, edge_probs, log_prob = self._get_action(obs)
+                if self.use_mcts and self._mcts is not None:
+                    action, action_probs, vertex_probs, edge_probs, log_prob = self._get_action_mcts(obs, env)
+                else:
+                    action, action_probs, vertex_probs, edge_probs, log_prob = self._get_action(obs)
                 action_id, vertex_id, edge_id, trade_give, trade_get = action
 
                 episode_obs.append(obs['observation'].copy())
@@ -1091,6 +1109,70 @@ class CurriculumTrainerV3:
         trade_get = np.random.choice(len(tgetp), p=tgetp)
 
         # Store log probs for ALL heads (needed for proper PPO)
+        action_log_prob = np.log(ap[action_id] + 1e-8)
+        vertex_log_prob = np.log(vp[vertex_id] + 1e-8)
+        edge_log_prob = np.log(ep[edge_id] + 1e-8)
+        trade_give_log_prob = np.log(tgp[trade_give] + 1e-8)
+        trade_get_log_prob = np.log(tgetp[trade_get] + 1e-8)
+
+        return (action_id, vertex_id, edge_id, trade_give, trade_get), ap, vp, ep, (action_log_prob, vertex_log_prob, edge_log_prob, trade_give_log_prob, trade_get_log_prob)
+
+    def _get_action_mcts(self, obs, env):
+        """Get action using MCTS search for higher-quality decisions.
+
+        Uses MCTS to select action + location, falls back to network for trades.
+        Returns same format as _get_action so play_game works unchanged.
+        """
+        from game_state import GameState
+
+        # Create a temporary GameState from the current env for MCTS to search
+        # The env is a reward wrapper; its .env is the CatanEnv
+        underlying_env = env.env if hasattr(env, 'env') else env
+        temp_state = GameState(env=underlying_env)
+
+        # MCTS search (uses copies internally, doesn't modify temp_state)
+        best_action, mcts_probs = self._mcts.search(temp_state, temperature=1.0)
+        action_id, vertex_id, edge_id = best_action
+
+        # Get network's own probabilities (needed for PPO log_probs and entropy)
+        if self._inference_server is not None:
+            ap, vp, ep, tgp, tgetp = self._inference_server.infer(obs)
+        else:
+            ctx = torch.amp.autocast('cuda') if self.use_amp else contextlib.nullcontext()
+            with torch.inference_mode(), ctx:
+                observation = torch.from_numpy(obs['observation']).float().unsqueeze(0).to(self.device)
+                action_mask = torch.from_numpy(obs['action_mask']).float().unsqueeze(0).to(self.device)
+                vertex_mask = torch.from_numpy(obs['vertex_mask']).float().unsqueeze(0).to(self.device)
+                edge_mask = torch.from_numpy(obs['edge_mask']).float().unsqueeze(0).to(self.device)
+
+                action_probs, vertex_probs, edge_probs, trade_give_probs, trade_get_probs, _ = self.network(
+                    observation, action_mask, vertex_mask, edge_mask)
+
+                ap = action_probs.cpu().numpy()[0]
+                vp = vertex_probs.cpu().numpy()[0]
+                ep = edge_probs.cpu().numpy()[0]
+                tgp = trade_give_probs.cpu().numpy()[0]
+                tgetp = trade_get_probs.cpu().numpy()[0]
+
+        def safe_probs(probs):
+            probs = np.nan_to_num(probs, nan=0.0, posinf=0.0, neginf=0.0)
+            if probs.sum() <= 0:
+                probs = np.ones_like(probs) / len(probs)
+            else:
+                probs = probs / probs.sum()
+            return probs
+
+        ap = safe_probs(ap)
+        vp = safe_probs(vp)
+        ep = safe_probs(ep)
+        tgp = safe_probs(tgp)
+        tgetp = safe_probs(tgetp)
+
+        # Trade actions: MCTS doesn't specialize in trades, use network
+        trade_give = np.random.choice(len(tgp), p=tgp)
+        trade_get = np.random.choice(len(tgetp), p=tgetp)
+
+        # Log probs from the NETWORK's perspective (for PPO importance sampling)
         action_log_prob = np.log(ap[action_id] + 1e-8)
         vertex_log_prob = np.log(vp[vertex_id] + 1e-8)
         edge_log_prob = np.log(ep[edge_id] + 1e-8)
@@ -1797,6 +1879,12 @@ if __name__ == "__main__":
     parser.add_argument('--specialist-mix-rate', type=float, default=0.0,
                         help='During self-play, probability each opponent turn uses a random specialist AI (0.0-1.0). '
                              'Prevents blind spots against strategies like dev-card spamming or balanced aggression.')
+    parser.add_argument('--mcts', action='store_true',
+                        help='Use MCTS for action selection during data collection (slower but higher quality)')
+    parser.add_argument('--mcts-sims', type=int, default=30,
+                        help='Number of MCTS simulations per move (default: 30)')
+    parser.add_argument('--mcts-cpuct', type=float, default=1.5,
+                        help='MCTS exploration constant (default: 1.5)')
     args = parser.parse_args()
 
     # List phases if requested
@@ -1904,6 +1992,9 @@ if __name__ == "__main__":
         bc_coef=args.bc_coef,
         self_play_pool=sp_pool,
         specialist_mix_rate=args.specialist_mix_rate,
+        use_mcts=args.mcts,
+        mcts_simulations=args.mcts_sims,
+        mcts_c_puct=args.mcts_cpuct,
     )
     trainer.train(
         total_games=args.total_games,

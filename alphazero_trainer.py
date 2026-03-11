@@ -59,18 +59,24 @@ class ReplayBuffer:
         indices = np.random.choice(len(self.buffer), size=min(batch_size, len(self.buffer)), replace=False)
 
         observations = []
-        action_probs = []
+        action_targets = []
+        vertex_targets = []
+        edge_targets = []
         values = []
 
         for idx in indices:
             example = self.buffer[idx]
             observations.append(example['observation'])
-            action_probs.append(example['action_probs'])
+            action_targets.append(example['action_target'])
+            vertex_targets.append(example['vertex_target'])
+            edge_targets.append(example['edge_target'])
             values.append(example['value'])
 
         return {
             'observations': np.array(observations),
-            'action_probs': np.array(action_probs),
+            'action_targets': np.array(action_targets),
+            'vertex_targets': np.array(vertex_targets),
+            'edge_targets': np.array(edge_targets),
             'values': np.array(values)
         }
 
@@ -145,6 +151,9 @@ class AlphaZeroTrainer:
         move_count = 0
         max_moves = 500
 
+        # Use higher temperature early for exploration, lower late for exploitation
+        explore_moves = 30  # First 30 moves use temperature=1.0
+
         while not state.is_terminal() and move_count < max_moves:
             current_player = state.get_current_player()
 
@@ -152,13 +161,20 @@ class AlphaZeroTrainer:
                 move_count += 1
                 obs = state.get_observation()
 
+                # Temperature: explore early, exploit late
+                temp = 1.0 if move_count <= explore_moves else 0.3
+
                 # MCTS search
-                best_action, action_probs_dict = self.mcts.search(state)
-                action_probs_array = self._action_probs_to_array(action_probs_dict)
+                best_action, action_probs_dict = self.mcts.search(state, temperature=temp)
+
+                # Convert to separate target arrays for action, vertex, edge heads
+                action_target, vertex_target, edge_target = self._action_probs_to_targets(action_probs_dict)
 
                 examples.append({
                     'observation': obs['observation'].copy(),
-                    'action_probs': action_probs_array,
+                    'action_target': action_target,
+                    'vertex_target': vertex_target,
+                    'edge_target': edge_target,
                     'player': current_player
                 })
 
@@ -175,20 +191,19 @@ class AlphaZeroTrainer:
         final_value = 1.0 if winner == 0 else (-1.0 if winner is not None else 0.0)
 
         # Create training examples with discounted values
-        # Later positions get values closer to final outcome
         gamma = 0.99
         training_examples = []
         num_examples = len(examples)
 
         for i, ex in enumerate(examples):
-            # Discount factor: positions earlier in game are less certain
-            # Position near end: discount ~= 1.0, Position at start: discount ~= gamma^n
             steps_to_end = num_examples - i - 1
             discounted_value = final_value * (gamma ** steps_to_end)
 
             training_examples.append({
                 'observation': ex['observation'],
-                'action_probs': ex['action_probs'],
+                'action_target': ex['action_target'],
+                'vertex_target': ex['vertex_target'],
+                'edge_target': ex['edge_target'],
                 'value': discounted_value
             })
 
@@ -201,14 +216,86 @@ class AlphaZeroTrainer:
 
         return winner, len(examples)
 
-    def _action_probs_to_array(self, action_probs_dict):
-        """Convert MCTS action probabilities to fixed-size array"""
-        probs = np.zeros(11, dtype=np.float32)
+    def _action_probs_to_targets(self, action_probs_dict):
+        """
+        Convert MCTS visit-count probabilities into separate training targets
+        for the action, vertex, and edge heads.
+
+        This preserves location information so the network learns WHERE to build,
+        not just WHAT to build.
+        """
+        action_target = np.zeros(14, dtype=np.float32)
+        vertex_target = np.zeros(54, dtype=np.float32)
+        edge_target = np.zeros(72, dtype=np.float32)
+
         for (action_id, vertex_id, edge_id), prob in action_probs_dict.items():
-            probs[action_id] += prob
-        if probs.sum() > 0:
-            probs = probs / probs.sum()
-        return probs
+            # Accumulate action type probabilities
+            if action_id < 14:
+                action_target[action_id] += prob
+
+            # Accumulate vertex probabilities for vertex-based actions
+            if action_id in (1, 3, 4) and vertex_id < 54:
+                vertex_target[vertex_id] += prob
+
+            # Accumulate edge probabilities for edge-based actions
+            if action_id in (2, 5) and edge_id < 72:
+                edge_target[edge_id] += prob
+
+        # Normalize each target (they may not sum to 1 individually)
+        if action_target.sum() > 0:
+            action_target /= action_target.sum()
+        if vertex_target.sum() > 0:
+            vertex_target /= vertex_target.sum()
+        if edge_target.sum() > 0:
+            edge_target /= edge_target.sum()
+
+        return action_target, vertex_target, edge_target
+
+    def _compute_loss(self, batch):
+        """Compute combined loss for action, vertex, edge, and value heads."""
+        observations = torch.FloatTensor(batch['observations']).to(self.device)
+        target_actions = torch.FloatTensor(batch['action_targets']).to(self.device)
+        target_vertices = torch.FloatTensor(batch['vertex_targets']).to(self.device)
+        target_edges = torch.FloatTensor(batch['edge_targets']).to(self.device)
+        target_values = torch.FloatTensor(batch['values']).to(self.device)
+
+        # Forward pass (no masks during training — targets already encode valid actions)
+        action_probs, vertex_probs, edge_probs, _, _, value = self.network.forward(
+            observations, action_mask=None, vertex_mask=None, edge_mask=None
+        )
+        value = value.squeeze()
+
+        # Cross-entropy losses for each head
+        action_loss = -torch.sum(target_actions * torch.log(action_probs + 1e-8), dim=1).mean()
+        value_loss = F.mse_loss(value, target_values)
+
+        # Vertex/edge losses only on examples that have location targets
+        # (skip examples where target is all zeros = no location action was taken)
+        vertex_mask = target_vertices.sum(dim=1) > 0
+        edge_mask = target_edges.sum(dim=1) > 0
+
+        vertex_loss = torch.tensor(0.0, device=self.device)
+        edge_loss = torch.tensor(0.0, device=self.device)
+
+        if vertex_mask.any():
+            vertex_loss = -torch.sum(
+                target_vertices[vertex_mask] * torch.log(vertex_probs[vertex_mask] + 1e-8), dim=1
+            ).mean()
+
+        if edge_mask.any():
+            edge_loss = -torch.sum(
+                target_edges[edge_mask] * torch.log(edge_probs[edge_mask] + 1e-8), dim=1
+            ).mean()
+
+        total_loss = action_loss + value_loss + vertex_loss + edge_loss
+
+        return total_loss, {
+            'action_loss': action_loss.item(),
+            'vertex_loss': vertex_loss.item(),
+            'edge_loss': edge_loss.item(),
+            'value_loss': value_loss.item(),
+            'total_loss': total_loss.item()
+        }
 
     def train_step(self):
         """One training step with optional mixed precision"""
@@ -216,25 +303,11 @@ class AlphaZeroTrainer:
             return None
 
         batch = self.replay_buffer.sample(self.batch_size)
-
-        observations = torch.FloatTensor(batch['observations']).to(self.device)
-        target_probs = torch.FloatTensor(batch['action_probs']).to(self.device)
-        target_values = torch.FloatTensor(batch['values']).to(self.device)
-
         self.network.train()
 
         if self.use_amp:
-            # Mixed precision training (CUDA)
             with torch.cuda.amp.autocast():
-                action_probs, _, _, _, _, value = self.network.forward(
-                    observations, action_mask=None, vertex_mask=None, edge_mask=None
-                )
-                value = value.squeeze()
-
-                policy_loss = -torch.sum(target_probs * torch.log(action_probs + 1e-8), dim=1).mean()
-                value_loss = F.mse_loss(value, target_values)
-                total_loss = policy_loss + value_loss
-
+                total_loss, loss_dict = self._compute_loss(batch)
             self.optimizer.zero_grad()
             self.scaler.scale(total_loss).backward()
             self.scaler.unscale_(self.optimizer)
@@ -242,16 +315,7 @@ class AlphaZeroTrainer:
             self.scaler.step(self.optimizer)
             self.scaler.update()
         else:
-            # Regular training (MPS/CPU)
-            action_probs, _, _, _, _, value = self.network.forward(
-                observations, action_mask=None, vertex_mask=None, edge_mask=None
-            )
-            value = value.squeeze()
-
-            policy_loss = -torch.sum(target_probs * torch.log(action_probs + 1e-8), dim=1).mean()
-            value_loss = F.mse_loss(value, target_values)
-            total_loss = policy_loss + value_loss
-
+            total_loss, loss_dict = self._compute_loss(batch)
             self.optimizer.zero_grad()
             total_loss.backward()
             torch.nn.utils.clip_grad_norm_(self.network.parameters(), max_norm=1.0)
@@ -260,11 +324,7 @@ class AlphaZeroTrainer:
         self.scheduler.step()
         self.training_steps += 1
 
-        return {
-            'policy_loss': policy_loss.item(),
-            'value_loss': value_loss.item(),
-            'total_loss': total_loss.item()
-        }
+        return loss_dict
 
     def train_batch(self, num_steps=10):
         """Multiple training steps"""
@@ -336,9 +396,12 @@ class AlphaZeroTrainer:
                 train_time = time.time() - train_start
 
                 if losses:
-                    avg_policy = np.mean([l['policy_loss'] for l in losses])
+                    avg_action = np.mean([l['action_loss'] for l in losses])
+                    avg_vertex = np.mean([l['vertex_loss'] for l in losses])
+                    avg_edge = np.mean([l['edge_loss'] for l in losses])
                     avg_value = np.mean([l['value_loss'] for l in losses])
-                    print(f"  └─ Training: policy={avg_policy:.4f}, value={avg_value:.4f} ({train_time:.1f}s)")
+                    print(f"  └─ Training: action={avg_action:.4f}, vertex={avg_vertex:.4f}, "
+                          f"edge={avg_edge:.4f}, value={avg_value:.4f} ({train_time:.1f}s)")
 
             # Save checkpoint
             if game_num % save_frequency == 0:
