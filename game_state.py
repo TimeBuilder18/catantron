@@ -9,6 +9,7 @@ Provides clean interface for:
 """
 
 import copy
+import pickle
 import numpy as np
 from catan_env_pytorch import CatanEnv
 
@@ -30,9 +31,10 @@ class GameState:
             self.env = env
 
     def copy(self):
-        """Create independent copy of this state"""
+        """Create independent copy of this state.
+        Uses pickle instead of deepcopy — typically 2-5x faster for complex objects."""
         new_state = GameState.__new__(GameState)
-        new_state.env = copy.deepcopy(self.env)
+        new_state.env = pickle.loads(pickle.dumps(self.env, protocol=pickle.HIGHEST_PROTOCOL))
         return new_state
 
     def get_observation(self):

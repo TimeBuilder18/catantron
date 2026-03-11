@@ -6,6 +6,7 @@ AlphaZero-style MCTS with:
 - Lazy expansion (copy state only when visiting a child)
 - Dirichlet noise at root for exploration
 - Neural network value estimation
+- Single NN call per simulation (combined priors + value)
 """
 
 import math
@@ -62,30 +63,22 @@ class MCTS:
     """
     Monte Carlo Tree Search with Neural Network guidance.
 
-    Key improvements over basic implementation:
+    Key improvements:
+    - Single NN call per simulation (combined expand + evaluate)
     - Priors combine action_prob × location_prob for location-specific actions
     - Lazy expansion: states copied only when a child is actually visited
     - Dirichlet noise at root for exploration diversity
+    - Skips search entirely for forced moves (1 legal action)
     """
 
     def __init__(self, policy_network=None, num_simulations=50, c_puct=1.5,
                  dirichlet_alpha=0.3, dirichlet_frac=0.25):
-        """
-        Args:
-            policy_network: NetworkWrapper with evaluate(obs) method
-            num_simulations: Number of MCTS simulations per move
-            c_puct: Exploration constant (higher = more exploration)
-            dirichlet_alpha: Alpha for Dirichlet noise at root
-            dirichlet_frac: Fraction of noise mixed into root priors
-        """
         self.policy_network = policy_network
         self.num_simulations = num_simulations
         self.c_puct = c_puct
         self.dirichlet_alpha = dirichlet_alpha
         self.dirichlet_frac = dirichlet_frac
         # Optional callable for batched inference: fn(obs) -> (policy_dict, value)
-        # When set, bypasses self.policy_network.evaluate() and routes through
-        # the CentralInferenceServer for much faster parallel MCTS.
         self._infer_fn = None
 
     def set_infer_fn(self, fn):
@@ -97,10 +90,6 @@ class MCTS:
         """
         Run MCTS from root_state.
 
-        Args:
-            root_state: GameState to search from
-            temperature: Controls action selection (1.0=proportional, 0=greedy)
-
         Returns:
             best_action: (action_id, vertex_id, edge_id) tuple
             action_probs: dict mapping action tuples to visit probabilities
@@ -110,8 +99,18 @@ class MCTS:
         # Create root node with its own copy
         root = MCTSNode(root_state.copy())
 
-        # Expand root and add Dirichlet noise
-        self._expand(root)
+        # Expand root: single NN call returns both priors and value
+        root_value = self._expand_and_evaluate(root)
+
+        # Skip search for forced moves (only 1 legal action)
+        if len(root.children) <= 1:
+            if root.children:
+                action = next(iter(root.children))
+                return action, {action: 1.0}
+            else:
+                return (0, 0, 0), {(0, 0, 0): 1.0}
+
+        # Add Dirichlet noise at root
         self._add_dirichlet_noise(root)
 
         # Run simulations
@@ -130,10 +129,9 @@ class MCTS:
                 a_id, v_id, e_id = node.action
                 node.state.apply_action(a_id, v_id, e_id)
 
-            # 3. EXPAND & EVALUATE
+            # 3. EXPAND & EVALUATE in single NN call
             if not node.is_terminal():
-                self._expand(node)
-                value = self._evaluate(node)
+                value = self._expand_and_evaluate(node)
             else:
                 value = node.state.get_result(root_player)
 
@@ -155,106 +153,80 @@ class MCTS:
                 best_child = child
         return best_child
 
-    def _expand(self, node):
+    def _expand_and_evaluate(self, node):
         """
-        Expand node by creating child placeholders for all legal actions.
-        Children start with state=None (lazy — state created on first visit).
+        Expand node AND get value estimate in a SINGLE neural network call.
+
+        Previously _expand and _evaluate were separate, requiring 2 NN calls
+        per simulation. Now we do 1 call and use the result for both.
+
+        Returns:
+            value: float in [-1, 1]
         """
         legal_actions = node.state.get_legal_actions()
         if not legal_actions:
-            return
+            node._expanded = True
+            return 0.0
 
-        priors = self._get_priors(node.state, legal_actions)
+        # Single NN call — get both policy (for priors) and value
+        obs = node.state.get_observation()
+        has_network = self.policy_network is not None or self._infer_fn is not None
 
+        if has_network:
+            if self._infer_fn is not None:
+                policy, value = self._infer_fn(obs)
+            else:
+                policy, value = self.policy_network.evaluate(obs)
+
+            # Compute priors from policy
+            action_probs = policy['action']
+            vertex_probs = policy['vertex']
+            edge_probs = policy['edge']
+
+            priors = []
+            for action_id, vertex_id, edge_id in legal_actions:
+                a_prob = action_probs[action_id] if action_id < len(action_probs) else 1e-4
+
+                if action_id in VERTEX_ACTIONS:
+                    v_prob = vertex_probs[vertex_id] if vertex_id < len(vertex_probs) else 1e-4
+                    prior = a_prob * v_prob
+                elif action_id in EDGE_ACTIONS:
+                    e_prob = edge_probs[edge_id] if edge_id < len(edge_probs) else 1e-4
+                    prior = a_prob * e_prob
+                else:
+                    prior = a_prob
+
+                priors.append(max(prior, 1e-6))
+
+            # Normalize
+            total = sum(priors)
+            if total > 0:
+                priors = [p / total for p in priors]
+            else:
+                priors = [1.0 / len(priors)] * len(priors)
+        else:
+            # No network — uniform priors, heuristic value
+            n = len(legal_actions)
+            priors = [1.0 / n] * n
+            current_player = node.state.get_current_player()
+            my_vp = node.state.get_victory_points(current_player)
+            value = (my_vp - 5) / 5.0
+
+        # Create children with computed priors
         for action, prior in zip(legal_actions, priors):
-            # Lazy: child has no state yet, just prior and action
-            child = MCTSNode(
-                state=None,
-                parent=node,
-                action=action,
-                prior=prior
-            )
+            child = MCTSNode(state=None, parent=node, action=action, prior=prior)
             node.children[action] = child
 
         node._expanded = True
-
-    def _evaluate(self, node):
-        """Get value estimate from neural network."""
-        if self.policy_network is None and self._infer_fn is None:
-            current_player = node.state.get_current_player()
-            my_vp = node.state.get_victory_points(current_player)
-            return (my_vp - 5) / 5.0
-
-        obs = node.state.get_observation()
-        if self._infer_fn is not None:
-            _, value = self._infer_fn(obs)
-        else:
-            _, value = self.policy_network.evaluate(obs)
         return value
 
-    def _get_priors(self, state, legal_actions):
-        """
-        Get prior probabilities for legal actions.
-
-        For location-specific actions (build settlement at vertex X),
-        the prior is: P(action_type) × P(vertex | action_type).
-        This lets MCTS distinguish between good and bad locations.
-        """
-        if self.policy_network is None and self._infer_fn is None:
-            n = len(legal_actions)
-            return [1.0 / n] * n
-
-        obs = state.get_observation()
-        if self._infer_fn is not None:
-            policy, _ = self._infer_fn(obs)
-        else:
-            policy, _ = self.policy_network.evaluate(obs)
-
-        action_probs = policy['action']   # shape (14,)
-        vertex_probs = policy['vertex']   # shape (54,)
-        edge_probs = policy['edge']       # shape (72,)
-
-        priors = []
-        for action_id, vertex_id, edge_id in legal_actions:
-            # Base probability for this action type
-            a_prob = action_probs[action_id] if action_id < len(action_probs) else 1e-4
-
-            if action_id in VERTEX_ACTIONS:
-                # Action × vertex probability
-                v_prob = vertex_probs[vertex_id] if vertex_id < len(vertex_probs) else 1e-4
-                prior = a_prob * v_prob
-            elif action_id in EDGE_ACTIONS:
-                # Action × edge probability
-                e_prob = edge_probs[edge_id] if edge_id < len(edge_probs) else 1e-4
-                prior = a_prob * e_prob
-            else:
-                prior = a_prob
-
-            # Floor to avoid zero priors (MCTS needs some exploration)
-            priors.append(max(prior, 1e-6))
-
-        # Normalize to sum to 1
-        total = sum(priors)
-        if total > 0:
-            priors = [p / total for p in priors]
-        else:
-            priors = [1.0 / len(priors)] * len(priors)
-
-        return priors
-
     def _add_dirichlet_noise(self, root):
-        """
-        Add Dirichlet noise to root priors for exploration.
-        This is critical for AlphaZero — without it, MCTS just follows
-        the network's existing policy with minimal diversity.
-        """
+        """Add Dirichlet noise to root priors for exploration."""
         if not root.children:
             return
-
         children = list(root.children.values())
         noise = np.random.dirichlet([self.dirichlet_alpha] * len(children))
         frac = self.dirichlet_frac
-
         for child, n in zip(children, noise):
             child.prior = (1 - frac) * child.prior + frac * n
 
@@ -269,7 +241,6 @@ class MCTS:
                 else:
                     node.value_sum -= value
             else:
-                # Lazy node not yet expanded — use parent's perspective
                 if node.parent is not None and node.parent.state is not None:
                     parent_player = node.parent.state.get_current_player()
                     if parent_player == root_player:
@@ -288,13 +259,7 @@ class MCTS:
         return best_action
 
     def _get_action_probs(self, root, temperature=1.0):
-        """
-        Get action probabilities based on visit counts.
-
-        Args:
-            root: Root node
-            temperature: 1.0=proportional to visits, 0=always pick best
-        """
+        """Get action probabilities based on visit counts."""
         actions = list(root.children.keys())
         visits = np.array([root.children[a].visits for a in actions], dtype=np.float32)
 
