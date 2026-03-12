@@ -43,30 +43,29 @@ class NetworkWrapper:
         self.policy.eval()  # Set to evaluation mode
 
     def _transfer_weights(self, old_state_dict, old_dim, new_dim):
-        """Transfer weights from a smaller network into a larger one.
+        """Transfer encoder weights from a smaller network into a larger one.
 
-        For each parameter, copies the old weights into the top-left corner
-        of the new (larger) parameter tensor. The remaining capacity is left
-        at its random initialization. This preserves all learned knowledge
-        while adding new capacity for the network to grow into.
+        Only transfers encoder weights (tile_encoder.*, player_embed.*, player_ln.*)
+        which have identical shapes regardless of hidden_dim. These encode board
+        understanding — the hardest part to learn. The backbone (fc layers, output
+        heads, projection) starts fresh and retrains quickly.
         """
         new_state = self.policy.state_dict()
         transferred = 0
+        skipped = 0
         for name, old_param in old_state_dict.items():
             if name not in new_state:
                 continue
             new_param = new_state[name]
             if old_param.shape == new_param.shape:
-                # Same shape — direct copy
+                # Same shape — safe to copy (encoders, and any unchanged layers)
                 new_state[name] = old_param
                 transferred += 1
             else:
-                # Different shape — copy old weights into top-left corner
-                slices = tuple(slice(0, min(o, n)) for o, n in zip(old_param.shape, new_param.shape))
-                new_state[name][slices] = old_param[slices]
-                transferred += 1
+                # Different shape — skip (backbone/heads changed due to hidden_dim)
+                skipped += 1
         self.policy.load_state_dict(new_state)
-        print(f"  Transferred {transferred}/{len(old_state_dict)} parameter tensors")
+        print(f"  Transferred {transferred} params, skipped {skipped} (different shape, fresh init)")
 
     def evaluate(self, obs):
         """

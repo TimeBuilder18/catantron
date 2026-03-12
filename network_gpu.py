@@ -108,7 +108,9 @@ class CatanPolicy(nn.Module):
             self.device = torch.device('cpu')
 
         self.hidden_dim = hidden_dim
-        encoder_dim = hidden_dim // 2  # Each encoder outputs half the backbone width
+        # Encoders always output 128 each (256 total) for clean weight transfer.
+        # A projection layer widens to hidden_dim if needed.
+        encoder_dim = 128
 
         print(f" Using device: {self.device}")
 
@@ -122,8 +124,16 @@ class CatanPolicy(nn.Module):
         self.player_embed = nn.Linear(player_context_dim, encoder_dim)
         self.player_ln = nn.LayerNorm(encoder_dim)
 
+        # === Projection from encoder output (256) to backbone width ===
+        concat_dim = encoder_dim * 2  # 256 always
+        if hidden_dim != concat_dim:
+            self.projection = nn.Linear(concat_dim, hidden_dim)
+            self.projection_ln = nn.LayerNorm(hidden_dim)
+        else:
+            self.projection = None
+
         # === Combined Processing ===
-        # Tile context (encoder_dim) + Player context (encoder_dim) = hidden_dim
+        # After projection: hidden_dim wide
         self.fc1 = nn.Linear(hidden_dim, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, hidden_dim)
         self.fc3 = nn.Linear(hidden_dim, hidden_dim)
@@ -176,6 +186,10 @@ class CatanPolicy(nn.Module):
         # === Combine and process ===
         # (batch, 128) + (batch, 128) = (batch, 256)
         x = torch.cat([tile_context, player_context], dim=-1)
+
+        # Project to backbone width if needed (256 → hidden_dim)
+        if self.projection is not None:
+            x = F.relu(self.projection_ln(self.projection(x)))
 
         x = F.relu(self.ln1(self.fc1(x)))
         x = F.relu(self.ln2(self.fc2(x)))
