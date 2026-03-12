@@ -587,7 +587,8 @@ class CurriculumTrainerV3:
     def __init__(self, model_path=None, learning_rate=5e-4, batch_size=None, reward_mode='pbrs_fixed',
                  lr_decay=1.0, value_weight=0.5, entropy_decay=1.0, num_parallel_games=8,
                  buffer_size=200000, num_players=4, bc_coef=0.1, self_play_pool=None,
-                 specialist_mix_rate=0.0, use_mcts=False, mcts_simulations=30, mcts_c_puct=1.5):
+                 specialist_mix_rate=0.0, use_mcts=False, mcts_simulations=30, mcts_c_puct=1.5,
+                 hidden_dim=256):
         self.device = get_device()
         self.reward_mode = reward_mode
         self.lr_decay = lr_decay  # Learning rate decay per 1000 games
@@ -625,7 +626,8 @@ class CurriculumTrainerV3:
             batch_size = 1024 if self.device.type == 'cuda' else 256
         self.batch_size = batch_size
 
-        self.network_wrapper = NetworkWrapper(model_path=model_path, device=str(self.device))
+        self.network_wrapper = NetworkWrapper(model_path=model_path, device=str(self.device),
+                                                hidden_dim=hidden_dim)
         self.network = self.network_wrapper.policy
 
         # torch.compile: fuses kernels for faster inference (~20-40% on CUDA).
@@ -1933,6 +1935,8 @@ if __name__ == "__main__":
                         help='Number of MCTS simulations per move (default: 30)')
     parser.add_argument('--mcts-cpuct', type=float, default=1.5,
                         help='MCTS exploration constant (default: 1.5)')
+    parser.add_argument('--hidden-dim', type=int, default=256,
+                        help='Network backbone hidden dimension (default: 256, use 512 for ~3x capacity)')
     args = parser.parse_args()
 
     # List phases if requested
@@ -2046,6 +2050,7 @@ if __name__ == "__main__":
         use_mcts=args.mcts,
         mcts_simulations=args.mcts_sims,
         mcts_c_puct=args.mcts_cpuct,
+        hidden_dim=args.hidden_dim,
     )
     trainer.train(
         total_games=args.total_games,

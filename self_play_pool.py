@@ -126,8 +126,9 @@ class SelfPlayPool:
 
     def _load_policy(self, path: str):
         from network_gpu import CatanPolicy
-        policy = CatanPolicy(device=self.device)
         ckpt = torch.load(path, map_location=self.device, weights_only=True)
+        hidden_dim = ckpt.get('hidden_dim', 256)  # Auto-detect architecture from checkpoint
+        policy = CatanPolicy(device=self.device, hidden_dim=hidden_dim)
         policy.load_state_dict(ckpt['model_state_dict'])
         policy.eval()
         return policy
