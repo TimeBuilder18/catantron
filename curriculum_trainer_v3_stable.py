@@ -1988,7 +1988,7 @@ if __name__ == "__main__":
             print("  Phase 3-4:  WeightedRandom bridge")
             print("  Phase 5-10: Difficulty progression (VeryWeak → Strong)")
             print("  Phase 11-15: Specialist diversity (CityRusher, RoadBlocker, etc.)")
-            print("  Phase 16-17: Self-play (past checkpoints as opponents)")
+            print("  Phase 16-17: Curriculum mix (50% self-play / 25% strong / 25% medium)")
             print("-" * 70)
         else:
             phases = [
