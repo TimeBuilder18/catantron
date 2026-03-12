@@ -774,9 +774,23 @@ class CurriculumTrainerV3:
         Args:
             mix_prob: Probability of primary_ai (0.0-1.0)
             primary_ai: Primary AI difficulty ('random', 'very_weak', 'weak', 'medium', 'strong')
+                         Special: 'curriculum_mix' selects per-game from self_play/strong/medium (50/25/25)
             secondary_ai: Secondary AI difficulty (if None, uses random for non-primary)
             victory_points_to_win: VP needed to win (default 10)
         """
+        # Curriculum mixing: pick a single opponent type per game
+        if primary_ai == 'curriculum_mix':
+            roll = random.random()
+            if roll < 0.50:
+                primary_ai = 'self_play'
+            elif roll < 0.75:
+                primary_ai = 'strong'
+            else:
+                primary_ai = 'medium'
+            # When using rule-based opponents, no secondary needed
+            if primary_ai != 'self_play':
+                secondary_ai = None
+                mix_prob = 1.0
         if self.reward_mode == 'pbrs_fixed':
             env = PBRSFixedRewardWrapper(player_id=0, victory_points_to_win=victory_points_to_win, num_players=self.num_players)
         else:
@@ -1512,6 +1526,7 @@ class CurriculumTrainerV3:
                 'weak': 0.20,
                 'medium': 0.12,
                 'strong': 0.15,
+                'curriculum_mix': 0.15,  # Mixed opponents: same threshold as strong
             }
         else:
             # 4-player mode: 25% baseline, lower thresholds
@@ -1584,9 +1599,10 @@ class CurriculumTrainerV3:
                 ('dev_card_spammer', 'strong', 0.5, 10, 5.5, "1v1 DevCardSpammer/Strong"),
                 ('balanced_aggressor', 'strong', 0.5, 10, 5.5, "1v1 BalancedAggressor/Strong"),
                 ('port_specialist', 'strong', 0.5, 10, 5.5, "1v1 PortSpecialist/Strong"),
-                # Phase 5: Self-play — agent trains against its own past checkpoints
-                ('self_play', 'strong', 0.5, 10, 5.5, "1v1 SelfPlay/Strong"),
-                ('self_play', None, 1.0, 10, 999, "1v1 SelfPlay FINAL"),
+                # Phase 5: Curriculum mix — 50% self-play + 25% strong + 25% medium
+                # Ensures continuous learning signal even when self-play WR plateaus
+                ('curriculum_mix', 'strong', 0.5, 10, 5.5, "1v1 CurriculumMix/Strong"),
+                ('curriculum_mix', None, 1.0, 10, 999, "1v1 CurriculumMix FINAL"),
             ]
         else:
             # === STANDARD 4-PLAYER CURRICULUM ===
@@ -1962,8 +1978,8 @@ if __name__ == "__main__":
                 ('dev_card_spammer', 'strong', 0.5, 10, 5.5, "1v1 DevCardSpammer/Strong"),
                 ('balanced_aggressor', 'strong', 0.5, 10, 5.5, "1v1 BalancedAggressor/Strong"),
                 ('port_specialist', 'strong', 0.5, 10, 5.5, "1v1 PortSpecialist/Strong"),
-                ('self_play', 'strong', 0.5, 10, 5.5, "1v1 SelfPlay/Strong"),
-                ('self_play', None, 1.0, 10, 999, "1v1 SelfPlay FINAL"),
+                ('curriculum_mix', 'strong', 0.5, 10, 5.5, "1v1 CurriculumMix/Strong"),
+                ('curriculum_mix', None, 1.0, 10, 999, "1v1 CurriculumMix FINAL"),
             ]
             print("\n1v1 OPTIMIZED Curriculum Phases (v5 - 10VP throughout):")
             print("-" * 70)
