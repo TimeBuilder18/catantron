@@ -125,6 +125,49 @@ def _pip_count(number):
     return max(0, 6 - abs(7 - number))
 
 
+DICE_PIPS = {2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 8: 5, 9: 4, 10: 3, 11: 2, 12: 1}
+
+
+def _aqs_pip_count(player):
+    """Sum pip values from all hexes adjacent to player's settlements and cities."""
+    pips = 0
+    seen_tiles = set()
+    for structure in player.settlements + player.cities:
+        for tile in structure.position.adjacent_tiles:
+            if id(tile) not in seen_tiles and tile.number and tile.resource and tile.resource != 'desert':
+                seen_tiles.add(id(tile))
+                pips += DICE_PIPS.get(tile.number, 0)
+    return pips
+
+
+def _aqs_resource_diversity(player):
+    """Count distinct resource types produced by player's settlements/cities."""
+    resources = set()
+    for structure in player.settlements + player.cities:
+        for tile in structure.position.adjacent_tiles:
+            if tile.resource and tile.resource != 'desert':
+                rt = tile.get_resource_type()
+                if rt:
+                    resources.add(rt)
+    return len(resources)
+
+
+def _aqs_port_access(player, game_board):
+    """Count how many ports the player has access to."""
+    return len(game_board.get_player_ports(player))
+
+
+def _aqs_resources_spent(player):
+    """Estimate total resources spent from structures built."""
+    settlements = len(player.settlements)
+    cities = len(player.cities)
+    roads = len(player.roads)
+    dev_cards = sum(player.development_cards.values()) + player.knights_played
+    paid_settlements = max(0, settlements + cities - 2)
+    paid_roads = max(0, roads - 2)
+    return (paid_settlements * 4) + (cities * 5) + (paid_roads * 2) + (dev_cards * 3)
+
+
 def play_passive_turn(game, player_id):
     """Passive opponent - NEVER builds after initial placement.
 
@@ -823,6 +866,8 @@ class CurriculumTrainerV3:
         done = False
         moves = 0
         max_moves = 3000   # raised from 800: model does many trades/turn → 800 = only ~80 real turns, games always timed out → no win signal → plateau
+        bank_trade_count = 0
+        robber_placement_count = 0
 
         while not done and moves < max_moves:
             game = env.game_env.game
@@ -865,6 +910,10 @@ class CurriculumTrainerV3:
                 _needs_v = action_id in (1, 3, 4)
                 _needs_e = action_id in (2, 5)
                 _needs_t = action_id == 9
+                if action_id == 9:
+                    bank_trade_count += 1
+                if action_id == 11:
+                    robber_placement_count += 1
                 episode_needs_vertex.append(float(_needs_v))
                 episode_needs_edge.append(float(_needs_e))
                 episode_needs_trade.append(float(_needs_t))
@@ -1026,6 +1075,14 @@ class CurriculumTrainerV3:
                 'has_largest_army': _p0.has_largest_army,
                 'knights_played': _p0.knights_played,
                 'opponent_type': primary_ai,
+                'dev_cards_bought': sum(_p0.development_cards.values()) + _p0.knights_played,
+                'dev_cards_played': _p0.knights_played,
+                'total_resources_spent': _aqs_resources_spent(_p0),
+                'bank_trades_made': bank_trade_count,
+                'robber_placements': robber_placement_count,
+                'pip_count': _aqs_pip_count(_p0),
+                'resource_diversity': _aqs_resource_diversity(_p0),
+                'port_access_count': _aqs_port_access(_p0, env.game_env.game.game_board),
             })
 
         # Track settlement count at game end (diagnose expansion failure)
