@@ -40,7 +40,7 @@ class TileAttentionEncoder(nn.Module):
     """
 
     def __init__(self, tile_feature_dim=TILE_FEATURE_DIM, embed_dim=TILE_EMBED_DIM,
-                 num_heads=NUM_ATTENTION_HEADS, num_tiles=NUM_TILES):
+                 num_heads=NUM_ATTENTION_HEADS, num_tiles=NUM_TILES, output_dim=128):
         super(TileAttentionEncoder, self).__init__()
 
         self.num_tiles = num_tiles
@@ -62,8 +62,8 @@ class TileAttentionEncoder(nn.Module):
         self.ffn_ln = nn.LayerNorm(embed_dim)
 
         # Compress flattened tile representations to fixed size
-        self.compress = nn.Linear(num_tiles * embed_dim, 128)
-        self.compress_ln = nn.LayerNorm(128)
+        self.compress = nn.Linear(num_tiles * embed_dim, output_dim)
+        self.compress_ln = nn.LayerNorm(output_dim)
 
     def forward(self, tile_features):
         """
@@ -88,14 +88,14 @@ class TileAttentionEncoder(nn.Module):
         # Flatten: (batch, 19, 32) -> (batch, 608)
         x = x.view(x.size(0), -1)
 
-        # Compress to 128-dim: (batch, 608) -> (batch, 128)
+        # Compress to output_dim: (batch, 608) -> (batch, output_dim)
         tile_context = F.relu(self.compress_ln(self.compress(x)))
 
         return tile_context
 
 
 class CatanPolicy(nn.Module):
-    def __init__(self, device=None):
+    def __init__(self, device=None, hidden_dim=256):
         super(CatanPolicy, self).__init__()
 
         if device is not None:
@@ -107,35 +107,38 @@ class CatanPolicy(nn.Module):
         else:
             self.device = torch.device('cpu')
 
+        self.hidden_dim = hidden_dim
+        encoder_dim = hidden_dim // 2  # Each encoder outputs half the backbone width
+
         print(f" Using device: {self.device}")
 
         # === Tile Attention Encoder ===
         # Processes 19 tiles through self-attention for spatial board understanding
-        self.tile_encoder = TileAttentionEncoder()
+        self.tile_encoder = TileAttentionEncoder(output_dim=encoder_dim)
 
         # === Player/Game Context Encoder ===
         # Non-tile features: game state (46) + ports (18) + positional (306) = 370
         player_context_dim = NON_TILE_DIM + (PORT_END_IDX - PORT_START_IDX) + (TOTAL_OBS_DIM - POSITIONAL_START_IDX)
-        self.player_embed = nn.Linear(player_context_dim, 128)
-        self.player_ln = nn.LayerNorm(128)
+        self.player_embed = nn.Linear(player_context_dim, encoder_dim)
+        self.player_ln = nn.LayerNorm(encoder_dim)
 
         # === Combined Processing ===
-        # Tile context (128) + Player context (128) = 256
-        self.fc1 = nn.Linear(256, 256)
-        self.fc2 = nn.Linear(256, 256)
-        self.fc3 = nn.Linear(256, 256)
+        # Tile context (encoder_dim) + Player context (encoder_dim) = hidden_dim
+        self.fc1 = nn.Linear(hidden_dim, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
+        self.fc3 = nn.Linear(hidden_dim, hidden_dim)
 
-        self.ln1 = nn.LayerNorm(256)
-        self.ln2 = nn.LayerNorm(256)
-        self.ln3 = nn.LayerNorm(256)
+        self.ln1 = nn.LayerNorm(hidden_dim)
+        self.ln2 = nn.LayerNorm(hidden_dim)
+        self.ln3 = nn.LayerNorm(hidden_dim)
 
-        # === Output Heads (unchanged) ===
-        self.policy_head = nn.Linear(256, 14)  # 14 action types (added play_knight/monopoly/yop)
-        self.location_head_vertex = nn.Linear(256, 54)  # 54 vertices
-        self.location_head_edge = nn.Linear(256, 72)  # 72 edges
-        self.trade_give_head = nn.Linear(256, 5)  # 5 resources (unused in 1v1)
-        self.trade_get_head = nn.Linear(256, 5)   # 5 resources (unused in 1v1)
-        self.value_head = nn.Linear(256, 1)  # State value
+        # === Output Heads ===
+        self.policy_head = nn.Linear(hidden_dim, 14)  # 14 action types
+        self.location_head_vertex = nn.Linear(hidden_dim, 54)  # 54 vertices
+        self.location_head_edge = nn.Linear(hidden_dim, 72)  # 72 edges
+        self.trade_give_head = nn.Linear(hidden_dim, 5)  # 5 resources
+        self.trade_get_head = nn.Linear(hidden_dim, 5)   # 5 resources
+        self.value_head = nn.Linear(hidden_dim, 1)  # State value
 
         self.to(self.device)
 
@@ -275,7 +278,8 @@ class CatanPolicy(nn.Module):
     def save(self, path):
         torch.save({
             'model_state_dict': self.state_dict(),
-            'device': str(self.device)
+            'device': str(self.device),
+            'hidden_dim': self.hidden_dim,
         }, path)
 
     def load(self, path, device=None):

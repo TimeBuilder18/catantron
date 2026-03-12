@@ -517,7 +517,6 @@ class CentralInferenceServer:
         return result
 
     def _inference_loop(self):
-        _batch_count = 0
         while self._running:
             # Block waiting for the first request
             try:
@@ -567,10 +566,6 @@ class CentralInferenceServer:
                     holder[0] = (aps[i], vps[i], eps[i], tgps[i], tgetps[i], svs[i])
                     event.set()
 
-                _batch_count += 1
-                if _batch_count % 500 == 0:
-                    print(f"  [INFER-DIAG] {_batch_count} batches processed, last batch_size={len(batch)}", flush=True)
-
             except Exception as e:
                 # Unblock all waiting threads before propagating (prevents infinite hang)
                 print(f"[CentralInferenceServer] Error in inference loop: {e}")
@@ -592,7 +587,8 @@ class CurriculumTrainerV3:
     def __init__(self, model_path=None, learning_rate=5e-4, batch_size=None, reward_mode='pbrs_fixed',
                  lr_decay=1.0, value_weight=0.5, entropy_decay=1.0, num_parallel_games=8,
                  buffer_size=200000, num_players=4, bc_coef=0.1, self_play_pool=None,
-                 specialist_mix_rate=0.0, use_mcts=False, mcts_simulations=30, mcts_c_puct=1.5):
+                 specialist_mix_rate=0.0, use_mcts=False, mcts_simulations=30, mcts_c_puct=1.5,
+                 hidden_dim=256):
         self.device = get_device()
         self.reward_mode = reward_mode
         self.lr_decay = lr_decay  # Learning rate decay per 1000 games
@@ -630,7 +626,8 @@ class CurriculumTrainerV3:
             batch_size = 1024 if self.device.type == 'cuda' else 256
         self.batch_size = batch_size
 
-        self.network_wrapper = NetworkWrapper(model_path=model_path, device=str(self.device))
+        self.network_wrapper = NetworkWrapper(model_path=model_path, device=str(self.device),
+                                                hidden_dim=hidden_dim)
         self.network = self.network_wrapper.policy
 
         # torch.compile: fuses kernels for faster inference (~20-40% on CUDA).
@@ -777,9 +774,23 @@ class CurriculumTrainerV3:
         Args:
             mix_prob: Probability of primary_ai (0.0-1.0)
             primary_ai: Primary AI difficulty ('random', 'very_weak', 'weak', 'medium', 'strong')
+                         Special: 'curriculum_mix' selects per-game from self_play/strong/medium (50/25/25)
             secondary_ai: Secondary AI difficulty (if None, uses random for non-primary)
             victory_points_to_win: VP needed to win (default 10)
         """
+        # Curriculum mixing: pick a single opponent type per game
+        if primary_ai == 'curriculum_mix':
+            roll = random.random()
+            if roll < 0.50:
+                primary_ai = 'self_play'
+            elif roll < 0.75:
+                primary_ai = 'strong'
+            else:
+                primary_ai = 'medium'
+            # When using rule-based opponents, no secondary needed
+            if primary_ai != 'self_play':
+                secondary_ai = None
+                mix_prob = 1.0
         if self.reward_mode == 'pbrs_fixed':
             env = PBRSFixedRewardWrapper(player_id=0, victory_points_to_win=victory_points_to_win, num_players=self.num_players)
         else:
@@ -811,20 +822,9 @@ class CurriculumTrainerV3:
 
         done = False
         moves = 0
-        # With MCTS, each move is ~15x slower, so cap max_moves lower to keep
-        # batch times reasonable (~2-4 min instead of 20+ min).
-        max_moves = 800 if (self.use_mcts and self._mcts is not None) else 3000
-        import time as _time
-        _game_start = _time.monotonic()
-        _last_progress = _game_start
+        max_moves = 3000   # raised from 800: model does many trades/turn → 800 = only ~80 real turns, games always timed out → no win signal → plateau
 
         while not done and moves < max_moves:
-            _now = _time.monotonic()
-            if _now - _last_progress > 30.0:
-                _last_progress = _now
-                _elapsed_game = _now - _game_start
-                print(f"  [GAME-DIAG] {_elapsed_game:.0f}s elapsed, {moves} moves, thread={threading.current_thread().name}", flush=True)
-
             game = env.game_env.game
             current = game.get_current_player()
             current_id = game.players.index(current)
@@ -833,7 +833,7 @@ class CurriculumTrainerV3:
                 moves += 1
 
                 # Skip expensive MCTS for trivial forced actions (roll_dice, end_turn, wait, do_nothing)
-                # These have only 1 legal action — MCTS adds 15 sims of overhead for zero benefit
+                # These have only 1 legal action — MCTS adds N sims of overhead for zero benefit
                 _action_mask = obs['action_mask']
                 _n_legal = int(_action_mask.sum())
                 _use_mcts_this_step = (self.use_mcts and self._mcts is not None and _n_legal > 1)
@@ -915,7 +915,6 @@ class CurriculumTrainerV3:
             else:
                 # Self-play: use a past-checkpoint network as opponent
                 # (with optional specialist mixing to prevent blind spots)
-                _opp_t0 = _time.monotonic()
                 sp_used = False
                 if primary_ai == 'self_play' and self.self_play_pool is not None:
                     if self.specialist_mix_rate > 0 and random.random() < self.specialist_mix_rate:
@@ -939,10 +938,6 @@ class CurriculumTrainerV3:
                 # This was being skipped because opponent doesn't go through env.step()
                 if game.waiting_for_discards:
                     env.game_env._handle_automatic_discards()
-
-                _opp_elapsed = _time.monotonic() - _opp_t0
-                if _opp_elapsed > 5.0:
-                    print(f"  [OPP-DIAG] opponent turn took {_opp_elapsed:.1f}s, sp_used={sp_used}", flush=True)
 
                 # FIX: Refresh observation after opponent turn so agent sees current state
                 obs = env._get_obs()
@@ -1186,7 +1181,6 @@ class CurriculumTrainerV3:
         Uses MCTS to select action + location, falls back to network for trades.
         Returns same format as _get_action so play_game works unchanged.
         """
-        import time as _time
         from game_state import GameState
 
         # Create a temporary GameState from the current env for MCTS to search
@@ -1195,11 +1189,7 @@ class CurriculumTrainerV3:
         temp_state = GameState(env=underlying_env)
 
         # MCTS search (uses copies internally, doesn't modify temp_state)
-        _t0 = _time.monotonic()
         best_action, mcts_probs = self._mcts.search(temp_state, temperature=1.0)
-        _elapsed = _time.monotonic() - _t0
-        if _elapsed > 2.0:
-            print(f"  [MCTS-DIAG] search took {_elapsed:.1f}s, action={best_action}, {len(mcts_probs)} probs", flush=True)
         action_id, vertex_id, edge_id = best_action
 
         # Get network's own probabilities (needed for PPO log_probs and entropy)
@@ -1536,6 +1526,7 @@ class CurriculumTrainerV3:
                 'weak': 0.20,
                 'medium': 0.12,
                 'strong': 0.15,
+                'curriculum_mix': 0.15,  # Mixed opponents: same threshold as strong
             }
         else:
             # 4-player mode: 25% baseline, lower thresholds
@@ -1608,9 +1599,10 @@ class CurriculumTrainerV3:
                 ('dev_card_spammer', 'strong', 0.5, 10, 5.5, "1v1 DevCardSpammer/Strong"),
                 ('balanced_aggressor', 'strong', 0.5, 10, 5.5, "1v1 BalancedAggressor/Strong"),
                 ('port_specialist', 'strong', 0.5, 10, 5.5, "1v1 PortSpecialist/Strong"),
-                # Phase 5: Self-play — agent trains against its own past checkpoints
-                ('self_play', 'strong', 0.5, 10, 5.5, "1v1 SelfPlay/Strong"),
-                ('self_play', None, 1.0, 10, 999, "1v1 SelfPlay FINAL"),
+                # Phase 5: Curriculum mix — 50% self-play + 25% strong + 25% medium
+                # Ensures continuous learning signal even when self-play WR plateaus
+                ('curriculum_mix', 'strong', 0.5, 10, 5.5, "1v1 CurriculumMix/Strong"),
+                ('curriculum_mix', None, 1.0, 10, 999, "1v1 CurriculumMix FINAL"),
             ]
         else:
             # === STANDARD 4-PLAYER CURRICULUM ===
@@ -1959,6 +1951,8 @@ if __name__ == "__main__":
                         help='Number of MCTS simulations per move (default: 30)')
     parser.add_argument('--mcts-cpuct', type=float, default=1.5,
                         help='MCTS exploration constant (default: 1.5)')
+    parser.add_argument('--hidden-dim', type=int, default=256,
+                        help='Network backbone hidden dimension (default: 256, use 512 for ~3x capacity)')
     args = parser.parse_args()
 
     # List phases if requested
@@ -1984,8 +1978,8 @@ if __name__ == "__main__":
                 ('dev_card_spammer', 'strong', 0.5, 10, 5.5, "1v1 DevCardSpammer/Strong"),
                 ('balanced_aggressor', 'strong', 0.5, 10, 5.5, "1v1 BalancedAggressor/Strong"),
                 ('port_specialist', 'strong', 0.5, 10, 5.5, "1v1 PortSpecialist/Strong"),
-                ('self_play', 'strong', 0.5, 10, 5.5, "1v1 SelfPlay/Strong"),
-                ('self_play', None, 1.0, 10, 999, "1v1 SelfPlay FINAL"),
+                ('curriculum_mix', 'strong', 0.5, 10, 5.5, "1v1 CurriculumMix/Strong"),
+                ('curriculum_mix', None, 1.0, 10, 999, "1v1 CurriculumMix FINAL"),
             ]
             print("\n1v1 OPTIMIZED Curriculum Phases (v5 - 10VP throughout):")
             print("-" * 70)
@@ -2072,6 +2066,7 @@ if __name__ == "__main__":
         use_mcts=args.mcts,
         mcts_simulations=args.mcts_sims,
         mcts_c_puct=args.mcts_cpuct,
+        hidden_dim=args.hidden_dim,
     )
     trainer.train(
         total_games=args.total_games,
