@@ -112,11 +112,27 @@ class CatanPolicy(nn.Module):
         # A projection layer widens to hidden_dim if needed.
         encoder_dim = 128
 
+        # Store obs layout as instance attrs so legacy policies (created with
+        # patched module constants) retain their own layout in forward().
+        self._non_tile_dim = NON_TILE_DIM
+        self._tile_start = TILE_START_IDX
+        self._tile_end = TILE_END_IDX
+        self._num_tiles = NUM_TILES
+        self._tile_feat_dim = TILE_FEATURE_DIM
+        self._port_start = PORT_START_IDX
+        self._port_end = PORT_END_IDX
+        self._pos_start = POSITIONAL_START_IDX
+
         print(f" Using device: {self.device}")
 
         # === Tile Attention Encoder ===
-        # Processes 19 tiles through self-attention for spatial board understanding
-        self.tile_encoder = TileAttentionEncoder(output_dim=encoder_dim)
+        # Pass dims explicitly so they're evaluated at call time (not bound
+        # at class definition like TileAttentionEncoder's default params).
+        self.tile_encoder = TileAttentionEncoder(
+            tile_feature_dim=TILE_FEATURE_DIM,
+            embed_dim=TILE_EMBED_DIM,
+            output_dim=encoder_dim,
+        )
 
         # === Player/Game Context Encoder ===
         # Non-tile features: game state + strategic (61) + ports (18) + positional (306) = 385
@@ -161,18 +177,15 @@ class CatanPolicy(nn.Module):
             obs = obs.unsqueeze(0)
 
         # === Split observation into tile and non-tile features ===
-        # Non-tile features: game/player state + strategic [0:61]
-        game_features = obs[:, :NON_TILE_DIM]
+        # Uses instance attrs so legacy policies slice their 427-dim obs correctly.
+        game_features = obs[:, :self._non_tile_dim]
 
-        # Tile features: [61:251] -> reshape to (batch, 19, 10)
-        tile_features_flat = obs[:, TILE_START_IDX:TILE_END_IDX]
-        tile_features = tile_features_flat.view(-1, NUM_TILES, TILE_FEATURE_DIM)
+        tile_features_flat = obs[:, self._tile_start:self._tile_end]
+        tile_features = tile_features_flat.view(-1, self._num_tiles, self._tile_feat_dim)
 
-        # Port features: [251:269]
-        port_features = obs[:, PORT_START_IDX:PORT_END_IDX]
+        port_features = obs[:, self._port_start:self._port_end]
 
-        # Positional features: [269:575]
-        positional_features = obs[:, POSITIONAL_START_IDX:]
+        positional_features = obs[:, self._pos_start:]
 
         # === Process through encoders ===
         # Tile attention: (batch, 19, 10) -> (batch, 128)

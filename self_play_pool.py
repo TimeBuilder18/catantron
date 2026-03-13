@@ -237,13 +237,10 @@ class SelfPlayPool:
             ng.POSITIONAL_START_IDX = 121
             ng.TOTAL_OBS_DIM = 427
             ng.TILE_EMBED_DIM = 32
+            # CatanPolicy now passes tile dims explicitly to TileAttentionEncoder
+            # and stores layout constants as instance attrs, so module patching
+            # is sufficient — no manual tile_encoder replacement needed.
             policy = CatanPolicy(device=self.device, hidden_dim=hidden_dim)
-            # TileAttentionEncoder default params are bound at import time,
-            # so module patching doesn't affect them — replace explicitly
-            from network_gpu import TileAttentionEncoder
-            policy.tile_encoder = TileAttentionEncoder(
-                tile_feature_dim=tile_dim, embed_dim=32, output_dim=128
-            ).to(self.device)
             policy.load_state_dict(ckpt['model_state_dict'])
             policy.eval()
         finally:
