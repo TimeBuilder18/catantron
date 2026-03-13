@@ -14,6 +14,23 @@ sys.path.append('/mnt/project')
 from ai_interface import AIGameEnvironment
 from game_system import ResourceType
 from game_system import DevelopmentCardType, Player
+from game_system import Settlement, City, Road, DevelopmentCardDeck
+
+# Dice pip counts (probability weight) for each number token
+DICE_PIPS = {2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 8: 5, 9: 4, 10: 3, 11: 2, 12: 1}
+
+# One-hot resource encoding for tiles
+RESOURCE_ONEHOT = {
+    'forest':   [1, 0, 0, 0, 0, 0],
+    'hill':     [0, 1, 0, 0, 0, 0],
+    'field':    [0, 0, 1, 0, 0, 0],
+    'mountain': [0, 0, 0, 1, 0, 0],
+    'pasture':  [0, 0, 0, 0, 1, 0],
+    'desert':   [0, 0, 0, 0, 0, 1],
+}
+
+# Tile resource string -> ResourceType mapping (skip desert)
+RESOURCE_STR_TO_TYPE = {rt.value: rt for rt in ResourceType}
 
 class CatanEnv(gym.Env):
     """
@@ -75,17 +92,19 @@ class CatanEnv(gym.Env):
 
     def _calculate_obs_size(self):
         """Calculate total observation vector size"""
-        # Base features (121):
+        # Non-tile features (61):
         #   game state (11) + resources (5) + structures (3) + dev cards (5)
-        #   + VP/stats (4) + opponents (18) + tiles (57) + ports (18)
-        size = 11 + 5 + 3 + 5 + 4 + 18 + 57 + 18  # = 121
+        #   + VP/stats (4) + opponents (18) + strategic (15)
+        # Tile features (190): 19 tiles × 10 features
+        # Port features (18): 9 ports × 2 features
+        size = 11 + 5 + 3 + 5 + 4 + 18 + 15 + 190 + 18  # = 269
 
         # Positional features (306):
         #   my_settlements (54) + my_cities (54) + opp_buildings (54)
         #   + my_roads (72) + opp_roads (72)
         size += 54 + 54 + 54 + 72 + 72  # = 306
 
-        return size  # = 427
+        return size  # = 575
 
     def reset(self, seed=None, options=None):
         """Reset environment to initial state"""
@@ -245,16 +264,75 @@ class CatanEnv(gym.Env):
         # 11 (game) + 5 (resources) + 3 (structures) + 5 (dev cards) + 4 (VP) + 18 (3 opponents) = 46
         while len(features) < 11 + 5 + 3 + 5 + 4 + 18:
             features.append(0.0)
-        resource_encoding = {
-            'forest': 1.0, 'hill': 2.0, 'field': 3.0,
-            'mountain': 4.0, 'pasture': 5.0, 'desert': 0.0
-        }
+
+        # === Strategic features (15) ===
+        game = self.game_env.game
+
+        # Per-resource pip production rate (5 features)
+        resource_pips = {rt: 0 for rt in ResourceType}
+        for settlement in player.settlements:
+            for tile in settlement.position.adjacent_tiles:
+                rt = RESOURCE_STR_TO_TYPE.get(tile.resource)
+                if rt and tile.number and not tile.has_robber:
+                    resource_pips[rt] += DICE_PIPS.get(tile.number, 0)
+        for city in player.cities:
+            for tile in city.position.adjacent_tiles:
+                rt = RESOURCE_STR_TO_TYPE.get(tile.resource)
+                if rt and tile.number and not tile.has_robber:
+                    resource_pips[rt] += DICE_PIPS.get(tile.number, 0) * 2
+        for rt in [ResourceType.WOOD, ResourceType.BRICK, ResourceType.WHEAT,
+                   ResourceType.SHEEP, ResourceType.ORE]:
+            features.append(resource_pips[rt] / 10.0)
+
+        # Turn number (1 feature)
+        features.append(self._turn_count / 200.0)
+
+        # My longest road length (1 feature)
+        my_road_length = game.calculate_longest_road_for_player(player)
+        features.append(my_road_length / 15.0)
+
+        # Opponent max longest road (1 feature)
+        opp_max_road = 0
+        for i, p in enumerate(game.players):
+            if i != self.player_id:
+                opp_max_road = max(opp_max_road, game.calculate_longest_road_for_player(p))
+        features.append(opp_max_road / 15.0)
+
+        # Opponent max knights played (1 feature)
+        opp_max_knights = max((p.knights_played for i, p in enumerate(game.players) if i != self.player_id), default=0)
+        features.append(opp_max_knights / 5.0)
+
+        # VP gap (1 feature)
+        opp_max_vp = max((p.calculate_victory_points() for i, p in enumerate(game.players) if i != self.player_id), default=0)
+        features.append((raw_obs['my_victory_points'] - opp_max_vp) / 10.0)
+
+        # Cards in hand total (1 feature)
+        features.append(sum(player.resources.values()) / 15.0)
+
+        # Can afford checks (4 features)
+        features.append(1.0 if player.can_afford(Settlement.get_cost()) else 0.0)
+        features.append(1.0 if player.can_afford(City.get_cost()) else 0.0)
+        features.append(1.0 if player.can_afford(Road.get_cost()) else 0.0)
+        features.append(1.0 if player.can_afford(DevelopmentCardDeck.get_cost()) else 0.0)
+
+        # === Tile features (19 tiles × 10 = 190) ===
+        # Pre-compute building strength per tile
+        tile_building_strength = {}
+        for settlement in player.settlements:
+            for tile in settlement.position.adjacent_tiles:
+                key = (tile.q, tile.r)
+                tile_building_strength[key] = tile_building_strength.get(key, 0) + 1
+        for city in player.cities:
+            for tile in city.position.adjacent_tiles:
+                key = (tile.q, tile.r)
+                tile_building_strength[key] = tile_building_strength.get(key, 0) + 2
+
         for q, r, resource, number in raw_obs['tiles']:
-            features.extend([
-                resource_encoding.get(resource, 0.0),
-                float(number if number else 0),
-                1.0 if self._tile_has_robber(q, r) else 0.0
-            ])
+            features.extend(RESOURCE_ONEHOT.get(resource, [0, 0, 0, 0, 0, 0]))
+            features.append(float(number) / 12.0 if number else 0.0)
+            features.append(DICE_PIPS.get(number, 0) / 5.0)
+            features.append(1.0 if self._tile_has_robber(q, r) else 0.0)
+            features.append(tile_building_strength.get((q, r), 0) / 2.0)
         port_type_encoding = {
             'GENERIC': 1.0, 'WOOD': 2.0, 'BRICK': 3.0,
             'WHEAT': 4.0, 'SHEEP': 5.0, 'ORE': 6.0

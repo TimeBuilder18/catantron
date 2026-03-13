@@ -4,30 +4,31 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# Observation layout constants (for 427-feature observation)
-# Base features (121):
+# Observation layout constants (for 575-feature observation)
+# Base features (269):
 #   [0:46]    Non-tile features (game state, resources, structures, dev cards, stats, opponents)
-#   [46:103]  Tile features (19 tiles × 3 = 57)
-#   [103:121] Port features (9 ports × 2 = 18)
+#   [46:61]   Strategic features (production pips, turn, road lengths, VP gap, affordability)
+#   [61:251]  Tile features (19 tiles × 10 = 190)
+#   [251:269] Port features (9 ports × 2 = 18)
 # Positional features (306):
-#   [121:175] My settlement positions (54)
-#   [175:229] My city positions (54)
-#   [229:283] Opponent building positions (54)
-#   [283:355] My road positions (72)
-#   [355:427] Opponent road positions (72)
+#   [269:323] My settlement positions (54)
+#   [323:377] My city positions (54)
+#   [377:431] Opponent building positions (54)
+#   [431:503] My road positions (72)
+#   [503:575] Opponent road positions (72)
 
-TILE_START_IDX = 46
-TILE_END_IDX = 103
+NON_TILE_DIM = 61          # 46 base + 15 strategic features
+TILE_START_IDX = 61
+TILE_END_IDX = 251         # 61 + 19×10
 NUM_TILES = 19
-TILE_FEATURE_DIM = 3
-NON_TILE_DIM = 46  # Game/player features before tiles
-PORT_START_IDX = 103
-PORT_END_IDX = 121
-POSITIONAL_START_IDX = 121
-TOTAL_OBS_DIM = 427
+TILE_FEATURE_DIM = 10      # one-hot(6) + number + pips + robber + building_strength
+PORT_START_IDX = 251
+PORT_END_IDX = 269
+POSITIONAL_START_IDX = 269
+TOTAL_OBS_DIM = 575
 
 # Tile attention hyperparameters
-TILE_EMBED_DIM = 32
+TILE_EMBED_DIM = 48        # Was 32; richer 10-feature tiles need more capacity
 NUM_ATTENTION_HEADS = 4
 
 
@@ -46,7 +47,7 @@ class TileAttentionEncoder(nn.Module):
         self.num_tiles = num_tiles
         self.embed_dim = embed_dim
 
-        # Embed each tile's raw features (resource_type, number, has_robber) to embed_dim
+        # Embed each tile's raw features to embed_dim
         self.tile_embedding = nn.Linear(tile_feature_dim, embed_dim)
 
         # Multi-head self-attention: tiles attend to each other
@@ -68,16 +69,15 @@ class TileAttentionEncoder(nn.Module):
     def forward(self, tile_features):
         """
         Args:
-            tile_features: (batch, num_tiles, tile_feature_dim) = (batch, 19, 3)
+            tile_features: (batch, num_tiles, tile_feature_dim) = (batch, 19, 10)
 
         Returns:
             tile_context: (batch, 128) compressed tile representation
         """
-        # Embed tiles: (batch, 19, 3) -> (batch, 19, 32)
+        # Embed tiles: (batch, 19, 10) -> (batch, 19, 48)
         x = self.tile_embedding(tile_features)
 
         # Self-attention with residual connection
-        # attn_output: (batch, 19, 32)
         attn_output, _ = self.attention(x, x, x)
         x = self.attn_ln(x + attn_output)  # Residual + LayerNorm
 
@@ -85,10 +85,10 @@ class TileAttentionEncoder(nn.Module):
         ffn_output = F.relu(self.ffn(x))
         x = self.ffn_ln(x + ffn_output)  # Residual + LayerNorm
 
-        # Flatten: (batch, 19, 32) -> (batch, 608)
+        # Flatten: (batch, 19, 48) -> (batch, 912)
         x = x.view(x.size(0), -1)
 
-        # Compress to output_dim: (batch, 608) -> (batch, output_dim)
+        # Compress to output_dim: (batch, 912) -> (batch, output_dim)
         tile_context = F.relu(self.compress_ln(self.compress(x)))
 
         return tile_context
@@ -119,7 +119,7 @@ class CatanPolicy(nn.Module):
         self.tile_encoder = TileAttentionEncoder(output_dim=encoder_dim)
 
         # === Player/Game Context Encoder ===
-        # Non-tile features: game state (46) + ports (18) + positional (306) = 370
+        # Non-tile features: game state + strategic (61) + ports (18) + positional (306) = 385
         player_context_dim = NON_TILE_DIM + (PORT_END_IDX - PORT_START_IDX) + (TOTAL_OBS_DIM - POSITIONAL_START_IDX)
         self.player_embed = nn.Linear(player_context_dim, encoder_dim)
         self.player_ln = nn.LayerNorm(encoder_dim)
@@ -161,25 +161,25 @@ class CatanPolicy(nn.Module):
             obs = obs.unsqueeze(0)
 
         # === Split observation into tile and non-tile features ===
-        # Non-tile features: game/player state [0:46]
+        # Non-tile features: game/player state + strategic [0:61]
         game_features = obs[:, :NON_TILE_DIM]
 
-        # Tile features: [46:103] -> reshape to (batch, 19, 3)
+        # Tile features: [61:251] -> reshape to (batch, 19, 10)
         tile_features_flat = obs[:, TILE_START_IDX:TILE_END_IDX]
         tile_features = tile_features_flat.view(-1, NUM_TILES, TILE_FEATURE_DIM)
 
-        # Port features: [103:121]
+        # Port features: [251:269]
         port_features = obs[:, PORT_START_IDX:PORT_END_IDX]
 
-        # Positional features: [121:427]
+        # Positional features: [269:575]
         positional_features = obs[:, POSITIONAL_START_IDX:]
 
         # === Process through encoders ===
-        # Tile attention: (batch, 19, 3) -> (batch, 128)
+        # Tile attention: (batch, 19, 10) -> (batch, 128)
         tile_context = self.tile_encoder(tile_features)
 
         # Player context: concatenate non-tile features and embed
-        # (batch, 46) + (batch, 18) + (batch, 306) = (batch, 370) -> (batch, 128)
+        # (batch, 61) + (batch, 18) + (batch, 306) = (batch, 385) -> (batch, 128)
         player_features = torch.cat([game_features, port_features, positional_features], dim=-1)
         player_context = F.relu(self.player_ln(self.player_embed(player_features)))
 
@@ -191,9 +191,18 @@ class CatanPolicy(nn.Module):
         if self.projection is not None:
             x = F.relu(self.projection_ln(self.projection(x)))
 
+        # FC backbone with residual connections
+        residual = x
         x = F.relu(self.ln1(self.fc1(x)))
+        x = x + residual
+
+        residual = x
         x = F.relu(self.ln2(self.fc2(x)))
+        x = x + residual
+
+        residual = x
         x = F.relu(self.ln3(self.fc3(x)))
+        x = x + residual
 
         # === Action head with masking ===
         action_logits = self.policy_head(x)
