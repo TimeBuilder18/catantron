@@ -204,18 +204,10 @@ class CatanPolicy(nn.Module):
         if self.projection is not None:
             x = F.relu(self.projection_ln(self.projection(x)))
 
-        # FC backbone with residual connections
-        residual = x
+        # FC backbone
         x = F.relu(self.ln1(self.fc1(x)))
-        x = x + residual
-
-        residual = x
         x = F.relu(self.ln2(self.fc2(x)))
-        x = x + residual
-
-        residual = x
         x = F.relu(self.ln3(self.fc3(x)))
-        x = x + residual
 
         # === Action head with masking ===
         action_logits = self.policy_head(x)
