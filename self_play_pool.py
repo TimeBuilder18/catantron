@@ -343,6 +343,9 @@ class SelfPlayPool:
         # Get (or create) a thread-local opponent env for this player slot
         opp_env = self._get_thread_opp_env(opponent_player_id, vp_to_win, num_players)
         opp_env.wire_to_game(game_env)
+        # Skip expensive strategic features for legacy opponents — they get
+        # discarded by the 575→427 adapter anyway.
+        opp_env._skip_strategic = isinstance(policy, _LegacyPolicyWrapper)
 
         # Drive the opponent's turn until it ends or the game is over
         max_steps = 200
