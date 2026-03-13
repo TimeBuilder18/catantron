@@ -29,6 +29,74 @@ from catan_env_pytorch import CatanEnv
 # Lightweight CatanEnv subclass that can share an existing game_env
 # ──────────────────────────────────────────────────────────────────────────────
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Legacy observation adapter (575 → 427 features) for old checkpoints
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Old observation layout constants (427 features)
+_OLD_NON_TILE_DIM = 46
+_OLD_TILE_FEATURE_DIM = 3
+_OLD_NUM_TILES = 19
+_OLD_TOTAL_OBS_DIM = 427
+
+# Maps one-hot position → old ordinal value.
+# One-hot order: forest=0, hill=1, field=2, mountain=3, pasture=4, desert=5
+# Old ordinal:   forest=1, hill=2,  field=3, mountain=4, pasture=5, desert=0
+_ONEHOT_TO_ORDINAL = torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0, 0.0])
+
+
+def _convert_obs_575_to_427(obs_575):
+    """Convert a batch of new 575-feature observations to old 427-feature format.
+
+    Args:
+        obs_575: (batch, 575) tensor in the new observation layout
+
+    Returns:
+        obs_427: (batch, 427) tensor in the old observation layout
+    """
+    batch = obs_575.shape[0]
+    device = obs_575.device
+
+    # Non-tile features [0:46] — unchanged between old and new
+    non_tile = obs_575[:, :46]
+
+    # Tile features: new [61:251] (19×10) → old (19×3) ordinal encoding
+    tile_block = obs_575[:, 61:251].view(batch, 19, 10)
+    onehot = tile_block[:, :, :6]                              # (batch, 19, 6)
+    ordinal = (onehot * _ONEHOT_TO_ORDINAL.to(device)).sum(-1, keepdim=True)  # (batch, 19, 1)
+    number = tile_block[:, :, 6:7] * 12.0                     # denormalize
+    has_robber = tile_block[:, :, 8:9]                         # position 8 in new layout
+    old_tiles = torch.cat([ordinal, number, has_robber], dim=-1)  # (batch, 19, 3)
+    old_tiles_flat = old_tiles.view(batch, 57)
+
+    # Port features: new [251:269] → old [103:121] — same format
+    ports = obs_575[:, 251:269]
+
+    # Positional features: new [269:575] → old [121:427] — same format
+    positional = obs_575[:, 269:575]
+
+    return torch.cat([non_tile, old_tiles_flat, ports, positional], dim=-1)
+
+
+class _LegacyPolicyWrapper:
+    """Wraps an old-format CatanPolicy to accept new 575-feature observations.
+
+    Converts observations from 575→427 before forwarding to the legacy network.
+    Exposes the same interface as CatanPolicy for use in play_turn().
+    """
+
+    def __init__(self, policy):
+        self.policy = policy
+
+    def get_action_and_value(self, obs, action_mask, vertex_mask=None, edge_mask=None):
+        obs_427 = _convert_obs_575_to_427(obs)
+        return self.policy.get_action_and_value(obs_427, action_mask, vertex_mask, edge_mask)
+
+    def eval(self):
+        self.policy.eval()
+        return self
+
+
 class _SelfPlayEnv(CatanEnv):
     """CatanEnv that can be wired to an external game_env (shared game state)."""
 
@@ -125,7 +193,7 @@ class SelfPlayPool:
         return selected
 
     def _load_policy(self, path: str):
-        from network_gpu import CatanPolicy
+        from network_gpu import CatanPolicy, TILE_FEATURE_DIM
         ckpt = torch.load(path, map_location=self.device, weights_only=True)
         hidden_dim = ckpt.get('hidden_dim', None)
         if hidden_dim is None:
@@ -135,10 +203,50 @@ class SelfPlayPool:
                 hidden_dim = fc1_w.shape[0]
             else:
                 hidden_dim = 256
+
+        # Check observation layout compatibility
+        tile_embed_w = ckpt['model_state_dict'].get('tile_encoder.tile_embedding.weight')
+        if tile_embed_w is not None and tile_embed_w.shape[1] != TILE_FEATURE_DIM:
+            # Old checkpoint — load with legacy architecture + adapter
+            return self._load_legacy_policy(ckpt, hidden_dim,
+                                            tile_dim=tile_embed_w.shape[1])
+
         policy = CatanPolicy(device=self.device, hidden_dim=hidden_dim)
         policy.load_state_dict(ckpt['model_state_dict'])
         policy.eval()
         return policy
+
+    def _load_legacy_policy(self, ckpt, hidden_dim, tile_dim):
+        """Load an old-format checkpoint and wrap it with an observation adapter."""
+        from network_gpu import CatanPolicy
+        # Build a CatanPolicy with old architecture dimensions
+        # We need to temporarily construct a policy that matches the old weights.
+        # The old layout: NON_TILE_DIM=46, TILE_FEATURE_DIM=3, TILE_EMBED_DIM=32,
+        #   PORT_START_IDX=103, PORT_END_IDX=121, POSITIONAL_START_IDX=121, TOTAL_OBS_DIM=427
+        import network_gpu as ng
+        saved = (ng.NON_TILE_DIM, ng.TILE_START_IDX, ng.TILE_END_IDX, ng.TILE_FEATURE_DIM,
+                 ng.PORT_START_IDX, ng.PORT_END_IDX, ng.POSITIONAL_START_IDX,
+                 ng.TOTAL_OBS_DIM, ng.TILE_EMBED_DIM)
+        try:
+            ng.NON_TILE_DIM = 46
+            ng.TILE_START_IDX = 46
+            ng.TILE_END_IDX = 103
+            ng.TILE_FEATURE_DIM = tile_dim  # typically 3
+            ng.PORT_START_IDX = 103
+            ng.PORT_END_IDX = 121
+            ng.POSITIONAL_START_IDX = 121
+            ng.TOTAL_OBS_DIM = 427
+            ng.TILE_EMBED_DIM = 32
+            policy = CatanPolicy(device=self.device, hidden_dim=hidden_dim)
+            policy.load_state_dict(ckpt['model_state_dict'])
+            policy.eval()
+        finally:
+            (ng.NON_TILE_DIM, ng.TILE_START_IDX, ng.TILE_END_IDX, ng.TILE_FEATURE_DIM,
+             ng.PORT_START_IDX, ng.PORT_END_IDX, ng.POSITIONAL_START_IDX,
+             ng.TOTAL_OBS_DIM, ng.TILE_EMBED_DIM) = saved
+
+        print(f"[SelfPlayPool] Loaded legacy checkpoint (tile_dim={tile_dim}) with adapter")
+        return _LegacyPolicyWrapper(policy)
 
     def _refresh_pool(self, all_paths: list):
         selected = self._sample_paths(all_paths)

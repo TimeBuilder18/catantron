@@ -8,7 +8,7 @@ class PPOTrainer:
     def __init__(
             self,
             policy,
-            learning_rate=3e-4,
+            learning_rate=1e-4,
             gamma=0.99,
             gae_lambda=0.95,
             clip_epsilon=0.2,
