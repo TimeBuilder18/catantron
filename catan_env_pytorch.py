@@ -266,54 +266,59 @@ class CatanEnv(gym.Env):
             features.append(0.0)
 
         # === Strategic features (15) ===
-        game = self.game_env.game
+        # Skip for legacy self-play opponents — these get discarded by the
+        # 575→427 adapter anyway, and calculate_longest_road is expensive.
+        if getattr(self, '_skip_strategic', False):
+            features.extend([0.0] * 15)
+        else:
+            game = self.game_env.game
 
-        # Per-resource pip production rate (5 features)
-        resource_pips = {rt: 0 for rt in ResourceType}
-        for settlement in player.settlements:
-            for tile in settlement.position.adjacent_tiles:
-                rt = RESOURCE_STR_TO_TYPE.get(tile.resource)
-                if rt and tile.number and not tile.has_robber:
-                    resource_pips[rt] += DICE_PIPS.get(tile.number, 0)
-        for city in player.cities:
-            for tile in city.position.adjacent_tiles:
-                rt = RESOURCE_STR_TO_TYPE.get(tile.resource)
-                if rt and tile.number and not tile.has_robber:
-                    resource_pips[rt] += DICE_PIPS.get(tile.number, 0) * 2
-        for rt in [ResourceType.WOOD, ResourceType.BRICK, ResourceType.WHEAT,
-                   ResourceType.SHEEP, ResourceType.ORE]:
-            features.append(resource_pips[rt] / 10.0)
+            # Per-resource pip production rate (5 features)
+            resource_pips = {rt: 0 for rt in ResourceType}
+            for settlement in player.settlements:
+                for tile in settlement.position.adjacent_tiles:
+                    rt = RESOURCE_STR_TO_TYPE.get(tile.resource)
+                    if rt and tile.number and not tile.has_robber:
+                        resource_pips[rt] += DICE_PIPS.get(tile.number, 0)
+            for city in player.cities:
+                for tile in city.position.adjacent_tiles:
+                    rt = RESOURCE_STR_TO_TYPE.get(tile.resource)
+                    if rt and tile.number and not tile.has_robber:
+                        resource_pips[rt] += DICE_PIPS.get(tile.number, 0) * 2
+            for rt in [ResourceType.WOOD, ResourceType.BRICK, ResourceType.WHEAT,
+                       ResourceType.SHEEP, ResourceType.ORE]:
+                features.append(resource_pips[rt] / 10.0)
 
-        # Turn number (1 feature)
-        features.append(self._turn_count / 200.0)
+            # Turn number (1 feature)
+            features.append(self._turn_count / 200.0)
 
-        # My longest road length (1 feature)
-        my_road_length = game.calculate_longest_road_for_player(player)
-        features.append(my_road_length / 15.0)
+            # My longest road length (1 feature)
+            my_road_length = game.calculate_longest_road_for_player(player)
+            features.append(my_road_length / 15.0)
 
-        # Opponent max longest road (1 feature)
-        opp_max_road = 0
-        for i, p in enumerate(game.players):
-            if i != self.player_id:
-                opp_max_road = max(opp_max_road, game.calculate_longest_road_for_player(p))
-        features.append(opp_max_road / 15.0)
+            # Opponent max longest road (1 feature)
+            opp_max_road = 0
+            for i, p in enumerate(game.players):
+                if i != self.player_id:
+                    opp_max_road = max(opp_max_road, game.calculate_longest_road_for_player(p))
+            features.append(opp_max_road / 15.0)
 
-        # Opponent max knights played (1 feature)
-        opp_max_knights = max((p.knights_played for i, p in enumerate(game.players) if i != self.player_id), default=0)
-        features.append(opp_max_knights / 5.0)
+            # Opponent max knights played (1 feature)
+            opp_max_knights = max((p.knights_played for i, p in enumerate(game.players) if i != self.player_id), default=0)
+            features.append(opp_max_knights / 5.0)
 
-        # VP gap (1 feature)
-        opp_max_vp = max((p.calculate_victory_points() for i, p in enumerate(game.players) if i != self.player_id), default=0)
-        features.append((raw_obs['my_victory_points'] - opp_max_vp) / 10.0)
+            # VP gap (1 feature)
+            opp_max_vp = max((p.calculate_victory_points() for i, p in enumerate(game.players) if i != self.player_id), default=0)
+            features.append((raw_obs['my_victory_points'] - opp_max_vp) / 10.0)
 
-        # Cards in hand total (1 feature)
-        features.append(sum(player.resources.values()) / 15.0)
+            # Cards in hand total (1 feature)
+            features.append(sum(player.resources.values()) / 15.0)
 
-        # Can afford checks (4 features)
-        features.append(1.0 if player.can_afford(Settlement.get_cost()) else 0.0)
-        features.append(1.0 if player.can_afford(City.get_cost()) else 0.0)
-        features.append(1.0 if player.can_afford(Road.get_cost()) else 0.0)
-        features.append(1.0 if player.can_afford(DevelopmentCardDeck.get_cost()) else 0.0)
+            # Can afford checks (4 features)
+            features.append(1.0 if player.can_afford(Settlement.get_cost()) else 0.0)
+            features.append(1.0 if player.can_afford(City.get_cost()) else 0.0)
+            features.append(1.0 if player.can_afford(Road.get_cost()) else 0.0)
+            features.append(1.0 if player.can_afford(DevelopmentCardDeck.get_cost()) else 0.0)
 
         # === Tile features (19 tiles × 10 = 190) ===
         # Pre-compute building strength per tile
