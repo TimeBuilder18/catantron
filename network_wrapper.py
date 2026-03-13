@@ -26,15 +26,25 @@ class NetworkWrapper:
             ckpt = torch.load(model_path, map_location='cpu', weights_only=True)
             saved_dim = ckpt.get('hidden_dim', 256)  # Old checkpoints default to 256
 
-            if saved_dim != hidden_dim:
-                # Different architecture — transfer weights from smaller to larger network
-                print(f"  Transferring weights: checkpoint hidden_dim={saved_dim} → new hidden_dim={hidden_dim}")
-                self.policy = CatanPolicy(device=device, hidden_dim=hidden_dim)
+            self.policy = CatanPolicy(device=device, hidden_dim=hidden_dim)
+
+            # Check if checkpoint has matching layer shapes (obs format + hidden_dim)
+            needs_transfer = (saved_dim != hidden_dim)
+            if not needs_transfer:
+                # Same hidden_dim, but obs format may differ (427 vs 575)
+                old_sd = ckpt['model_state_dict']
+                new_sd = self.policy.state_dict()
+                for name in old_sd:
+                    if name in new_sd and old_sd[name].shape != new_sd[name].shape:
+                        needs_transfer = True
+                        break
+
+            if needs_transfer:
+                reason = f"hidden_dim={saved_dim}→{hidden_dim}" if saved_dim != hidden_dim else "obs format mismatch"
+                print(f"  Transferring weights ({reason})")
                 self._transfer_weights(ckpt['model_state_dict'], saved_dim, hidden_dim)
-                print(f"✅ Transferred weights from {model_path} (expanded {saved_dim}→{hidden_dim})")
+                print(f"✅ Transferred compatible weights from {model_path}")
             else:
-                # Same architecture — direct load
-                self.policy = CatanPolicy(device=device, hidden_dim=hidden_dim)
                 self.policy.load(model_path)
                 print(f"✅ Loaded model from {model_path}")
         else:

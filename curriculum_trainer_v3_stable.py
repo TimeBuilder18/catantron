@@ -681,9 +681,10 @@ class CurriculumTrainerV3:
                 compiled = torch.compile(self.network, mode='reduce-overhead')
                 # Warmup: tiny dummy batch to detect Triton missing / backend errors now
                 _d = self.device
+                from network_gpu import TOTAL_OBS_DIM
                 with torch.inference_mode():
                     compiled(
-                        torch.zeros(1, 427, device=_d),
+                        torch.zeros(1, TOTAL_OBS_DIM, device=_d),
                         torch.zeros(1, 14, device=_d),
                         torch.zeros(1, 54, device=_d),
                         torch.zeros(1, 72, device=_d),
