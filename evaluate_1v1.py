@@ -222,7 +222,11 @@ def _play_game(network, device, opponent_type, victory_points=10):
 
 def evaluate(model_path, opponent_type, num_games=100, num_parallel=8, verbose=True):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    nw = NetworkWrapper(model_path=model_path, device=device)
+    # Auto-detect hidden_dim from checkpoint
+    ckpt = torch.load(model_path, map_location='cpu', weights_only=True)
+    hidden_dim = ckpt.get('hidden_dim', 256)
+    del ckpt
+    nw = NetworkWrapper(model_path=model_path, device=device, hidden_dim=hidden_dim)
     network = nw.policy
     network.eval()
 
