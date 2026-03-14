@@ -24,7 +24,14 @@ class NetworkWrapper:
         """
         if model_path:
             ckpt = torch.load(model_path, map_location='cpu', weights_only=True)
-            saved_dim = ckpt.get('hidden_dim', 256)  # Old checkpoints default to 256
+            # Detect saved hidden_dim: explicit key > infer from fc1 > fallback 256
+            saved_dim = ckpt.get('hidden_dim', None)
+            if saved_dim is None:
+                sd = ckpt.get('model_state_dict', {})
+                if 'fc1.weight' in sd:
+                    saved_dim = sd['fc1.weight'].shape[0]
+                else:
+                    saved_dim = 256
 
             self.policy = CatanPolicy(device=device, hidden_dim=hidden_dim)
 
