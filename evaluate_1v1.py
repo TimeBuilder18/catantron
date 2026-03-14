@@ -224,7 +224,14 @@ def evaluate(model_path, opponent_type, num_games=100, num_parallel=8, verbose=T
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     # Auto-detect hidden_dim from checkpoint
     ckpt = torch.load(model_path, map_location='cpu', weights_only=True)
-    hidden_dim = ckpt.get('hidden_dim', 256)
+    hidden_dim = ckpt.get('hidden_dim', None)
+    if hidden_dim is None:
+        # Infer from fc1 weight shape (fc1 is hidden_dim x hidden_dim)
+        sd = ckpt.get('model_state_dict', {})
+        if 'fc1.weight' in sd:
+            hidden_dim = sd['fc1.weight'].shape[0]
+        else:
+            hidden_dim = 256
     del ckpt
     nw = NetworkWrapper(model_path=model_path, device=device, hidden_dim=hidden_dim)
     network = nw.policy

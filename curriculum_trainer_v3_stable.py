@@ -1954,6 +1954,7 @@ class CurriculumTrainerV3:
             'games_played': self.games_played,
             'entropy_coef': self.current_entropy_coef,
             'grad_norm': self.current_grad_norm,
+            'hidden_dim': self.network_wrapper.policy.hidden_dim,
         }, path)
         print(f"  Saved: {path}")
 
