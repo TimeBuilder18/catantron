@@ -850,10 +850,10 @@ class CatanEnv(gym.Env):
         # MASSIVE bonus for cities - this is the KEY to winning
         # Max 4 cities per player in Catan
         num_cities = min(len(player.cities), 4)  # Cap at 4 (Catan max)
-        # CRITICAL: City bonus must be HIGHER than city_readiness bonus
+        # CRITICAL: City bonus must be HIGHER than city_readiness bonus (+10)
         # Otherwise PBRS gives negative reward for building cities!
-        # First city: +30, Second: +32, Third: +34, Fourth: +36 (compound bonus)
-        city_bonus = sum(30.0 + 2.0 * i for i in range(num_cities))
+        # First city: +20, Second: +22, Third: +24, Fourth: +26 (compound bonus)
+        city_bonus = sum(20.0 + 2.0 * i for i in range(num_cities))
         potential += city_bonus
 
         # ========== CITY READINESS BONUS ==========
@@ -868,7 +868,7 @@ class CatanEnv(gym.Env):
         if len(player.settlements) > 0:
             if self.num_players == 2:
                 # 1v1: Small readiness bonus (+3 max) so net PBRS for building
-                # a city is clearly positive: +30 city - 3 readiness = +27 PBRS.
+                # a city is clearly positive: +20 city - 3 readiness = +17 PBRS.
                 potential += ore_progress * 2.0 + wheat_progress * 1.0
             else:
                 city_readiness = ore_progress * wheat_progress  # 0 to 1
@@ -878,20 +878,20 @@ class CatanEnv(gym.Env):
         # Roads are valuable for expansion and longest road!
         # Max 15 roads per player in Catan - cap bonuses there
         num_roads = min(len(player.roads), 15)  # Cap at 15 (Catan max)
-        # Bonus for each road - roads enable expansion and longest road
-        potential += num_roads * 0.8
+        # Bonus for each road - roads enable expansion
+        potential += num_roads * 0.3
         # Extra bonus for longest road progress
         if num_roads >= 5:
-            potential += 2.0
+            potential += 1.0
         if num_roads >= 8:
-            potential += 2.0  # Getting close to longest road
+            potential += 1.0  # Getting close to longest road
         if num_roads >= 10:
-            potential += 3.0  # Strong longest road contender
+            potential += 1.5  # Strong longest road contender
         if num_roads >= 13:
-            potential += 4.0  # Near max roads - dominating the board
+            potential += 2.0  # Near max roads - dominating the board
 
         # ========== STRATEGIC ASSET POTENTIAL ==========
-        if player.has_longest_road: potential += 6.0
+        if player.has_longest_road: potential += 2.0
         if player.has_largest_army: potential += 2.0
         potential += player.development_cards.get(DevelopmentCardType.VICTORY_POINT, 0) * 1.5
 
@@ -1104,24 +1104,24 @@ class CatanEnv(gym.Env):
                 reward_breakdown['road_bonus'] = road_bonus
 
         # ========== DEV CARD PURCHASE BONUS ==========
-        # Small reward - dev cards are useful but shouldn't dominate strategy
+        # Buying dev cards is a valid strategy, give small reward
         if action_name == 'buy_dev_card' and step_info.get('success', False):
-            reward += 1.0
-            reward_breakdown['dev_card_bonus'] = 1.0
+            reward += 3.0
+            reward_breakdown['dev_card_bonus'] = 3.0
 
         # ========== BANK TRADE PENALTY (BALANCED) ==========
         # Discourage excessive trading but allow strategic trades
         # Some trades are necessary, especially early game
         if step_info.get('bank_trade') and step_info.get('success'):
             trades_so_far = self._bank_trades_this_game
-            # Base penalty - 4:1 bank trades are expensive and wasteful
-            trade_penalty = 1.5
-            # Escalate after many trades (>6 is excessive)
-            if trades_so_far > 6:
-                trade_penalty += 0.5 * (trades_so_far - 6)
-            # Strong penalty after 12 trades - clearly inefficient play
-            if trades_so_far > 12:
-                trade_penalty += 1.0 * (trades_so_far - 12)
+            # Small base penalty - trading is inefficient but sometimes needed
+            trade_penalty = 0.5
+            # Only escalate after many trades (>8 is excessive)
+            if trades_so_far > 8:
+                trade_penalty += 0.5 * (trades_so_far - 8)
+            # Strong penalty after 15 trades - clearly inefficient play
+            if trades_so_far > 15:
+                trade_penalty += 1.0 * (trades_so_far - 15)
 
             reward -= trade_penalty
             reward_breakdown['bank_trade_penalty'] = -trade_penalty
@@ -1130,7 +1130,7 @@ class CatanEnv(gym.Env):
         # NOTE: 1v1 city inaction penalty REMOVED - it caused a death spiral where
         # the value function learned "having city resources = terrible state" and the
         # agent traded away resources to escape the penalty rather than building cities.
-        # City building is now incentivized purely via city_bonus (+40) and PBRS (+30 per city).
+        # City building is now incentivized purely via city_bonus (+40) and PBRS (+20 per city).
         if action_name == 'end_turn':
             legal_actions = old_obs.get('legal_actions', [])
             if self.num_players == 2:
