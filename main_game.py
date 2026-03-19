@@ -27,7 +27,7 @@ from gui_components import (
     draw_resource_panel, draw_player_info_box, draw_vp_tracker,
     draw_button, draw_game_state_panel, draw_game_log,
     draw_title_screen, draw_difficulty_screen, set_screen_size,
-    draw_robber_overlay, draw_dev_card_popup,
+    draw_robber_overlay, draw_dev_card_popup, draw_dev_cards_panel,
 )
 
 
@@ -442,12 +442,16 @@ class CatantronApp:
                     success, msg = game.try_place_initial_settlement(vertex, player)
                     if success:
                         self.add_message(f"{player.name} placed a settlement", player.color)
+                    else:
+                        self.add_message(msg, (255, 100, 100))
             else:
                 edge = find_closest_edge(game.game_board, mouse_pos, self.offset)
                 if edge:
                     success, msg = game.try_place_initial_road(edge, player)
                     if success:
                         self.add_message(f"{player.name} placed a road", player.color)
+                    else:
+                        self.add_message(msg, (255, 100, 100))
         elif game.can_trade_or_build():
             if self.build_mode == "SETTLEMENT":
                 vertex = find_closest_vertex(game.game_board, mouse_pos, self.offset)
@@ -455,12 +459,16 @@ class CatantronApp:
                     success, msg = player.try_build_settlement(vertex, False)
                     if success:
                         self.add_message(f"{player.name} built a settlement", player.color)
+                    else:
+                        self.add_message(msg, (255, 100, 100))
             elif self.build_mode == "CITY":
                 vertex = find_closest_vertex(game.game_board, mouse_pos, self.offset)
                 if vertex:
                     success, msg = player.try_build_city(vertex)
                     if success:
                         self.add_message(f"{player.name} upgraded to a city", player.color)
+                    else:
+                        self.add_message(msg, (255, 100, 100))
             elif self.build_mode == "ROAD":
                 edge = find_closest_edge(game.game_board, mouse_pos, self.offset)
                 if edge:
@@ -468,6 +476,8 @@ class CatantronApp:
                     if success:
                         game.update_longest_road()
                         self.add_message(f"{player.name} built a road", player.color)
+                    else:
+                        self.add_message(msg, (255, 100, 100))
 
     def _handle_seven_rolled(self, game, player):
         """Handle rolling a 7: discard, then enter robber placement mode."""
@@ -591,6 +601,11 @@ class CatantronApp:
         if self.is_human_turn() or self.mode == GameMode.PVP:
             draw_resource_panel(self.screen, current, x, y)
             y += 82
+
+        # Dev card inventory
+        if sum(current.development_cards.values()) > 0:
+            h = draw_dev_cards_panel(self.screen, current, x, y, pw, self.small_font)
+            y += h + 4
 
         # Build mode indicator
         mode_font = get_font(14, bold=True)

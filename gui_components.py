@@ -780,3 +780,49 @@ def draw_dev_card_popup(screen, card_name, description):
     hint_font = get_font(13)
     hint_surf = hint_font.render("Click to dismiss", True, TEXT_DIM)
     screen.blit(hint_surf, hint_surf.get_rect(center=(cx, card_y + card_h - 18)))
+
+
+# ===========================================================================
+# Dev Card Inventory Panel
+# ===========================================================================
+
+DEV_CARD_DISPLAY = {
+    DevelopmentCardType.KNIGHT: ("Knight", (180, 80, 80)),
+    DevelopmentCardType.VICTORY_POINT: ("VP", (230, 200, 50)),
+    DevelopmentCardType.ROAD_BUILDING: ("Roads", (120, 180, 80)),
+    DevelopmentCardType.YEAR_OF_PLENTY: ("Plenty", (80, 160, 200)),
+    DevelopmentCardType.MONOPOLY: ("Mono", (200, 130, 200)),
+}
+
+
+def draw_dev_cards_panel(screen, player, x, y, width, font):
+    """Draw a compact dev card inventory panel. Returns height used."""
+    owned = [(ct, count) for ct, count in player.development_cards.items() if count > 0]
+    if not owned:
+        return 0
+
+    height = 38
+    # Background
+    pygame.draw.rect(screen, (35, 32, 28), (x, y, width, height), border_radius=6)
+    pygame.draw.rect(screen, (70, 65, 55), (x, y, width, height), 1, border_radius=6)
+
+    # Label
+    label_font = get_font(12, bold=True)
+    label = label_font.render("Dev Cards:", True, TEXT_DIM)
+    screen.blit(label, (x + 8, y + 4))
+
+    # Card boxes
+    bx = x + 8
+    by = y + 18
+    box_h = 16
+    for card_type, count in owned:
+        name, color = DEV_CARD_DISPLAY.get(card_type, (str(card_type.value), TEXT_COLOR))
+        text = f"{name} x{count}"
+        card_font = get_font(12)
+        text_surf = card_font.render(text, True, color)
+        tw = text_surf.get_width() + 10
+        pygame.draw.rect(screen, (50, 45, 40), (bx, by, tw, box_h), border_radius=3)
+        screen.blit(text_surf, (bx + 5, by + 1))
+        bx += tw + 4
+
+    return height
