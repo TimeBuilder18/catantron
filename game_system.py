@@ -385,7 +385,7 @@ class Player:
             if adj.structure is not None:
                 return False, "Too close to another settlement"
         if not ignore_road_rule and not vertex.has_connected_road(self):
-            return False, "No connected road to this vertex"
+            return False, "No road here — extend your roads first (green dots show valid spots)"
 
         self.pay_cost(cost)
         vertex.build_settlement(self)
