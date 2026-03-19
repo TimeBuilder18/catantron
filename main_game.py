@@ -726,6 +726,7 @@ class CatantronApp:
         self.screen.blit(mode_surf, (x, y))
         y += 18
         # Show hint if no valid spots for current build mode
+        game = self.game
         if self.is_human_turn() and game.can_trade_or_build():
             if self.build_mode == "SETTLEMENT" and not game.get_buildable_vertices_for_settlements():
                 hint = get_font(12).render("No valid spots — build roads first!", True, (255, 100, 100))
@@ -743,7 +744,6 @@ class CatantronApp:
         btn_font = get_font(16, bold=True)
         mouse_pos = pygame.mouse.get_pos()
 
-        game = self.game
         can_build = game.can_trade_or_build()
         player = game.get_current_player()
 
