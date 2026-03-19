@@ -28,6 +28,7 @@ from gui_components import (
     draw_button, draw_game_state_panel, draw_game_log,
     draw_title_screen, draw_difficulty_screen, set_screen_size,
     draw_robber_overlay, draw_dev_card_popup, draw_dev_cards_panel,
+    draw_discard_overlay,
 )
 
 
@@ -359,6 +360,12 @@ class CatantronApp:
         # Robber mode
         self.robber_mode = False
 
+        # Discard mode
+        self.discard_mode = False
+        self.discard_selection = {}  # {ResourceType: count_to_discard}
+        self.discard_required = 0
+        self.discard_buttons = []  # clickable rects from draw_discard_overlay
+
         # Dev card popup
         self.dev_card_popup = None  # {"card_name": str, "description": str, "show_until": float}
 
@@ -392,6 +399,10 @@ class CatantronApp:
         self.offset = compute_center_offset(tiles, int(460 * self.scale),
                                             self.screen_h // 2)
         self.robber_mode = False
+        self.discard_mode = False
+        self.discard_selection = {}
+        self.discard_required = 0
+        self.discard_buttons = []
         self.dev_card_popup = None
 
         if mode == GameMode.PVP:
@@ -480,13 +491,45 @@ class CatantronApp:
                         self.add_message(msg, (255, 100, 100))
 
     def _handle_seven_rolled(self, game, player):
-        """Handle rolling a 7: discard, then enter robber placement mode."""
-        self.add_message("Seven! Move the robber!", (255, 100, 100))
-        # Auto-discard for all players with 8+ cards
+        """Handle rolling a 7: discard (manual for humans), then robber placement."""
+        self.add_message("Seven! Robber activated!", (255, 100, 100))
+
         if game.waiting_for_discards:
-            _auto_discard_only(game)
-        # Enter robber mode for human player
+            # Auto-discard for AI/bot players
+            for p in list(game.players_must_discard):
+                if p in game.players_discarded:
+                    continue
+                idx = game.players.index(p)
+                if idx not in self.human_players:
+                    total = sum(p.resources.values())
+                    num_to_discard = total // 2
+                    all_cards = []
+                    for res_type, count in p.resources.items():
+                        all_cards.extend([res_type] * count)
+                    if all_cards and num_to_discard > 0:
+                        cards = random.sample(all_cards, min(num_to_discard, len(all_cards)))
+                        discard_dict = {}
+                        for rt in set(cards):
+                            discard_dict[rt] = cards.count(rt)
+                        game.discard_cards(p, discard_dict)
+
+            # Check if human player needs to discard
+            if game.player_must_discard(player):
+                total = sum(player.resources.values())
+                self.discard_required = total // 2
+                self.discard_selection = {rt: 0 for rt in ResourceType}
+                self.discard_mode = True
+                self.add_message(f"Discard {self.discard_required} cards!", (255, 100, 100))
+                return  # Don't enter robber mode yet — discard first
+
+            # All discards done, clear state
+            game.waiting_for_discards = False
+            game.players_must_discard = []
+            game.players_discarded = set()
+
+        # Enter robber mode
         self.robber_mode = True
+        self.add_message("Click a tile to move the robber!", (255, 200, 80))
 
     def _handle_robber_click(self, mouse_pos):
         """Handle a click during robber placement mode."""
@@ -523,6 +566,38 @@ class CatantronApp:
             self.add_message("No resources to steal", TEXT_DIM)
 
         self.robber_mode = False
+
+    def _handle_discard_click(self, mouse_pos):
+        """Handle a click during discard mode."""
+        for rect, action in self.discard_buttons:
+            if rect.collidepoint(mouse_pos):
+                if action[0] == "+" and len(action) == 2:
+                    res_type = action[1]
+                    have = self.game.get_current_player().resources.get(res_type, 0)
+                    total_sel = sum(self.discard_selection.values())
+                    if self.discard_selection[res_type] < have and total_sel < self.discard_required:
+                        self.discard_selection[res_type] += 1
+                elif action[0] == "-" and len(action) == 2:
+                    res_type = action[1]
+                    if self.discard_selection[res_type] > 0:
+                        self.discard_selection[res_type] -= 1
+                elif action[0] == "confirm":
+                    total_sel = sum(self.discard_selection.values())
+                    if total_sel == self.discard_required:
+                        game = self.game
+                        player = game.get_current_player()
+                        discard_dict = {rt: cnt for rt, cnt in self.discard_selection.items() if cnt > 0}
+                        game.discard_cards(player, discard_dict)
+                        self.discard_mode = False
+                        self.add_message(f"Discarded {self.discard_required} cards", player.color)
+                        # Clear remaining discard state
+                        game.waiting_for_discards = False
+                        game.players_must_discard = []
+                        game.players_discarded = set()
+                        # Now enter robber mode
+                        self.robber_mode = True
+                        self.add_message("Click a tile to move the robber!", (255, 200, 80))
+                break
 
     def _show_dev_card_popup(self, buy_message):
         """Show a popup for the purchased dev card."""
@@ -624,10 +699,10 @@ class CatantronApp:
         can_build = game.can_trade_or_build()
         player = game.get_current_player()
 
-        human_can_build = can_build and self.is_human_turn() and not self.robber_mode
+        human_can_build = can_build and self.is_human_turn() and not self.robber_mode and not self.discard_mode
         buttons_data = [
-            ("Roll Dice", "D", game.can_roll_dice() and self.is_human_turn() and not self.robber_mode, None, "roll"),
-            ("End Turn", "T", game.can_end_turn() and self.is_human_turn() and not self.robber_mode, None, "end_turn"),
+            ("Roll Dice", "D", game.can_roll_dice() and self.is_human_turn() and not self.robber_mode and not self.discard_mode, None, "roll"),
+            ("End Turn", "T", game.can_end_turn() and self.is_human_turn() and not self.robber_mode and not self.discard_mode, None, "end_turn"),
             ("Settlement", "1", human_can_build and player.can_afford(BUILD_COSTS["settlement"]), BUILD_COSTS["settlement"], "sett"),
             ("City", "2", human_can_build and player.can_afford(BUILD_COSTS["city"]), BUILD_COSTS["city"], "city"),
             ("Road", "3", human_can_build and player.can_afford(BUILD_COSTS["road"]), BUILD_COSTS["road"], "road"),
@@ -665,6 +740,12 @@ class CatantronApp:
         # Game log
         log_h = max(80, gui_components.SCREEN_H - y - 10)
         draw_game_log(self.screen, self.messages, x, y, pw, log_h, self.small_font)
+
+        # Discard overlay (drawn on top of everything)
+        if self.discard_mode:
+            current = self.game.get_current_player()
+            self.discard_buttons = draw_discard_overlay(
+                self.screen, current, self.discard_selection, self.discard_required)
 
         # Robber overlay (drawn on top of everything)
         if self.robber_mode:
@@ -763,8 +844,8 @@ class CatantronApp:
                         game = self.game
                         player = game.get_current_player()
 
-                        # Block all keys during robber placement
-                        if self.robber_mode:
+                        # Block all keys during discard or robber placement
+                        if self.discard_mode or self.robber_mode:
                             pass
                         elif event.key == pygame.K_d:
                             if game.can_roll_dice():
@@ -831,8 +912,11 @@ class CatantronApp:
                         game = self.game
                         player = game.get_current_player()
 
+                        # Discard mode: only accept discard overlay clicks
+                        if self.discard_mode:
+                            self._handle_discard_click(event.pos)
                         # Robber mode: only accept board tile clicks
-                        if self.robber_mode:
+                        elif self.robber_mode:
                             self._handle_robber_click(event.pos)
                         else:
                             # Check action button clicks

@@ -379,8 +379,13 @@ class Player:
                     missing.append(f"{resource.name.lower()}")
             return False, f"Need: 1 wood + 1 brick + 1 wheat + 1 sheep (Missing: {', '.join(missing)})"
 
-        if not vertex.can_build_settlement(self, ignore_road_rule):
-            return False, "Cannot build settlement (too close or no road connection)"
+        if vertex.structure is not None:
+            return False, "This vertex already has a building"
+        for adj in vertex.adjacent_vertices:
+            if adj.structure is not None:
+                return False, "Too close to another settlement"
+        if not ignore_road_rule and not vertex.has_connected_road(self):
+            return False, "No connected road to this vertex"
 
         self.pay_cost(cost)
         vertex.build_settlement(self)
