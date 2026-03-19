@@ -13,6 +13,14 @@ import math
 import time
 from enum import Enum
 
+try:
+    import torch
+    from network_wrapper import NetworkWrapper
+    from catan_env_pytorch import CatanEnv
+    HAS_TORCH = True
+except ImportError:
+    HAS_TORCH = False
+
 from tile import Tile
 from game_system import (Player, Robber, GameBoard, GameSystem, ResourceType,
                          Settlement, City, Road, DevelopmentCardType, GameConstants,
@@ -305,6 +313,145 @@ def play_random_turn(game, player_id):
     return False
 
 
+def play_neural_turn(game, player_id, network, device, catan_env):
+    """Play one AI action using the neural network.
+
+    Uses CatanEnv for observation building, then executes the chosen action
+    directly on the GameSystem.
+    """
+    if not HAS_TORCH:
+        return play_random_turn(game, player_id)
+
+    try:
+        player = game.players[player_id]
+
+        # Sync env's game reference to our game
+        catan_env.game_env.game = game
+        catan_env.player_id = player_id
+
+        # Build observation + masks
+        obs = catan_env._get_obs()
+
+        with torch.no_grad():
+            action_probs, vertex_probs, edge_probs, trade_give_probs, trade_get_probs, _ = \
+                network.policy.forward(
+                    torch.FloatTensor(obs['observation']).unsqueeze(0).to(device),
+                    torch.FloatTensor(obs['action_mask']).unsqueeze(0).to(device),
+                    torch.FloatTensor(obs['vertex_mask']).unsqueeze(0).to(device),
+                    torch.FloatTensor(obs['edge_mask']).unsqueeze(0).to(device)
+                )
+
+        action_id = int(torch.argmax(action_probs[0]).item())
+        vertex_id = int(torch.argmax(vertex_probs[0]).item())
+        edge_id = int(torch.argmax(edge_probs[0]).item())
+        give_idx = int(torch.argmax(trade_give_probs[0]).item())
+        get_idx = int(torch.argmax(trade_get_probs[0]).item())
+        if give_idx == get_idx:
+            get_idx = (give_idx + 1) % 5
+
+        action_names = [
+            'roll_dice', 'place_settlement', 'place_road',
+            'build_settlement', 'build_city', 'build_road',
+            'buy_dev_card', 'end_turn', 'wait', 'trade_with_bank',
+            'do_nothing', 'play_knight', 'play_monopoly', 'play_year_of_plenty'
+        ]
+        action_name = action_names[action_id]
+        board = game.game_board
+        resource_map = [ResourceType.WOOD, ResourceType.BRICK, ResourceType.WHEAT,
+                        ResourceType.SHEEP, ResourceType.ORE]
+
+        if action_name == 'roll_dice':
+            result = game.roll_dice()
+            if result and result[2] == 7 and game.waiting_for_discards:
+                _auto_discard_for_game(game, player_id)
+            return True
+
+        elif action_name == 'place_settlement':
+            if vertex_id < len(board.vertices):
+                game.try_place_initial_settlement(board.vertices[vertex_id], player)
+            return True
+
+        elif action_name == 'place_road':
+            if edge_id < len(board.edges):
+                game.try_place_initial_road(board.edges[edge_id], player)
+            return True
+
+        elif action_name == 'build_settlement':
+            if vertex_id < len(board.vertices):
+                player.try_build_settlement(board.vertices[vertex_id])
+            return True
+
+        elif action_name == 'build_city':
+            if vertex_id < len(board.vertices):
+                player.try_build_city(board.vertices[vertex_id])
+            return True
+
+        elif action_name == 'build_road':
+            if edge_id < len(board.edges):
+                player.try_build_road(board.edges[edge_id])
+                game.update_longest_road()
+            return True
+
+        elif action_name == 'buy_dev_card':
+            player.try_buy_development_card(game.dev_deck)
+            return True
+
+        elif action_name == 'end_turn':
+            if game.can_end_turn():
+                game.end_turn()
+            return True
+
+        elif action_name == 'trade_with_bank':
+            give_res = resource_map[give_idx]
+            get_res = resource_map[get_idx]
+            game.execute_bank_trade(player, give_res, get_res)
+            return True
+
+        elif action_name == 'play_knight':
+            success, _ = game.play_knight_card(player)
+            if success:
+                # Move robber to a tile with opponent buildings
+                available = [t for t in board.tiles
+                             if t != game.robber.position and t.resource is not None]
+                if available:
+                    # Pick tile adjacent to opponents
+                    best = None
+                    for t in available:
+                        for v in board.vertices:
+                            if t in v.adjacent_tiles and v.structure and v.structure.player != player:
+                                best = t
+                                break
+                        if best:
+                            break
+                    game.move_robber_to_tile(best or random.choice(available))
+                    # Steal from opponent on that tile
+                    for v in board.vertices:
+                        tile = best or available[0]
+                        if tile in v.adjacent_tiles and v.structure and v.structure.player != player:
+                            game.steal_random_resource(player, v.structure.player)
+                            break
+            return True
+
+        elif action_name in ('play_monopoly', 'play_year_of_plenty'):
+            # Use trade_give/get indices as resource choices
+            if action_name == 'play_monopoly':
+                game.play_monopoly_card(player, resource_map[give_idx])
+            else:
+                game.play_year_of_plenty_card(player, resource_map[give_idx], resource_map[get_idx])
+            return True
+
+        else:  # wait, do_nothing
+            if game.can_end_turn():
+                game.end_turn()
+            return True
+
+    except Exception as e:
+        print(f"Neural AI error: {e}")
+        import traceback
+        traceback.print_exc()
+        return play_random_turn(game, player_id)
+
+
 def play_opponent_turn(game, player_id, ai_difficulty='random'):
     if ai_difficulty == 'random':
         return play_random_turn(game, player_id)
@@ -375,6 +522,11 @@ class CatantronApp:
         # Dev card popup
         self.dev_card_popup = None  # {"card_name": str, "description": str, "show_until": float}
 
+        # Neural network AI
+        self.neural_network = None
+        self.neural_device = None
+        self.neural_env = None
+
         # Players: which indices are human
         self.human_players = set()
 
@@ -440,7 +592,56 @@ class CatantronApp:
         self.game = GameSystem(game_board, players)
         self.game.robber = robber
 
+        # Load neural network for VS_AI mode
+        self.neural_network = None
+        self.neural_device = None
+        self.neural_env = None
+        if mode == GameMode.VS_AI and HAS_TORCH:
+            self._load_neural_ai()
+
         self.state = GameState.PLAYING
+
+    def _load_neural_ai(self):
+        """Load neural network model for VS_AI mode."""
+        import os
+        model_path = "models/v3_selfplay_game61024.pt"
+        if not os.path.exists(model_path):
+            # Try to find any .pt model in models/
+            candidates = sorted(
+                [f for f in os.listdir("models") if f.endswith(".pt")],
+                key=lambda f: os.path.getmtime(os.path.join("models", f)),
+                reverse=True
+            )
+            if candidates:
+                model_path = os.path.join("models", candidates[0])
+                self.add_message(f"Model not found, using {candidates[0]}", (255, 200, 100))
+            else:
+                self.add_message("No model found — AI will play randomly", (255, 100, 100))
+                return
+
+        try:
+            if torch.cuda.is_available():
+                device = 'cuda'
+            elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+                device = 'mps'
+            else:
+                device = 'cpu'
+
+            self.neural_device = device
+            self.neural_network = NetworkWrapper(model_path=model_path, device=device)
+
+            # Create CatanEnv for observation building — AI is player 1
+            self.neural_env = CatanEnv(player_id=1, num_players=2)
+            # Swap game reference to point at our game
+            self.neural_env.game_env.game = self.game
+
+            self.add_message(f"Neural AI loaded ({device})", (100, 220, 100))
+        except Exception as e:
+            print(f"Failed to load neural AI: {e}")
+            import traceback
+            traceback.print_exc()
+            self.add_message("AI model failed to load — using random", (255, 100, 100))
+            self.neural_network = None
 
     def is_human_turn(self):
         if not self.game:
@@ -675,8 +876,20 @@ class CatantronApp:
                     game.players_must_discard = []
                     game.players_discarded = set()
         else:
-            # VS_AI or other: use random for now (Phase C will add neural net)
-            play_random_turn(game, current_idx)
+            # VS_AI mode: use neural network if available, else random
+            if self.neural_network and self.neural_env:
+                play_neural_turn(game, current_idx, self.neural_network,
+                                 self.neural_device, self.neural_env)
+            else:
+                play_random_turn(game, current_idx)
+
+            # Handle stuck discards for AI
+            if game.waiting_for_discards:
+                _auto_discard_for_game(game, current_idx)
+                if game.waiting_for_discards:
+                    game.waiting_for_discards = False
+                    game.players_must_discard = []
+                    game.players_discarded = set()
 
     def draw_playing(self):
         """Draw the game screen."""
