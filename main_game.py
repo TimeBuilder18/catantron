@@ -17,15 +17,17 @@ from tile import Tile
 from game_system import (Player, Robber, GameBoard, GameSystem, ResourceType,
                          Settlement, City, Road, DevelopmentCardType, GameConstants,
                          PortType)
+import gui_components
 from gui_components import (
-    SCREEN_W, SCREEN_H, PANEL_X, PANEL_W, BG_COLOR, PANEL_BG, PANEL_BORDER,
+    BG_COLOR, PANEL_BG, PANEL_BORDER,
     TEXT_COLOR, TEXT_DIM, GOLD, WHITE, BLACK,
     RESOURCE_COLORS, RESOURCE_DISPLAY_NAMES, RESOURCE_TYPE_NAMES,
     RESOURCE_CARD_COLORS, BUILD_COSTS, DICE_PIPS,
     get_font, draw_game_board, draw_buildable_highlights,
     draw_resource_panel, draw_player_info_box, draw_vp_tracker,
     draw_button, draw_game_state_panel, draw_game_log,
-    draw_title_screen, draw_difficulty_screen,
+    draw_title_screen, draw_difficulty_screen, set_screen_size,
+    draw_robber_overlay, draw_dev_card_popup,
 )
 
 
@@ -186,6 +188,29 @@ def _find_best_robber_tile(game, my_player_id):
     return best_tile
 
 
+def _auto_discard_only(game):
+    """Handle discards only (no robber placement). Used when human will place robber."""
+    if not game.waiting_for_discards:
+        return
+    for player in game.players_must_discard:
+        if player in game.players_discarded:
+            continue
+        total = sum(player.resources.values())
+        num_to_discard = total // 2
+        all_cards = []
+        for res_type, count in player.resources.items():
+            all_cards.extend([res_type] * count)
+        if all_cards and num_to_discard > 0:
+            cards_to_discard = random.sample(all_cards, min(num_to_discard, len(all_cards)))
+            discard_dict = {}
+            for res_type in set(cards_to_discard):
+                discard_dict[res_type] = cards_to_discard.count(res_type)
+            game.discard_cards(player, discard_dict)
+    game.waiting_for_discards = False
+    game.players_must_discard = []
+    game.players_discarded = set()
+
+
 def _auto_discard_for_game(game, current_player_id=0):
     if not game.waiting_for_discards:
         return
@@ -301,13 +326,23 @@ class CatantronApp:
         pygame.init()
         pygame.font.init()
 
-        self.screen = pygame.display.set_mode((SCREEN_W, SCREEN_H))
+        # Detect monitor size and scale window to fit
+        info = pygame.display.Info()
+        max_w = min(info.current_w - 60, 1600)
+        max_h = min(info.current_h - 100, 1000)
+        # Use uniform scale to keep aspect ratio
+        self.scale = min(max_w / 1600, max_h / 1000)
+        self.screen_w = int(1600 * self.scale)
+        self.screen_h = int(1000 * self.scale)
+        set_screen_size(self.screen_w, self.screen_h)
+
+        self.screen = pygame.display.set_mode((self.screen_w, self.screen_h))
         pygame.display.set_caption("Catantron")
         self.clock = pygame.time.Clock()
 
-        self.font = get_font(22, bold=True)
-        self.small_font = get_font(16)
-        self.big_font = get_font(36, bold=True)
+        self.font = get_font(max(16, int(22 * self.scale)), bold=True)
+        self.small_font = get_font(max(12, int(16 * self.scale)))
+        self.big_font = get_font(max(24, int(36 * self.scale)), bold=True)
 
         self.state = GameState.TITLE
         self.mode = None
@@ -320,6 +355,12 @@ class CatantronApp:
         self.offset = (0, 0)
         self.build_mode = "SETTLEMENT"
         self.messages = []  # (text, color) pairs
+
+        # Robber mode
+        self.robber_mode = False
+
+        # Dev card popup
+        self.dev_card_popup = None  # {"card_name": str, "description": str, "show_until": float}
 
         # Players: which indices are human
         self.human_players = set()
@@ -336,7 +377,7 @@ class CatantronApp:
         self.messages = []
         self.build_mode = "SETTLEMENT"
 
-        tile_size = 50
+        tile_size = max(30, int(50 * self.scale))
         tiles = create_hexagonal_board(tile_size, radius=2)
         for t in tiles:
             t.find_neighbors(tiles)
@@ -348,7 +389,10 @@ class CatantronApp:
         self.game_board = game_board
 
         # Center board in left portion of screen
-        self.offset = compute_center_offset(tiles, 460, SCREEN_H // 2)
+        self.offset = compute_center_offset(tiles, int(460 * self.scale),
+                                            self.screen_h // 2)
+        self.robber_mode = False
+        self.dev_card_popup = None
 
         if mode == GameMode.PVP:
             p1 = Player("Player 1", (220, 60, 60))    # Red
@@ -385,7 +429,7 @@ class CatantronApp:
 
     def handle_human_click(self, mouse_pos):
         """Handle mouse click on the game board for the current human player."""
-        if not self.game or mouse_pos[0] >= PANEL_X - 20:
+        if not self.game or mouse_pos[0] >= gui_components.PANEL_X - 20:
             return
 
         game = self.game
@@ -425,6 +469,69 @@ class CatantronApp:
                         game.update_longest_road()
                         self.add_message(f"{player.name} built a road", player.color)
 
+    def _handle_seven_rolled(self, game, player):
+        """Handle rolling a 7: discard, then enter robber placement mode."""
+        self.add_message("Seven! Move the robber!", (255, 100, 100))
+        # Auto-discard for all players with 8+ cards
+        if game.waiting_for_discards:
+            _auto_discard_only(game)
+        # Enter robber mode for human player
+        self.robber_mode = True
+
+    def _handle_robber_click(self, mouse_pos):
+        """Handle a click during robber placement mode."""
+        game = self.game
+        player = game.get_current_player()
+        tile = find_closest_tile(game.game_board, mouse_pos, self.offset)
+        if not tile:
+            return
+        # Can't place on current robber tile or desert
+        if tile == game.robber.position:
+            self.add_message("Robber is already there!", (255, 100, 100))
+            return
+        if tile.resource == "desert":
+            self.add_message("Can't place robber on desert!", (255, 100, 100))
+            return
+
+        # Move robber
+        game.move_robber_to_tile(tile)
+        self.add_message(f"Robber moved to {tile.resource} ({tile.number})", player.color)
+
+        # Steal from opponent on that tile
+        current_idx = game.players.index(player)
+        adjacent_players = game.get_players_on_tile(tile)
+        opponents = [p for p in adjacent_players if p != player]
+        stole = False
+        for opp in opponents:
+            if sum(opp.resources.values()) > 0:
+                success, msg = game.steal_random_resource(player, opp)
+                if success:
+                    self.add_message(f"Stole a resource from {opp.name}!", player.color)
+                    stole = True
+                break
+        if opponents and not stole:
+            self.add_message("No resources to steal", TEXT_DIM)
+
+        self.robber_mode = False
+
+    def _show_dev_card_popup(self, buy_message):
+        """Show a popup for the purchased dev card."""
+        # Parse card name from message like "Bought Knight"
+        card_name = buy_message.replace("Bought ", "").strip() if buy_message.startswith("Bought") else buy_message
+        DEV_CARD_INFO = {
+            "Knight": "Move the robber and steal a resource",
+            "Victory Point": "+1 hidden victory point",
+            "Road Building": "Build 2 roads for free",
+            "Year Of Plenty": "Take any 2 resources from the bank",
+            "Monopoly": "Take all of one resource type from opponents",
+        }
+        desc = DEV_CARD_INFO.get(card_name, "")
+        self.dev_card_popup = {
+            "card_name": card_name,
+            "description": desc,
+            "show_until": time.time() + 2.5,
+        }
+
     def handle_ai_turn(self):
         """Execute one AI action."""
         game = self.game
@@ -462,9 +569,9 @@ class CatantronApp:
                                     self.game, self.offset, self.build_mode)
 
         # --- Right Panel ---
-        x = PANEL_X
+        x = gui_components.PANEL_X
         y = 15
-        pw = PANEL_W
+        pw = gui_components.PANEL_W
 
         # Player info boxes
         for i, player in enumerate(self.game.players):
@@ -502,13 +609,14 @@ class CatantronApp:
         can_build = game.can_trade_or_build()
         player = game.get_current_player()
 
+        human_can_build = can_build and self.is_human_turn() and not self.robber_mode
         buttons_data = [
-            ("Roll Dice", "D", game.can_roll_dice() and self.is_human_turn(), None, "roll"),
-            ("End Turn", "T", game.can_end_turn() and self.is_human_turn(), None, "end_turn"),
-            ("Settlement", "1", can_build and self.is_human_turn(), BUILD_COSTS["settlement"], "sett"),
-            ("City", "2", can_build and self.is_human_turn(), BUILD_COSTS["city"], "city"),
-            ("Road", "3", can_build and self.is_human_turn(), BUILD_COSTS["road"], "road"),
-            ("Dev Card", "X", can_build and self.is_human_turn(), BUILD_COSTS["dev_card"], "dev"),
+            ("Roll Dice", "D", game.can_roll_dice() and self.is_human_turn() and not self.robber_mode, None, "roll"),
+            ("End Turn", "T", game.can_end_turn() and self.is_human_turn() and not self.robber_mode, None, "end_turn"),
+            ("Settlement", "1", human_can_build and player.can_afford(BUILD_COSTS["settlement"]), BUILD_COSTS["settlement"], "sett"),
+            ("City", "2", human_can_build and player.can_afford(BUILD_COSTS["city"]), BUILD_COSTS["city"], "city"),
+            ("Road", "3", human_can_build and player.can_afford(BUILD_COSTS["road"]), BUILD_COSTS["road"], "road"),
+            ("Dev Card", "X", human_can_build and player.can_afford(BUILD_COSTS["dev_card"]), BUILD_COSTS["dev_card"], "dev"),
         ]
 
         self.action_buttons = []
@@ -540,17 +648,31 @@ class CatantronApp:
             y += 30
 
         # Game log
-        log_h = max(80, SCREEN_H - y - 10)
+        log_h = max(80, gui_components.SCREEN_H - y - 10)
         draw_game_log(self.screen, self.messages, x, y, pw, log_h, self.small_font)
+
+        # Robber overlay (drawn on top of everything)
+        if self.robber_mode:
+            draw_robber_overlay(self.screen, self.game.game_board, self.offset,
+                               self.game.robber.position)
+
+        # Dev card popup (drawn on top of everything)
+        if self.dev_card_popup:
+            if time.time() < self.dev_card_popup["show_until"]:
+                draw_dev_card_popup(self.screen,
+                                   self.dev_card_popup["card_name"],
+                                   self.dev_card_popup["description"])
+            else:
+                self.dev_card_popup = None
 
     def draw_victory(self, winner):
         """Draw victory overlay."""
         # Semi-transparent overlay
-        overlay = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
+        overlay = pygame.Surface((self.screen_w, self.screen_h), pygame.SRCALPHA)
         overlay.fill((0, 0, 0, 180))
         self.screen.blit(overlay, (0, 0))
 
-        cx = SCREEN_W // 2
+        cx = self.screen_w // 2
 
         # Victory text
         title_font = get_font(64, bold=True)
@@ -626,7 +748,10 @@ class CatantronApp:
                         game = self.game
                         player = game.get_current_player()
 
-                        if event.key == pygame.K_d:
+                        # Block all keys during robber placement
+                        if self.robber_mode:
+                            pass
+                        elif event.key == pygame.K_d:
                             if game.can_roll_dice():
                                 result = game.roll_dice()
                                 if result:
@@ -634,17 +759,13 @@ class CatantronApp:
                                         f"{player.name} rolled {result[2]} ({result[0]}+{result[1]})",
                                         GOLD)
                                     if result[2] == 7:
-                                        self.add_message("Seven! Robber activated!", (255, 100, 100))
-                                        # Auto-handle discards and robber for now (Phase B: manual)
-                                        if game.waiting_for_discards:
-                                            _auto_discard_for_game(game,
-                                                game.players.index(player))
+                                        self._handle_seven_rolled(game, player)
 
                         elif event.key == pygame.K_t:
                             if game.can_end_turn():
                                 success, msg = game.end_turn()
                                 if success:
-                                    self.add_message(f"Turn ended", TEXT_DIM)
+                                    self.add_message("Turn ended", TEXT_DIM)
                                     winner = game.check_victory_conditions()
                                     if winner:
                                         self.state = GameState.VICTORY
@@ -653,15 +774,19 @@ class CatantronApp:
                                             winner.color)
 
                         elif event.key == pygame.K_1:
-                            self.build_mode = "SETTLEMENT"
+                            if game.can_trade_or_build() and player.can_afford(BUILD_COSTS["settlement"]):
+                                self.build_mode = "SETTLEMENT"
                         elif event.key == pygame.K_2:
-                            self.build_mode = "CITY"
+                            if game.can_trade_or_build() and player.can_afford(BUILD_COSTS["city"]):
+                                self.build_mode = "CITY"
                         elif event.key == pygame.K_3:
-                            self.build_mode = "ROAD"
+                            if game.can_trade_or_build() and player.can_afford(BUILD_COSTS["road"]):
+                                self.build_mode = "ROAD"
                         elif event.key == pygame.K_x:
-                            if game.can_trade_or_build():
+                            if game.can_trade_or_build() and player.can_afford(BUILD_COSTS["dev_card"]):
                                 success, msg = player.try_buy_development_card(game.dev_deck)
                                 if success:
+                                    self._show_dev_card_popup(msg)
                                     self.add_message(f"{player.name} bought a dev card", player.color)
 
                 elif event.type == pygame.MOUSEBUTTONDOWN:
@@ -688,47 +813,57 @@ class CatantronApp:
                                     self.setup_game(GameMode.VS_BOT, difficulty=diff)
 
                     elif self.state == GameState.PLAYING and self.is_human_turn():
-                        # Check action button clicks
-                        if hasattr(self, 'action_buttons'):
-                            game = self.game
-                            player = game.get_current_player()
-                            for rect, action, enabled in self.action_buttons:
-                                if enabled and rect.collidepoint(event.pos):
-                                    if action == "roll":
-                                        if game.can_roll_dice():
-                                            result = game.roll_dice()
-                                            if result:
-                                                self.add_message(
-                                                    f"{player.name} rolled {result[2]} ({result[0]}+{result[1]})",
-                                                    GOLD)
-                                                if result[2] == 7:
-                                                    self.add_message("Seven! Robber activated!", (255, 100, 100))
-                                                    if game.waiting_for_discards:
-                                                        _auto_discard_for_game(game,
-                                                            game.players.index(player))
-                                    elif action == "end_turn":
-                                        if game.can_end_turn():
-                                            success, msg = game.end_turn()
-                                            if success:
-                                                self.add_message("Turn ended", TEXT_DIM)
-                                                winner = game.check_victory_conditions()
-                                                if winner:
-                                                    self.state = GameState.VICTORY
-                                    elif action == "sett":
-                                        self.build_mode = "SETTLEMENT"
-                                    elif action == "city":
-                                        self.build_mode = "CITY"
-                                    elif action == "road":
-                                        self.build_mode = "ROAD"
-                                    elif action == "dev":
-                                        if game.can_trade_or_build():
-                                            success, msg = player.try_buy_development_card(game.dev_deck)
-                                            if success:
-                                                self.add_message(f"{player.name} bought a dev card", player.color)
-                                    break  # Only handle one button click
+                        game = self.game
+                        player = game.get_current_player()
 
-                        # Board clicks
-                        self.handle_human_click(event.pos)
+                        # Robber mode: only accept board tile clicks
+                        if self.robber_mode:
+                            self._handle_robber_click(event.pos)
+                        else:
+                            # Check action button clicks
+                            btn_handled = False
+                            if hasattr(self, 'action_buttons'):
+                                for rect, action, enabled in self.action_buttons:
+                                    if enabled and rect.collidepoint(event.pos):
+                                        btn_handled = True
+                                        if action == "roll":
+                                            if game.can_roll_dice():
+                                                result = game.roll_dice()
+                                                if result:
+                                                    self.add_message(
+                                                        f"{player.name} rolled {result[2]} ({result[0]}+{result[1]})",
+                                                        GOLD)
+                                                    if result[2] == 7:
+                                                        self._handle_seven_rolled(game, player)
+                                        elif action == "end_turn":
+                                            if game.can_end_turn():
+                                                success, msg = game.end_turn()
+                                                if success:
+                                                    self.add_message("Turn ended", TEXT_DIM)
+                                                    winner = game.check_victory_conditions()
+                                                    if winner:
+                                                        self.state = GameState.VICTORY
+                                        elif action == "sett":
+                                            self.build_mode = "SETTLEMENT"
+                                        elif action == "city":
+                                            self.build_mode = "CITY"
+                                        elif action == "road":
+                                            self.build_mode = "ROAD"
+                                        elif action == "dev":
+                                            if game.can_trade_or_build():
+                                                success, msg = player.try_buy_development_card(game.dev_deck)
+                                                if success:
+                                                    self._show_dev_card_popup(msg)
+                                                    self.add_message(f"{player.name} bought a dev card", player.color)
+                                        break  # Only handle one button click
+
+                            # Board clicks (if no button was clicked)
+                            if not btn_handled:
+                                self.handle_human_click(event.pos)
+
+                        # Dismiss dev card popup on click
+                        if self.dev_card_popup:
+                            self.dev_card_popup = None
 
                     elif self.state == GameState.VICTORY:
                         if hasattr(self, 'victory_buttons'):

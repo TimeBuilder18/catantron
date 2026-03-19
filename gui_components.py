@@ -8,10 +8,21 @@ import math
 from game_system import (ResourceType, PortType, Settlement, City,
                          DevelopmentCardType, GameConstants)
 
-# --- Screen Layout ---
+# --- Screen Layout (defaults, updated by set_screen_size) ---
 SCREEN_W, SCREEN_H = 1600, 1000
 PANEL_X = 1020  # Right panel starts here
 PANEL_W = 560   # Panel width
+SCALE = 1.0     # Scale factor relative to 1600x1000 reference
+
+
+def set_screen_size(w, h):
+    """Update layout globals to match actual window size."""
+    global SCREEN_W, SCREEN_H, PANEL_X, PANEL_W, SCALE
+    SCREEN_W = w
+    SCREEN_H = h
+    SCALE = w / 1600
+    PANEL_X = int(w * 1020 / 1600)
+    PANEL_W = w - PANEL_X - int(20 * SCALE)
 
 # --- Color Palette ---
 BG_COLOR = (25, 20, 18)
@@ -701,3 +712,71 @@ def draw_difficulty_screen(screen, buttons_hovered):
     button_rects.append((back_rect, "back"))
 
     return button_rects
+
+
+# ===========================================================================
+# Robber Placement Overlay
+# ===========================================================================
+
+def draw_robber_overlay(screen, game_board, offset, robber_tile):
+    """Draw highlights on valid tiles during robber placement mode."""
+    for tile in game_board.tiles:
+        if tile == robber_tile or tile.resource == "desert":
+            continue
+        tx = tile.x + offset[0]
+        ty = tile.y + offset[1]
+        highlight = pygame.Surface((60, 60), pygame.SRCALPHA)
+        pygame.draw.circle(highlight, (255, 220, 50, 50), (30, 30), 30)
+        screen.blit(highlight, (tx - 30, ty - 30))
+
+    # Banner at top of board area
+    banner_font = get_font(28, bold=True)
+    banner_surf = banner_font.render("MOVE THE ROBBER", True, (255, 80, 80))
+    banner_rect = banner_surf.get_rect(center=(PANEL_X // 2, 25))
+    bg_rect = banner_rect.inflate(20, 8)
+    pygame.draw.rect(screen, (40, 20, 20), bg_rect, border_radius=6)
+    pygame.draw.rect(screen, (255, 80, 80), bg_rect, 2, border_radius=6)
+    screen.blit(banner_surf, banner_rect)
+
+
+# ===========================================================================
+# Dev Card Popup
+# ===========================================================================
+
+def draw_dev_card_popup(screen, card_name, description):
+    """Draw a centered popup showing the purchased dev card."""
+    cx = PANEL_X // 2
+    cy = SCREEN_H // 2
+
+    card_w, card_h = 280, 170
+    card_x = cx - card_w // 2
+    card_y = cy - card_h // 2
+
+    # Dark overlay behind popup
+    overlay = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
+    overlay.fill((0, 0, 0, 100))
+    screen.blit(overlay, (0, 0))
+
+    # Card background
+    pygame.draw.rect(screen, (45, 38, 32), (card_x, card_y, card_w, card_h), border_radius=12)
+    pygame.draw.rect(screen, GOLD, (card_x, card_y, card_w, card_h), 2, border_radius=12)
+
+    # "You got:" header
+    header_font = get_font(18)
+    header_surf = header_font.render("You got:", True, TEXT_DIM)
+    screen.blit(header_surf, header_surf.get_rect(center=(cx, card_y + 30)))
+
+    # Card name
+    name_font = get_font(30, bold=True)
+    name_surf = name_font.render(card_name, True, GOLD)
+    screen.blit(name_surf, name_surf.get_rect(center=(cx, card_y + 75)))
+
+    # Description
+    desc_font = get_font(16)
+    desc_surf = desc_font.render(description, True, TEXT_COLOR)
+    screen.blit(desc_surf, desc_surf.get_rect(center=(cx, card_y + 115)))
+
+    # Dismiss hint
+    hint_font = get_font(13)
+    hint_surf = hint_font.render("Click to dismiss", True, TEXT_DIM)
+    screen.blit(hint_surf, hint_surf.get_rect(center=(cx, card_y + card_h - 18)))
