@@ -826,3 +826,105 @@ def draw_dev_cards_panel(screen, player, x, y, width, font):
         bx += tw + 4
 
     return height
+
+
+# ===========================================================================
+# Discard Overlay
+# ===========================================================================
+
+def draw_discard_overlay(screen, player, selection, required):
+    """Draw the discard card selection overlay. Returns list of (rect, action) for click handling.
+
+    Args:
+        player: Player who must discard
+        selection: dict {ResourceType: count_to_discard}
+        required: total cards that must be discarded
+    Returns:
+        list of (rect, action_tuple) where action_tuple is ("+"/"-", ResourceType) or ("confirm",)
+    """
+    # Dark overlay
+    overlay = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
+    overlay.fill((0, 0, 0, 160))
+    screen.blit(overlay, (0, 0))
+
+    # Panel dimensions
+    pw, ph = 420, 340
+    px = PANEL_X // 2 - pw // 2
+    py = SCREEN_H // 2 - ph // 2
+
+    # Panel background
+    pygame.draw.rect(screen, (40, 35, 30), (px, py, pw, ph), border_radius=12)
+    pygame.draw.rect(screen, (255, 100, 100), (px, py, pw, ph), 2, border_radius=12)
+
+    # Title
+    title_font = get_font(24, bold=True)
+    title = title_font.render("DISCARD CARDS", True, (255, 100, 100))
+    screen.blit(title, title.get_rect(center=(px + pw // 2, py + 28)))
+
+    total_selected = sum(selection.values())
+    sub_font = get_font(16)
+    sub = sub_font.render(f"Select {required} cards to discard  ({total_selected}/{required})",
+                          True, TEXT_COLOR)
+    screen.blit(sub, sub.get_rect(center=(px + pw // 2, py + 55)))
+
+    # Resource rows
+    clickables = []
+    row_font = get_font(18, bold=True)
+    btn_font = get_font(18, bold=True)
+    resource_order = [ResourceType.WOOD, ResourceType.BRICK, ResourceType.WHEAT,
+                      ResourceType.ORE, ResourceType.SHEEP]
+
+    row_y = py + 80
+    for res_type in resource_order:
+        have = player.resources.get(res_type, 0)
+        sel = selection.get(res_type, 0)
+        color = RESOURCE_CARD_COLORS.get(res_type, TEXT_COLOR)
+
+        # Resource name + count
+        name = RESOURCE_TYPE_NAMES.get(res_type, str(res_type.value))
+        name_surf = row_font.render(f"{name}: {have}", True, color)
+        screen.blit(name_surf, (px + 20, row_y + 4))
+
+        # Minus button
+        minus_rect = pygame.Rect(px + 220, row_y, 36, 32)
+        minus_enabled = sel > 0
+        minus_color = (180, 60, 60) if minus_enabled else (80, 60, 60)
+        pygame.draw.rect(screen, minus_color, minus_rect, border_radius=4)
+        pygame.draw.rect(screen, (120, 90, 80), minus_rect, 1, border_radius=4)
+        m_surf = btn_font.render("-", True, WHITE if minus_enabled else TEXT_DIM)
+        screen.blit(m_surf, m_surf.get_rect(center=minus_rect.center))
+        clickables.append((minus_rect, ("-", res_type)))
+
+        # Selected count
+        sel_surf = row_font.render(str(sel), True, GOLD if sel > 0 else TEXT_DIM)
+        screen.blit(sel_surf, sel_surf.get_rect(center=(px + 280, row_y + 16)))
+
+        # Plus button
+        plus_rect = pygame.Rect(px + 305, row_y, 36, 32)
+        plus_enabled = sel < have and total_selected < required
+        plus_color = (60, 140, 60) if plus_enabled else (60, 80, 60)
+        pygame.draw.rect(screen, plus_color, plus_rect, border_radius=4)
+        pygame.draw.rect(screen, (90, 120, 80), plus_rect, 1, border_radius=4)
+        p_surf = btn_font.render("+", True, WHITE if plus_enabled else TEXT_DIM)
+        screen.blit(p_surf, p_surf.get_rect(center=plus_rect.center))
+        clickables.append((plus_rect, ("+", res_type)))
+
+        row_y += 40
+
+    # Confirm button
+    confirm_enabled = total_selected == required
+    confirm_rect = pygame.Rect(px + pw // 2 - 80, py + ph - 55, 160, 40)
+    if confirm_enabled:
+        pygame.draw.rect(screen, (60, 150, 60), confirm_rect, border_radius=8)
+        pygame.draw.rect(screen, (100, 200, 100), confirm_rect, 2, border_radius=8)
+        c_color = WHITE
+    else:
+        pygame.draw.rect(screen, (50, 50, 45), confirm_rect, border_radius=8)
+        pygame.draw.rect(screen, (80, 75, 65), confirm_rect, 1, border_radius=8)
+        c_color = TEXT_DIM
+    c_font = get_font(18, bold=True)
+    c_surf = c_font.render("Confirm", True, c_color)
+    screen.blit(c_surf, c_surf.get_rect(center=confirm_rect.center))
+    clickables.append((confirm_rect, ("confirm",)))
+
+    return clickables
