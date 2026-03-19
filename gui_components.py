@@ -321,26 +321,28 @@ def draw_game_board(screen, game_board, offset):
 def draw_buildable_highlights(screen, game_board, game, offset, build_mode):
     """Highlight buildable positions for the current player."""
     highlight_color = (80, 220, 80)
+    pulse_color = (180, 255, 180)
 
     if build_mode == "SETTLEMENT":
+        verts = []
         if game.is_initial_placement_phase() and not game.waiting_for_road:
-            # Initial placement: any valid vertex
-            for v in game_board.vertices:
-                if v.structure is None and not any(adj.structure for adj in v.adjacent_vertices):
-                    x = v.x + offset[0]
-                    y = v.y + offset[1]
-                    pygame.draw.circle(screen, highlight_color, (int(x), int(y)), 8, 2)
+            verts = [v for v in game_board.vertices
+                     if v.structure is None and not any(adj.structure for adj in v.adjacent_vertices)]
         elif game.can_trade_or_build():
-            for v in game.get_buildable_vertices_for_settlements():
-                x = v.x + offset[0]
-                y = v.y + offset[1]
-                pygame.draw.circle(screen, highlight_color, (int(x), int(y)), 8, 2)
+            verts = game.get_buildable_vertices_for_settlements()
+        for v in verts:
+            x = int(v.x + offset[0])
+            y = int(v.y + offset[1])
+            # Filled green circle + white outline
+            pygame.draw.circle(screen, highlight_color, (x, y), 10)
+            pygame.draw.circle(screen, pulse_color, (x, y), 10, 2)
 
     elif build_mode == "CITY" and game.can_trade_or_build():
         for v in game.get_buildable_vertices_for_cities():
-            x = v.x + offset[0]
-            y = v.y + offset[1]
-            pygame.draw.circle(screen, (100, 180, 255), (int(x), int(y)), 10, 2)
+            x = int(v.x + offset[0])
+            y = int(v.y + offset[1])
+            pygame.draw.circle(screen, (100, 180, 255), (x, y), 11)
+            pygame.draw.circle(screen, (180, 220, 255), (x, y), 11, 2)
 
     elif build_mode == "ROAD":
         if game.is_initial_placement_phase() and game.waiting_for_road:
@@ -926,5 +928,136 @@ def draw_discard_overlay(screen, player, selection, required):
     c_surf = c_font.render("Confirm", True, c_color)
     screen.blit(c_surf, c_surf.get_rect(center=confirm_rect.center))
     clickables.append((confirm_rect, ("confirm",)))
+
+    return clickables
+
+
+# ===========================================================================
+# Bank Trade Overlay
+# ===========================================================================
+
+def draw_trade_overlay(screen, player, game_board, give_res, get_res):
+    """Draw bank trade overlay. Returns list of (rect, action) for click handling.
+
+    Args:
+        player: Player trading
+        game_board: GameBoard (for port ratio lookup)
+        give_res: ResourceType selected to give (or None)
+        get_res: ResourceType selected to receive (or None)
+    Returns:
+        list of (rect, action) where action is ("give", ResourceType), ("get", ResourceType),
+        ("trade",), or ("cancel",)
+    """
+    overlay = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
+    overlay.fill((0, 0, 0, 160))
+    screen.blit(overlay, (0, 0))
+
+    pw, ph = 440, 380
+    px = PANEL_X // 2 - pw // 2
+    py = SCREEN_H // 2 - ph // 2
+
+    pygame.draw.rect(screen, (40, 35, 30), (px, py, pw, ph), border_radius=12)
+    pygame.draw.rect(screen, GOLD, (px, py, pw, ph), 2, border_radius=12)
+
+    title_font = get_font(24, bold=True)
+    title = title_font.render("BANK TRADE", True, GOLD)
+    screen.blit(title, title.get_rect(center=(px + pw // 2, py + 28)))
+
+    clickables = []
+    resource_order = [ResourceType.WOOD, ResourceType.BRICK, ResourceType.WHEAT,
+                      ResourceType.ORE, ResourceType.SHEEP]
+    row_font = get_font(16, bold=True)
+    small_font = get_font(13)
+
+    # "Give" section (left column)
+    give_x = px + 20
+    give_label = get_font(16).render("GIVE:", True, (255, 120, 120))
+    screen.blit(give_label, (give_x, py + 58))
+
+    # "Get" section (right column)
+    get_x = px + pw // 2 + 20
+    get_label = get_font(16).render("RECEIVE:", True, (120, 220, 120))
+    screen.blit(get_label, (get_x, py + 58))
+
+    row_y = py + 82
+    for res_type in resource_order:
+        color = RESOURCE_CARD_COLORS.get(res_type, TEXT_COLOR)
+        name = RESOURCE_TYPE_NAMES.get(res_type, str(res_type.value))
+        have = player.resources.get(res_type, 0)
+        ratio = game_board.get_best_trade_ratio(player, res_type)
+
+        # Give button (left)
+        give_rect = pygame.Rect(give_x, row_y, pw // 2 - 30, 30)
+        is_give_sel = (give_res == res_type)
+        can_give = have >= ratio
+        if is_give_sel:
+            pygame.draw.rect(screen, (100, 50, 50), give_rect, border_radius=5)
+            pygame.draw.rect(screen, (255, 120, 120), give_rect, 2, border_radius=5)
+        elif can_give:
+            pygame.draw.rect(screen, (55, 48, 42), give_rect, border_radius=5)
+            pygame.draw.rect(screen, (90, 80, 70), give_rect, 1, border_radius=5)
+        else:
+            pygame.draw.rect(screen, (40, 38, 35), give_rect, border_radius=5)
+        give_text = f"{name} ({have}) — {ratio}:1"
+        text_col = color if can_give else (80, 75, 70)
+        g_surf = small_font.render(give_text, True, text_col)
+        screen.blit(g_surf, (give_x + 8, row_y + 7))
+        clickables.append((give_rect, ("give", res_type)))
+
+        # Get button (right)
+        get_rect = pygame.Rect(get_x, row_y, pw // 2 - 30, 30)
+        is_get_sel = (get_res == res_type)
+        can_get = (give_res != res_type) if give_res else True
+        if is_get_sel:
+            pygame.draw.rect(screen, (50, 100, 50), get_rect, border_radius=5)
+            pygame.draw.rect(screen, (120, 255, 120), get_rect, 2, border_radius=5)
+        elif can_get:
+            pygame.draw.rect(screen, (55, 48, 42), get_rect, border_radius=5)
+            pygame.draw.rect(screen, (90, 80, 70), get_rect, 1, border_radius=5)
+        else:
+            pygame.draw.rect(screen, (40, 38, 35), get_rect, border_radius=5)
+        r_surf = small_font.render(name, True, color if can_get else (80, 75, 70))
+        screen.blit(r_surf, (get_x + 8, row_y + 7))
+        clickables.append((get_rect, ("get", res_type)))
+
+        row_y += 36
+
+    # Trade summary
+    summary_y = row_y + 8
+    if give_res and get_res:
+        ratio = game_board.get_best_trade_ratio(player, give_res)
+        give_name = RESOURCE_TYPE_NAMES.get(give_res, "?")
+        get_name = RESOURCE_TYPE_NAMES.get(get_res, "?")
+        summary = row_font.render(f"{ratio} {give_name} → 1 {get_name}", True, GOLD)
+        screen.blit(summary, summary.get_rect(center=(px + pw // 2, summary_y)))
+
+    # Trade button
+    btn_y = summary_y + 28
+    can_trade = False
+    if give_res and get_res and give_res != get_res:
+        ratio = game_board.get_best_trade_ratio(player, give_res)
+        can_trade = player.resources.get(give_res, 0) >= ratio
+
+    trade_rect = pygame.Rect(px + 30, btn_y, pw // 2 - 40, 40)
+    if can_trade:
+        pygame.draw.rect(screen, (60, 150, 60), trade_rect, border_radius=8)
+        pygame.draw.rect(screen, (100, 200, 100), trade_rect, 2, border_radius=8)
+        t_col = WHITE
+    else:
+        pygame.draw.rect(screen, (50, 50, 45), trade_rect, border_radius=8)
+        pygame.draw.rect(screen, (80, 75, 65), trade_rect, 1, border_radius=8)
+        t_col = TEXT_DIM
+    t_font = get_font(18, bold=True)
+    t_surf = t_font.render("Trade", True, t_col)
+    screen.blit(t_surf, t_surf.get_rect(center=trade_rect.center))
+    clickables.append((trade_rect, ("trade",)))
+
+    # Cancel button
+    cancel_rect = pygame.Rect(px + pw // 2 + 10, btn_y, pw // 2 - 40, 40)
+    pygame.draw.rect(screen, (120, 60, 60), cancel_rect, border_radius=8)
+    pygame.draw.rect(screen, (180, 90, 90), cancel_rect, 1, border_radius=8)
+    c_surf = t_font.render("Cancel", True, WHITE)
+    screen.blit(c_surf, c_surf.get_rect(center=cancel_rect.center))
+    clickables.append((cancel_rect, ("cancel",)))
 
     return clickables

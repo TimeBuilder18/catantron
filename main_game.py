@@ -28,7 +28,7 @@ from gui_components import (
     draw_button, draw_game_state_panel, draw_game_log,
     draw_title_screen, draw_difficulty_screen, set_screen_size,
     draw_robber_overlay, draw_dev_card_popup, draw_dev_cards_panel,
-    draw_discard_overlay,
+    draw_discard_overlay, draw_trade_overlay,
 )
 
 
@@ -366,6 +366,12 @@ class CatantronApp:
         self.discard_required = 0
         self.discard_buttons = []  # clickable rects from draw_discard_overlay
 
+        # Trade mode
+        self.trade_mode = False
+        self.trade_give = None   # ResourceType to give
+        self.trade_get = None    # ResourceType to receive
+        self.trade_buttons = []  # clickable rects from draw_trade_overlay
+
         # Dev card popup
         self.dev_card_popup = None  # {"card_name": str, "description": str, "show_until": float}
 
@@ -403,6 +409,10 @@ class CatantronApp:
         self.discard_selection = {}
         self.discard_required = 0
         self.discard_buttons = []
+        self.trade_mode = False
+        self.trade_give = None
+        self.trade_get = None
+        self.trade_buttons = []
         self.dev_card_popup = None
 
         if mode == GameMode.PVP:
@@ -599,6 +609,33 @@ class CatantronApp:
                         self.add_message("Click a tile to move the robber!", (255, 200, 80))
                 break
 
+    def _handle_trade_click(self, mouse_pos):
+        """Handle a click during trade mode."""
+        for rect, action in self.trade_buttons:
+            if rect.collidepoint(mouse_pos):
+                if action[0] == "give":
+                    self.trade_give = action[1]
+                    # Reset get if same as give
+                    if self.trade_get == self.trade_give:
+                        self.trade_get = None
+                elif action[0] == "get":
+                    res = action[1]
+                    if res != self.trade_give:
+                        self.trade_get = res
+                elif action[0] == "trade":
+                    if self.trade_give and self.trade_get and self.trade_give != self.trade_get:
+                        game = self.game
+                        player = game.get_current_player()
+                        success, msg = game.execute_bank_trade(player, self.trade_give, self.trade_get)
+                        if success:
+                            self.add_message(msg, player.color)
+                            self.trade_mode = False
+                        else:
+                            self.add_message(msg, (255, 100, 100))
+                elif action[0] == "cancel":
+                    self.trade_mode = False
+                break
+
     def _show_dev_card_popup(self, buy_message):
         """Show a popup for the purchased dev card."""
         # Parse card name from message like "Bought Knight"
@@ -687,7 +724,18 @@ class CatantronApp:
         mode_text = f"Build Mode: {self.build_mode.title()}"
         mode_surf = mode_font.render(mode_text, True, GOLD)
         self.screen.blit(mode_surf, (x, y))
-        y += 22
+        y += 18
+        # Show hint if no valid spots for current build mode
+        if self.is_human_turn() and game.can_trade_or_build():
+            if self.build_mode == "SETTLEMENT" and not game.get_buildable_vertices_for_settlements():
+                hint = get_font(12).render("No valid spots — build roads first!", True, (255, 100, 100))
+                self.screen.blit(hint, (x, y))
+                y += 14
+            elif self.build_mode == "CITY" and not game.get_buildable_vertices_for_cities():
+                hint = get_font(12).render("No settlements to upgrade!", True, (255, 100, 100))
+                self.screen.blit(hint, (x, y))
+                y += 14
+        y += 4
 
         # Action buttons (2 columns)
         btn_w = (pw - 10) // 2
@@ -699,18 +747,23 @@ class CatantronApp:
         can_build = game.can_trade_or_build()
         player = game.get_current_player()
 
-        human_can_build = can_build and self.is_human_turn() and not self.robber_mode and not self.discard_mode
+        not_blocked = self.is_human_turn() and not self.robber_mode and not self.discard_mode and not self.trade_mode
+        human_can_build = can_build and not_blocked
         buttons_data = [
-            ("Roll Dice", "D", game.can_roll_dice() and self.is_human_turn() and not self.robber_mode and not self.discard_mode, None, "roll"),
-            ("End Turn", "T", game.can_end_turn() and self.is_human_turn() and not self.robber_mode and not self.discard_mode, None, "end_turn"),
+            ("Roll Dice", "D", game.can_roll_dice() and not_blocked, None, "roll"),
+            ("End Turn", "T", game.can_end_turn() and not_blocked, None, "end_turn"),
             ("Settlement", "1", human_can_build and player.can_afford(BUILD_COSTS["settlement"]), BUILD_COSTS["settlement"], "sett"),
             ("City", "2", human_can_build and player.can_afford(BUILD_COSTS["city"]), BUILD_COSTS["city"], "city"),
             ("Road", "3", human_can_build and player.can_afford(BUILD_COSTS["road"]), BUILD_COSTS["road"], "road"),
             ("Dev Card", "X", human_can_build and player.can_afford(BUILD_COSTS["dev_card"]), BUILD_COSTS["dev_card"], "dev"),
+            ("Trade", "B", can_build and not_blocked, None, "trade"),
+            ("", "", False, None, None),  # empty slot to keep 2-column grid even
         ]
 
         self.action_buttons = []
         for i, (label, shortcut, enabled, cost, action) in enumerate(buttons_data):
+            if not label:
+                continue  # skip empty placeholder
             col = i % 2
             row = i // 2
             bx = x + col * (btn_w + 10)
@@ -722,7 +775,7 @@ class CatantronApp:
                                     shortcut=shortcut, cost=cost)
             self.action_buttons.append((drawn_rect, action, enabled))
 
-        y += 3 * (btn_h + 6) + 10
+        y += 4 * (btn_h + 6) + 10
 
         # Game state panel
         h = draw_game_state_panel(self.screen, game, x, y, pw,
@@ -740,6 +793,13 @@ class CatantronApp:
         # Game log
         log_h = max(80, gui_components.SCREEN_H - y - 10)
         draw_game_log(self.screen, self.messages, x, y, pw, log_h, self.small_font)
+
+        # Trade overlay (drawn on top of everything)
+        if self.trade_mode:
+            current = self.game.get_current_player()
+            self.trade_buttons = draw_trade_overlay(
+                self.screen, current, self.game.game_board,
+                self.trade_give, self.trade_get)
 
         # Discard overlay (drawn on top of everything)
         if self.discard_mode:
@@ -844,8 +904,8 @@ class CatantronApp:
                         game = self.game
                         player = game.get_current_player()
 
-                        # Block all keys during discard or robber placement
-                        if self.discard_mode or self.robber_mode:
+                        # Block all keys during discard, robber, or trade mode
+                        if self.discard_mode or self.robber_mode or self.trade_mode:
                             pass
                         elif event.key == pygame.K_d:
                             if game.can_roll_dice():
@@ -884,6 +944,11 @@ class CatantronApp:
                                 if success:
                                     self._show_dev_card_popup(msg)
                                     self.add_message(f"{player.name} bought a dev card", player.color)
+                        elif event.key == pygame.K_b:
+                            if game.can_trade_or_build():
+                                self.trade_mode = True
+                                self.trade_give = None
+                                self.trade_get = None
 
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     if self.state == GameState.TITLE:
@@ -915,6 +980,9 @@ class CatantronApp:
                         # Discard mode: only accept discard overlay clicks
                         if self.discard_mode:
                             self._handle_discard_click(event.pos)
+                        # Trade mode: only accept trade overlay clicks
+                        elif self.trade_mode:
+                            self._handle_trade_click(event.pos)
                         # Robber mode: only accept board tile clicks
                         elif self.robber_mode:
                             self._handle_robber_click(event.pos)
@@ -954,6 +1022,11 @@ class CatantronApp:
                                                 if success:
                                                     self._show_dev_card_popup(msg)
                                                     self.add_message(f"{player.name} bought a dev card", player.color)
+                                        elif action == "trade":
+                                            if game.can_trade_or_build():
+                                                self.trade_mode = True
+                                                self.trade_give = None
+                                                self.trade_get = None
                                         break  # Only handle one button click
 
                             # Board clicks (if no button was clicked)
