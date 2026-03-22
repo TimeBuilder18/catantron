@@ -3,7 +3,7 @@ Catantron — Polished Catan Game GUI
 Entry point with title screen, game modes, and visual gameplay.
 
 Usage:
-    python main_game.py
+    python main.py
 """
 
 import pygame
