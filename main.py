@@ -669,7 +669,7 @@ class CatantronApp:
                 device = 'cpu'
 
             self.neural_device = device
-            self.neural_network = NetworkWrapper(model_path=model_path, device=device)
+            self.neural_network = NetworkWrapper(model_path=model_path, device=device, hidden_dim=512)
 
             # Create CatanEnv for observation building — AI is player 1
             self.neural_env = CatanEnv(player_id=1, num_players=2)
