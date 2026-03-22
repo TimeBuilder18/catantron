@@ -176,7 +176,7 @@ def find_closest_tile(game_board, mouse_pos, offset, max_distance=40):
 # ===========================================================================
 
 def _find_best_robber_tile(game, my_player_id):
-    from game_system import City as CityClass
+    from game.game_system import City as CityClass
     pip_values = {2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 8: 5, 9: 4, 10: 3, 11: 2, 12: 1}
     my_player = game.players[my_player_id]
     current_robber_tile = game.robber.position
@@ -253,8 +253,10 @@ def _auto_discard_for_game(game, current_player_id=0):
             game.move_robber_to_tile(random.choice(available))
 
 
-def play_random_turn(game, player_id):
+def play_random_turn(game, player_id, log=None):
     player = game.players[player_id]
+    if log is None:
+        log = lambda msg, color=None: None
     if game.is_initial_placement_phase():
         if game.waiting_for_road:
             if game.last_settlement_vertex:
@@ -264,16 +266,20 @@ def play_random_turn(game, player_id):
                          e.vertex2 == game.last_settlement_vertex)]
                 if valid:
                     game.try_place_initial_road(random.choice(valid), player)
+                    log(f"{player.name} placed a road", player.color)
         else:
             valid = [v for v in game.game_board.vertices
                     if v.structure is None and
                     not any(adj.structure for adj in v.adjacent_vertices)]
             if valid:
                 game.try_place_initial_settlement(random.choice(valid), player)
+                log(f"{player.name} placed a settlement", player.color)
         return True
 
     if game.can_roll_dice():
         result = game.roll_dice()
+        if result:
+            log(f"{player.name} rolled {result[2]}", player.color)
         if result and result[2] == 7 and game.waiting_for_discards:
             _auto_discard_for_game(game, player_id)
         return True
@@ -301,13 +307,17 @@ def play_random_turn(game, player_id):
             action_type, locs = random.choice(actions)
             if action_type == 'sett':
                 player.try_build_settlement(random.choice(locs))
+                log(f"{player.name} built a settlement", player.color)
             elif action_type == 'city':
                 player.try_build_city(random.choice(locs))
+                log(f"{player.name} upgraded to a city", player.color)
             elif action_type == 'road':
                 player.try_build_road(random.choice(locs))
                 game.update_longest_road()
+                log(f"{player.name} built a road", player.color)
             elif action_type == 'dev':
                 player.try_buy_development_card(game.dev_deck)
+                log(f"{player.name} bought a dev card", player.color)
             return True
 
     if game.can_end_turn():
@@ -316,21 +326,22 @@ def play_random_turn(game, player_id):
     return False
 
 
-def play_neural_turn(game, player_id, network, device, catan_env):
+def play_neural_turn(game, player_id, network, device, catan_env, log=None):
     """Play one AI action using the neural network.
 
     Uses CatanEnv for observation building, then executes the chosen action
     directly on the GameSystem.
     """
+    if log is None:
+        log = lambda msg, color=None: None
     if not HAS_TORCH:
-        return play_random_turn(game, player_id)
+        return play_random_turn(game, player_id, log=log)
 
     try:
         player = game.players[player_id]
 
         # Sync env's game reference to our game
         catan_env.game_env.game = game
-        catan_env.player_id = player_id
 
         # Build observation + masks
         obs = catan_env._get_obs()
@@ -365,6 +376,8 @@ def play_neural_turn(game, player_id, network, device, catan_env):
 
         if action_name == 'roll_dice':
             result = game.roll_dice()
+            if result:
+                log(f"{player.name} rolled {result[2]}", player.color)
             if result and result[2] == 7 and game.waiting_for_discards:
                 _auto_discard_for_game(game, player_id)
             return True
@@ -372,31 +385,57 @@ def play_neural_turn(game, player_id, network, device, catan_env):
         elif action_name == 'place_settlement':
             if vertex_id < len(board.vertices):
                 game.try_place_initial_settlement(board.vertices[vertex_id], player)
+                log(f"{player.name} placed a settlement", player.color)
             return True
 
         elif action_name == 'place_road':
             if edge_id < len(board.edges):
                 game.try_place_initial_road(board.edges[edge_id], player)
+                log(f"{player.name} placed a road", player.color)
             return True
 
         elif action_name == 'build_settlement':
+            built = False
             if vertex_id < len(board.vertices):
-                player.try_build_settlement(board.vertices[vertex_id])
+                result = player.try_build_settlement(board.vertices[vertex_id])
+                built = result[0] if isinstance(result, tuple) else bool(result)
+            if built:
+                log(f"{player.name} built a settlement", player.color)
+            elif game.can_end_turn():
+                game.end_turn()
             return True
 
         elif action_name == 'build_city':
+            built = False
             if vertex_id < len(board.vertices):
-                player.try_build_city(board.vertices[vertex_id])
+                result = player.try_build_city(board.vertices[vertex_id])
+                built = result[0] if isinstance(result, tuple) else bool(result)
+            if built:
+                log(f"{player.name} upgraded to a city", player.color)
+            elif game.can_end_turn():
+                game.end_turn()
             return True
 
         elif action_name == 'build_road':
+            built = False
             if edge_id < len(board.edges):
-                player.try_build_road(board.edges[edge_id])
-                game.update_longest_road()
+                result = player.try_build_road(board.edges[edge_id])
+                built = result[0] if isinstance(result, tuple) else bool(result)
+                if built:
+                    game.update_longest_road()
+            if built:
+                log(f"{player.name} built a road", player.color)
+            elif game.can_end_turn():
+                game.end_turn()
             return True
 
         elif action_name == 'buy_dev_card':
-            player.try_buy_development_card(game.dev_deck)
+            result = player.try_buy_development_card(game.dev_deck)
+            bought = result[0] if isinstance(result, tuple) else bool(result)
+            if bought:
+                log(f"{player.name} bought a dev card", player.color)
+            elif game.can_end_turn():
+                game.end_turn()
             return True
 
         elif action_name == 'end_turn':
@@ -407,12 +446,19 @@ def play_neural_turn(game, player_id, network, device, catan_env):
         elif action_name == 'trade_with_bank':
             give_res = resource_map[give_idx]
             get_res = resource_map[get_idx]
-            game.execute_bank_trade(player, give_res, get_res)
+            success, msg = game.execute_bank_trade(player, give_res, get_res)
+            if success:
+                log(f"{player.name} traded {give_res.name} for {get_res.name}", player.color)
+            else:
+                # Trade failed — end turn to avoid infinite loop
+                if game.can_end_turn():
+                    game.end_turn()
             return True
 
         elif action_name == 'play_knight':
             success, _ = game.play_knight_card(player)
             if success:
+                log(f"{player.name} played a Knight", player.color)
                 # Move robber to a tile with opponent buildings
                 available = [t for t in board.tiles
                              if t != game.robber.position and t.resource is not None]
@@ -439,8 +485,10 @@ def play_neural_turn(game, player_id, network, device, catan_env):
             # Use trade_give/get indices as resource choices
             if action_name == 'play_monopoly':
                 game.play_monopoly_card(player, resource_map[give_idx])
+                log(f"{player.name} played Monopoly on {resource_map[give_idx].name}", player.color)
             else:
                 game.play_year_of_plenty_card(player, resource_map[give_idx], resource_map[get_idx])
+                log(f"{player.name} played Year of Plenty", player.color)
             return True
 
         else:  # wait, do_nothing
@@ -453,14 +501,14 @@ def play_neural_turn(game, player_id, network, device, catan_env):
         import traceback
         traceback.print_exc()
         print(f"[Neural AI] Falling back to random for player {player_id}")
-        return play_random_turn(game, player_id)
+        return play_random_turn(game, player_id, log=log)
 
 
 def play_opponent_turn(game, player_id, ai_difficulty='random'):
     if ai_difficulty == 'random':
         return play_random_turn(game, player_id)
     try:
-        from rule_based_ai import play_rule_based_turn
+        from ai.scripted_opponents import play_rule_based_turn
         class MinimalEnv:
             def __init__(self, g):
                 self.game_env = type('obj', (object,), {'game': g})()
@@ -645,12 +693,16 @@ class CatantronApp:
                 device = 'cpu'
 
             self.neural_device = device
-            self.neural_network = NetworkWrapper(model_path=model_path, device=device)
+            self.neural_network = NetworkWrapper(model_path=model_path, device=device, hidden_dim=512)
 
-            # Create CatanEnv for observation building — AI is player 1
-            self.neural_env = CatanEnv(player_id=1, num_players=2)
-            # Swap game reference to point at our game
-            self.neural_env.game_env.game = self.game
+            # Create CatanEnv per player so each gets correct perspective
+            self.neural_envs = {}
+            for pid in range(len(self.game.players)):
+                env = CatanEnv(player_id=pid, num_players=2)
+                env.game_env.game = self.game
+                self.neural_envs[pid] = env
+            # Keep neural_env for backward compat (VS_AI uses player 1)
+            self.neural_env = self.neural_envs.get(1, list(self.neural_envs.values())[0])
 
             model_name = model_path.split('/')[-1] if '/' in model_path else model_path
             print(f"[Neural AI] Loaded model: {model_path} on {device}")
@@ -874,11 +926,19 @@ class CatantronApp:
             "show_until": time.time() + 2.5,
         }
 
+    def _get_neural_env(self, player_idx):
+        """Get the CatanEnv for the given player index."""
+        if hasattr(self, 'neural_envs') and player_idx in self.neural_envs:
+            return self.neural_envs[player_idx]
+        return self.neural_env
+
     def handle_ai_turn(self):
         """Execute one AI action."""
         game = self.game
         current_idx = game.players.index(game.get_current_player())
         player = game.get_current_player()
+
+        log = self.add_message
 
         if self.mode == GameMode.VS_BOT:
             diff_map = {"easy": "weak", "medium": "medium", "hard": "strong"}
@@ -896,21 +956,22 @@ class CatantronApp:
                     game.players_discarded = set()
         elif self.mode == GameMode.WATCH_AI:
             difficulty = getattr(self, 'watch_opponent_difficulty', 'ai_vs_ai')
+            env = self._get_neural_env(current_idx)
             if difficulty == "ai_vs_ai":
                 # Both players use neural network
-                if self.neural_network and self.neural_env:
+                if self.neural_network and env:
                     play_neural_turn(game, current_idx, self.neural_network,
-                                     self.neural_device, self.neural_env)
+                                     self.neural_device, env, log=log)
                 else:
-                    play_random_turn(game, current_idx)
+                    play_random_turn(game, current_idx, log=log)
             else:
                 # Player 0 = neural AI, Player 1 = rule-based bot
                 if current_idx == 0:
-                    if self.neural_network and self.neural_env:
+                    if self.neural_network and env:
                         play_neural_turn(game, current_idx, self.neural_network,
-                                         self.neural_device, self.neural_env)
+                                         self.neural_device, env, log=log)
                     else:
-                        play_random_turn(game, current_idx)
+                        play_random_turn(game, current_idx, log=log)
                 else:
                     diff_map = {"easy": "weak", "medium": "medium", "hard": "strong"}
                     ai_diff = diff_map.get(difficulty, "medium")
@@ -927,11 +988,12 @@ class CatantronApp:
                     game.players_discarded = set()
         else:
             # VS_AI mode: use neural network if available, else random
-            if self.neural_network and self.neural_env:
+            env = self._get_neural_env(current_idx)
+            if self.neural_network and env:
                 play_neural_turn(game, current_idx, self.neural_network,
-                                 self.neural_device, self.neural_env)
+                                 self.neural_device, env, log=log)
             else:
-                play_random_turn(game, current_idx)
+                play_random_turn(game, current_idx, log=log)
 
             # Handle stuck discards for AI
             if game.waiting_for_discards:
