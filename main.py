@@ -342,7 +342,6 @@ def play_neural_turn(game, player_id, network, device, catan_env, log=None):
 
         # Sync env's game reference to our game
         catan_env.game_env.game = game
-        catan_env.player_id = player_id
 
         # Build observation + masks
         obs = catan_env._get_obs()
@@ -696,10 +695,14 @@ class CatantronApp:
             self.neural_device = device
             self.neural_network = NetworkWrapper(model_path=model_path, device=device, hidden_dim=512)
 
-            # Create CatanEnv for observation building — AI is player 1
-            self.neural_env = CatanEnv(player_id=1, num_players=2)
-            # Swap game reference to point at our game
-            self.neural_env.game_env.game = self.game
+            # Create CatanEnv per player so each gets correct perspective
+            self.neural_envs = {}
+            for pid in range(len(self.game.players)):
+                env = CatanEnv(player_id=pid, num_players=2)
+                env.game_env.game = self.game
+                self.neural_envs[pid] = env
+            # Keep neural_env for backward compat (VS_AI uses player 1)
+            self.neural_env = self.neural_envs.get(1, list(self.neural_envs.values())[0])
 
             model_name = model_path.split('/')[-1] if '/' in model_path else model_path
             print(f"[Neural AI] Loaded model: {model_path} on {device}")
@@ -923,6 +926,12 @@ class CatantronApp:
             "show_until": time.time() + 2.5,
         }
 
+    def _get_neural_env(self, player_idx):
+        """Get the CatanEnv for the given player index."""
+        if hasattr(self, 'neural_envs') and player_idx in self.neural_envs:
+            return self.neural_envs[player_idx]
+        return self.neural_env
+
     def handle_ai_turn(self):
         """Execute one AI action."""
         game = self.game
@@ -947,19 +956,20 @@ class CatantronApp:
                     game.players_discarded = set()
         elif self.mode == GameMode.WATCH_AI:
             difficulty = getattr(self, 'watch_opponent_difficulty', 'ai_vs_ai')
+            env = self._get_neural_env(current_idx)
             if difficulty == "ai_vs_ai":
                 # Both players use neural network
-                if self.neural_network and self.neural_env:
+                if self.neural_network and env:
                     play_neural_turn(game, current_idx, self.neural_network,
-                                     self.neural_device, self.neural_env, log=log)
+                                     self.neural_device, env, log=log)
                 else:
                     play_random_turn(game, current_idx, log=log)
             else:
                 # Player 0 = neural AI, Player 1 = rule-based bot
                 if current_idx == 0:
-                    if self.neural_network and self.neural_env:
+                    if self.neural_network and env:
                         play_neural_turn(game, current_idx, self.neural_network,
-                                         self.neural_device, self.neural_env, log=log)
+                                         self.neural_device, env, log=log)
                     else:
                         play_random_turn(game, current_idx, log=log)
                 else:
@@ -978,9 +988,10 @@ class CatantronApp:
                     game.players_discarded = set()
         else:
             # VS_AI mode: use neural network if available, else random
-            if self.neural_network and self.neural_env:
+            env = self._get_neural_env(current_idx)
+            if self.neural_network and env:
                 play_neural_turn(game, current_idx, self.neural_network,
-                                 self.neural_device, self.neural_env, log=log)
+                                 self.neural_device, env, log=log)
             else:
                 play_random_turn(game, current_idx, log=log)
 
