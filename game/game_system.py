@@ -539,13 +539,18 @@ class Edge:
         return self.connects_to_player_infrastructure(player)
 
     def connects_to_player_infrastructure(self, player):
-        """Check if this edge connects to player's existing roads or settlements"""
+        """Check if this edge connects to player's existing roads or settlements.
+        An opponent's settlement/city at a vertex blocks road continuation through it."""
         for vertex in [self.vertex1, self.vertex2]:
-            # Check if vertex has player's structure
+            # Check if vertex has player's own structure
             if (vertex.structure and vertex.structure.player == player):
                 return True
 
-            # Check if vertex has player's roads
+            # If an opponent has a settlement/city here, roads can't pass through
+            if (vertex.structure and vertex.structure.player != player):
+                continue
+
+            # Check if vertex has player's roads (only if no enemy structure blocks)
             for edge in vertex.connected_edges:
                 if (edge != self and edge.structure and
                         edge.structure.player == player):
