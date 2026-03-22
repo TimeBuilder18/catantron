@@ -11,8 +11,8 @@ Result: PBRS helps learning but doesn't dominate
 """
 
 import numpy as np
-from catan_env_pytorch import CatanEnv
-from reward_shaping_mixin import PositionalRewardMixin
+from environment.catan_env import CatanEnv
+from environment.reward_utils import PositionalRewardMixin
 
 
 class PBRSFixedRewardWrapper(PositionalRewardMixin):
@@ -184,7 +184,7 @@ def compare_pbrs_scales():
     print("PBRS SCALING COMPARISON")
     print("=" * 70)
 
-    from game_system import Player, GameBoard
+    from game.game_system import Player, GameBoard
 
     # Create dummy player with typical mid-game state
     # (This is just for demonstration)

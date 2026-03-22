@@ -12,8 +12,8 @@ For MCTS/AlphaZero/PPO, simpler rewards work better!
 """
 
 import numpy as np
-from catan_env_pytorch import CatanEnv
-from reward_shaping_mixin import PositionalRewardMixin
+from environment.catan_env import CatanEnv
+from environment.reward_utils import PositionalRewardMixin
 
 
 class SimplifiedRewardWrapper(PositionalRewardMixin):

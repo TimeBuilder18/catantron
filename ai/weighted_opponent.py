@@ -17,7 +17,7 @@ rule-based opponent (which uses board evaluation).
 """
 
 import random
-from game_system import ResourceType, DevelopmentCardType
+from game.game_system import ResourceType, DevelopmentCardType
 
 
 # Action weights matching catanatron's WeightedRandomPlayer

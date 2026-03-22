@@ -22,7 +22,7 @@ import threading
 import torch
 import numpy as np
 
-from catan_env_pytorch import CatanEnv
+from environment.catan_env import CatanEnv
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -193,7 +193,7 @@ class SelfPlayPool:
         return selected
 
     def _load_policy(self, path: str):
-        from network_gpu import CatanPolicy, TILE_FEATURE_DIM
+        from model.network import CatanPolicy, TILE_FEATURE_DIM
         ckpt = torch.load(path, map_location=self.device, weights_only=True)
         hidden_dim = ckpt.get('hidden_dim', None)
         if hidden_dim is None:
@@ -218,7 +218,7 @@ class SelfPlayPool:
 
     def _load_legacy_policy(self, ckpt, hidden_dim, tile_dim):
         """Load an old-format checkpoint and wrap it with an observation adapter."""
-        from network_gpu import CatanPolicy
+        from model.network import CatanPolicy
         # Build a CatanPolicy with old architecture dimensions
         # We need to temporarily construct a policy that matches the old weights.
         # The old layout: NON_TILE_DIM=46, TILE_FEATURE_DIM=3, TILE_EMBED_DIM=32,

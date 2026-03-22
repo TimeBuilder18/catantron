@@ -4,9 +4,15 @@ Neural Network wrapper for MCTS
 Connects your existing CatanPolicy to the MCTS algorithm.
 """
 
+import sys
 import torch
 import numpy as np
-from network_gpu import CatanPolicy
+
+# Compatibility: old checkpoints reference 'network_gpu' which was renamed to 'model.network'
+from model import network as _network_module
+sys.modules['network_gpu'] = _network_module
+
+from model.network import CatanPolicy
 
 
 class NetworkWrapper:
@@ -122,28 +128,3 @@ class NetworkWrapper:
             return policy, value
 
 
-# Quick test
-if __name__ == "__main__":
-    from game_state import GameState
-
-    print("Testing NetworkWrapper...")
-
-    # Create wrapper (no saved model - uses random weights)
-    network = NetworkWrapper(model_path=None)
-    print("✅ Created network wrapper")
-
-    # Create game state
-    state = GameState()
-    obs = state.get_observation()
-    print("✅ Got observation")
-
-    # Evaluate
-    policy, value = network.evaluate(obs)
-
-    print(f"✅ Network evaluation:")
-    print(f"   Policy shape: {policy.shape}")
-    print(f"   Policy sum: {policy.sum():.3f} (should be ~1.0)")
-    print(f"   Top 3 action probs: {sorted(policy, reverse=True)[:3]}")
-    print(f"   Value: {value:.3f}")
-
-    print("\n✅ NetworkWrapper test passed!")

@@ -9,10 +9,7 @@ A smart AI with multiple difficulty levels:
 Helps curriculum learning by providing progressively harder opponents.
 """
 
-import sys
-sys.path.append('/mnt/project')
-
-from game_system import ResourceType
+from game.game_system import ResourceType
 import random
 
 
@@ -556,7 +553,7 @@ if __name__ == "__main__":
     #print("=" * 60)
 
     # This is just for testing - normally you'd use it in training
-    from ai_interface import AIGameEnvironment
+    from environment.ai_interface import AIGameEnvironment
 
     # Create game
     env = AIGameEnvironment()

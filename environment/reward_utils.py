@@ -9,7 +9,7 @@ And to call _shaping_reset() inside their own reset().
 """
 
 from collections import deque
-from game_system import PortType
+from game.game_system import PortType
 
 
 class PositionalRewardMixin:

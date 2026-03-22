@@ -15,18 +15,18 @@ from enum import Enum
 
 try:
     import torch
-    from network_wrapper import NetworkWrapper
-    from catan_env_pytorch import CatanEnv
+    from model.model_loader import NetworkWrapper
+    from environment.catan_env import CatanEnv
     HAS_TORCH = True
 except ImportError:
     HAS_TORCH = False
 
-from tile import Tile
-from game_system import (Player, Robber, GameBoard, GameSystem, ResourceType,
+from game.hexagon import Tile
+from game.game_system import (Player, Robber, GameBoard, GameSystem, ResourceType,
                          Settlement, City, Road, DevelopmentCardType, GameConstants,
                          PortType)
-import gui_components
-from gui_components import (
+from gui import gui_components
+from gui.gui_components import (
     BG_COLOR, PANEL_BG, PANEL_BORDER,
     TEXT_COLOR, TEXT_DIM, GOLD, WHITE, BLACK,
     RESOURCE_COLORS, RESOURCE_DISPLAY_NAMES, RESOURCE_TYPE_NAMES,
@@ -176,7 +176,7 @@ def find_closest_tile(game_board, mouse_pos, offset, max_distance=40):
 # ===========================================================================
 
 def _find_best_robber_tile(game, my_player_id):
-    from game_system import City as CityClass
+    from game.game_system import City as CityClass
     pip_values = {2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 8: 5, 9: 4, 10: 3, 11: 2, 12: 1}
     my_player = game.players[my_player_id]
     current_robber_tile = game.robber.position
@@ -459,7 +459,7 @@ def play_opponent_turn(game, player_id, ai_difficulty='random'):
     if ai_difficulty == 'random':
         return play_random_turn(game, player_id)
     try:
-        from rule_based_ai import play_rule_based_turn
+        from ai.scripted_opponents import play_rule_based_turn
         class MinimalEnv:
             def __init__(self, g):
                 self.game_env = type('obj', (object,), {'game': g})()

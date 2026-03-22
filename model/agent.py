@@ -1,7 +1,7 @@
 import random
 import numpy as np
 import torch
-from network_gpu import CatanPolicy
+from model.network import CatanPolicy
 
 class CatanAgent:
     def __init__(self, device=None):

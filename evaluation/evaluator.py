@@ -17,10 +17,10 @@ import numpy as np
 import torch
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from catan_env_pytorch import CatanEnv
-from network_wrapper import NetworkWrapper
-from curriculum_trainer_v3_stable import play_opponent_turn
-from agent_quality_score import AgentQualityEvaluator
+from environment.catan_env import CatanEnv
+from model.model_loader import NetworkWrapper
+from training.trainer import play_opponent_turn
+from evaluation.quality_score import AgentQualityEvaluator
 
 
 # ──────────────────────────────────────────────────────────────────────────────

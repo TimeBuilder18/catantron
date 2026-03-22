@@ -5,7 +5,7 @@ Reusable drawing functions for the polished Catan game interface.
 
 import pygame
 import math
-from game_system import (ResourceType, PortType, Settlement, City,
+from game.game_system import (ResourceType, PortType, Settlement, City,
                          DevelopmentCardType, GameConstants)
 
 # --- Screen Layout (defaults, updated by set_screen_size) ---

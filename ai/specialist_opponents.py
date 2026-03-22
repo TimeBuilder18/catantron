@@ -7,7 +7,7 @@ styles it has never encountered — pure city rushing, road blocking, dev card s
 aggressive disruption, and port-based trading engines.
 
 Usage:
-    from specialist_ai import play_specialist_turn
+    from ai.specialist_opponents import play_specialist_turn
     play_specialist_turn(game, player_id, strategy='city_rusher')
 
 Available strategies:
@@ -19,8 +19,8 @@ Available strategies:
 """
 
 import random
-from game_system import ResourceType, DevelopmentCardType, PortType, Settlement, City
-from rule_based_ai import score_vertex, score_edge, DICE_PIPS
+from game.game_system import ResourceType, DevelopmentCardType, PortType, Settlement, City
+from ai.scripted_opponents import score_vertex, score_edge, DICE_PIPS
 
 
 # ============================================================

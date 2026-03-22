@@ -6,7 +6,7 @@ try:
 except ImportError:
     HAS_PYGAME = False
 
-from game_system import ResourceType
+from game.game_system import ResourceType
 
 DIRECTIONS = [
     (+1, 0), (0, +1), (-1, +1),

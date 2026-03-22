@@ -7,14 +7,10 @@ Provides clean observation/action spaces and proper masking.
 import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
-import sys
-
-sys.path.append('/mnt/project')
-
-from ai_interface import AIGameEnvironment
-from game_system import ResourceType
-from game_system import DevelopmentCardType, Player
-from game_system import Settlement, City, Road, DevelopmentCardDeck
+from environment.ai_interface import AIGameEnvironment
+from game.game_system import ResourceType
+from game.game_system import DevelopmentCardType, Player
+from game.game_system import Settlement, City, Road, DevelopmentCardDeck
 
 # Dice pip counts (probability weight) for each number token
 DICE_PIPS = {2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 8: 5, 9: 4, 10: 3, 11: 2, 12: 1}
