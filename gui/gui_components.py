@@ -429,10 +429,18 @@ def draw_player_info_box(screen, player, x, y, width, is_current, font, small_fo
     name_surf = font.render(player.name, True, player.color)
     screen.blit(name_surf, (x + 32, y + 11))
 
-    # VP (prominent)
+    # VP (prominent) with breakdown
     vp = player.calculate_victory_points()
+    breakdown = getattr(player, 'vp_breakdown', {})
+    parts = []
+    for key, val in breakdown.items():
+        parts.append(f"{key}:{val}")
+    breakdown_str = " + ".join(parts) if parts else ""
     vp_surf = font.render(f"VP: {vp}", True, GOLD)
     screen.blit(vp_surf, (x + width - 80, y + 11))
+    if breakdown_str:
+        bd_surf = small_font.render(f"({breakdown_str})", True, TEXT_DIM)
+        screen.blit(bd_surf, (x + width - 80, y + 28))
 
     # Building counts
     info_y = y + 40
