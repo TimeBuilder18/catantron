@@ -37,6 +37,7 @@ from gui_components import (
     draw_title_screen, draw_difficulty_screen, set_screen_size,
     draw_robber_overlay, draw_dev_card_popup, draw_dev_cards_panel,
     draw_discard_overlay, draw_trade_overlay,
+    draw_watch_select_screen,
 )
 
 
@@ -53,6 +54,7 @@ RESOURCES = (["forest"] * 4 + ["hill"] * 3 + ["field"] * 4 +
 class GameState(Enum):
     TITLE = "title"
     DIFFICULTY_SELECT = "difficulty"
+    WATCH_SELECT = "watch_select"
     PLAYING = "playing"
     VICTORY = "victory"
 
@@ -61,6 +63,7 @@ class GameMode(Enum):
     PVP = "pvp"
     VS_AI = "vs_ai"
     VS_BOT = "vs_bot"
+    WATCH_AI = "watch_ai"
 
 
 # ===========================================================================
@@ -586,17 +589,30 @@ class CatantronApp:
             players = [p1, p2]
             self.human_players = {0}
             self.add_message("You vs Neural AI — Place your first settlement!", GOLD)
+        elif mode == GameMode.WATCH_AI:
+            self.watch_opponent_difficulty = difficulty
+            if difficulty == "ai_vs_ai":
+                p1 = Player("Neural AI 1", (220, 60, 60))
+                p2 = Player("Neural AI 2", (60, 100, 220))
+                self.add_message("Watching: Neural AI vs Neural AI", GOLD)
+            else:
+                diff_label = {"easy": "Easy", "medium": "Medium", "hard": "Hard"}.get(difficulty, difficulty)
+                p1 = Player("Neural AI", (220, 60, 60))
+                p2 = Player(f"Bot ({diff_label})", (60, 100, 220))
+                self.add_message(f"Watching: Neural AI vs {diff_label} Bot", GOLD)
+            players = [p1, p2]
+            self.human_players = set()
         else:
             return
 
         self.game = GameSystem(game_board, players)
         self.game.robber = robber
 
-        # Load neural network for VS_AI mode
+        # Load neural network for VS_AI / WATCH_AI modes
         self.neural_network = None
         self.neural_device = None
         self.neural_env = None
-        if mode == GameMode.VS_AI and HAS_TORCH:
+        if mode in (GameMode.VS_AI, GameMode.WATCH_AI) and HAS_TORCH:
             self._load_neural_ai()
 
         self.state = GameState.PLAYING
@@ -867,6 +883,37 @@ class CatantronApp:
             success = play_opponent_turn(game, current_idx, ai_diff)
             if not success and game.can_end_turn():
                 game.end_turn()
+
+            # Handle stuck discards
+            if game.waiting_for_discards:
+                _auto_discard_for_game(game, current_idx)
+                if game.waiting_for_discards:
+                    game.waiting_for_discards = False
+                    game.players_must_discard = []
+                    game.players_discarded = set()
+        elif self.mode == GameMode.WATCH_AI:
+            difficulty = getattr(self, 'watch_opponent_difficulty', 'ai_vs_ai')
+            if difficulty == "ai_vs_ai":
+                # Both players use neural network
+                if self.neural_network and self.neural_env:
+                    play_neural_turn(game, current_idx, self.neural_network,
+                                     self.neural_device, self.neural_env)
+                else:
+                    play_random_turn(game, current_idx)
+            else:
+                # Player 0 = neural AI, Player 1 = rule-based bot
+                if current_idx == 0:
+                    if self.neural_network and self.neural_env:
+                        play_neural_turn(game, current_idx, self.neural_network,
+                                         self.neural_device, self.neural_env)
+                    else:
+                        play_random_turn(game, current_idx)
+                else:
+                    diff_map = {"easy": "weak", "medium": "medium", "hard": "strong"}
+                    ai_diff = diff_map.get(difficulty, "medium")
+                    success = play_opponent_turn(game, current_idx, ai_diff)
+                    if not success and game.can_end_turn():
+                        game.end_turn()
 
             # Handle stuck discards
             if game.waiting_for_discards:
@@ -1176,6 +1223,17 @@ class CatantronApp:
                                     self.setup_game(GameMode.VS_AI)
                                 elif mode == "vs_bot":
                                     self.state = GameState.DIFFICULTY_SELECT
+                                elif mode == "watch_ai":
+                                    self.state = GameState.WATCH_SELECT
+
+                    elif self.state == GameState.WATCH_SELECT:
+                        button_rects = draw_watch_select_screen(self.screen, self.buttons_hovered)
+                        for rect, opt in button_rects:
+                            if rect.collidepoint(event.pos):
+                                if opt == "back":
+                                    self.state = GameState.TITLE
+                                else:
+                                    self.setup_game(GameMode.WATCH_AI, difficulty=opt)
 
                     elif self.state == GameState.DIFFICULTY_SELECT:
                         button_rects = draw_difficulty_screen(self.screen, self.buttons_hovered)
@@ -1291,6 +1349,13 @@ class CatantronApp:
                 for rect, diff in temp_rects:
                     self.buttons_hovered[diff] = rect.collidepoint(mouse_pos)
                 draw_difficulty_screen(self.screen, self.buttons_hovered)
+
+            elif self.state == GameState.WATCH_SELECT:
+                self.buttons_hovered = {}
+                temp_rects = draw_watch_select_screen(self.screen, {})
+                for rect, opt in temp_rects:
+                    self.buttons_hovered[opt] = rect.collidepoint(mouse_pos)
+                draw_watch_select_screen(self.screen, self.buttons_hovered)
 
             elif self.state == GameState.PLAYING:
                 self.draw_playing()

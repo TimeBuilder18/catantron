@@ -647,6 +647,7 @@ def draw_title_screen(screen, buttons_hovered):
         ("Player vs Player", "pvp"),
         ("Play vs AI", "vs_ai"),
         ("Play vs Bot", "vs_bot"),
+        ("Watch AI", "watch_ai"),
     ]
 
     button_rects = []
@@ -708,6 +709,58 @@ def draw_difficulty_screen(screen, buttons_hovered):
 
     # Back button
     back_y = btn_start_y + 3 * btn_spacing + 20
+    back_hovered = buttons_hovered.get("back", False)
+    back_rect = draw_button(screen, (btn_x, back_y, btn_w, 45), "Back",
+                           get_font(20), enabled=True, hovered=back_hovered)
+    button_rects.append((back_rect, "back"))
+
+    return button_rects
+
+
+def draw_watch_select_screen(screen, buttons_hovered):
+    """Draw watch mode selection screen. Returns list of (rect, option)."""
+    screen.fill((30, 22, 18))
+
+    # Pattern
+    for i in range(-20, SCREEN_W + SCREEN_H, 40):
+        pygame.draw.line(screen, (35, 27, 22), (i, 0), (i - SCREEN_H, SCREEN_H), 1)
+
+    cx = SCREEN_W // 2
+
+    # Header
+    header_font = get_font(48, bold=True)
+    header = header_font.render("Watch AI Play", True, GOLD)
+    screen.blit(header, header.get_rect(center=(cx, 160)))
+
+    # Buttons
+    btn_w, btn_h = 320, 55
+    btn_x = cx - btn_w // 2
+    btn_start_y = 270
+    btn_spacing = 80
+
+    button_font = get_font(24, bold=True)
+    desc_font = get_font(16)
+
+    options = [
+        ("AI vs AI", "ai_vs_ai", "Neural network plays both sides"),
+        ("AI vs Easy Bot", "easy", "Neural AI vs easy rule-based bot"),
+        ("AI vs Medium Bot", "medium", "Neural AI vs medium rule-based bot"),
+        ("AI vs Hard Bot", "hard", "Neural AI vs hard rule-based bot"),
+    ]
+
+    button_rects = []
+    for i, (label, opt, desc) in enumerate(options):
+        y = btn_start_y + i * btn_spacing
+        hovered = buttons_hovered.get(opt, False)
+        rect = draw_button(screen, (btn_x, y, btn_w, btn_h), label,
+                          button_font, enabled=True, hovered=hovered)
+        # Description below button
+        desc_surf = desc_font.render(desc, True, TEXT_DIM)
+        screen.blit(desc_surf, desc_surf.get_rect(center=(cx, y + btn_h + 12)))
+        button_rects.append((rect, opt))
+
+    # Back button
+    back_y = btn_start_y + 4 * btn_spacing + 20
     back_hovered = buttons_hovered.get("back", False)
     back_rect = draw_button(screen, (btn_x, back_y, btn_w, 45), "Back",
                            get_font(20), enabled=True, hovered=back_hovered)
