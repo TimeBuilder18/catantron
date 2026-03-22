@@ -1,3 +1,10 @@
+"""
+Hexagonal tile system using axial coordinates (q, r). Each tile knows its
+resource type, dice number, vertices, edges, and how to draw itself.
+We went with axial over cube coords because it's simpler and the neighbor
+offsets are just 6 fixed directions.
+"""
+
 import math
 # Pygame is only needed for drawing - make it optional for server
 try:
@@ -6,8 +13,10 @@ try:
 except ImportError:
     HAS_PYGAME = False
 
-from game_system import ResourceType
+from game.game_system import ResourceType
 
+# The 6 neighbor offsets in axial coordinates — these never change
+# regardless of hex size. Going clockwise from east.
 DIRECTIONS = [
     (+1, 0), (0, +1), (-1, +1),
     (-1, 0), (0, -1), (+1, -1)

@@ -1,12 +1,27 @@
 """
-Neural Network wrapper for MCTS
+Neural Network wrapper for MCTS.
 
-Connects your existing CatanPolicy to the MCTS algorithm.
+Handles loading saved model checkpoints and providing the evaluate() interface
+that MCTS needs. The tricky part is backwards compatibility — we've changed the
+observation format (427 -> 575 features) and backbone width (256 -> 512) over
+the course of this project, so this wrapper handles detecting old checkpoints
+and transferring whatever weights still match. That way we don't lose weeks of
+training every time we change the architecture.
 """
 
+import sys
 import torch
 import numpy as np
-from network_gpu import CatanPolicy
+
+# Compatibility shim: our old checkpoints were saved when the module was called
+# 'network_gpu' (before we reorganized into model/). torch.load tries to
+# reimport the original module path, so we trick it by aliasing the new
+# module name into sys.modules under the old name. Without this, loading
+# any pre-refactor checkpoint crashes with ModuleNotFoundError.
+from model import network as _network_module
+sys.modules['network_gpu'] = _network_module
+
+from model.network import CatanPolicy
 
 
 class NetworkWrapper:
@@ -24,7 +39,9 @@ class NetworkWrapper:
         """
         if model_path:
             ckpt = torch.load(model_path, map_location='cpu', weights_only=True)
-            # Detect saved hidden_dim: explicit key > infer from fc1 > fallback 256
+            # Figure out what hidden_dim the saved model used. Newer checkpoints
+            # store it explicitly; older ones don't, so we peek at the fc1 weight
+            # shape to infer it. If all else fails, assume 256 (original default).
             saved_dim = ckpt.get('hidden_dim', None)
             if saved_dim is None:
                 sd = ckpt.get('model_state_dict', {})
@@ -35,10 +52,14 @@ class NetworkWrapper:
 
             self.policy = CatanPolicy(device=device, hidden_dim=hidden_dim)
 
-            # Check if checkpoint has matching layer shapes (obs format + hidden_dim)
+            # Check if checkpoint has matching layer shapes (obs format + hidden_dim).
+            # Two things can cause a mismatch: (1) we changed hidden_dim (256->512),
+            # or (2) we changed the observation format (427->575 features) which
+            # changes the input layer shapes. Either way we need partial weight transfer.
             needs_transfer = (saved_dim != hidden_dim)
             if not needs_transfer:
-                # Same hidden_dim, but obs format may differ (427 vs 575)
+                # Same hidden_dim — but still check layer-by-layer in case the
+                # obs format changed (different input dims for encoders)
                 old_sd = ckpt['model_state_dict']
                 new_sd = self.policy.state_dict()
                 for name in old_sd:
@@ -60,12 +81,16 @@ class NetworkWrapper:
         self.policy.eval()  # Set to evaluation mode
 
     def _transfer_weights(self, old_state_dict, old_dim, new_dim):
-        """Transfer encoder weights from a smaller network into a larger one.
+        """Transfer encoder weights from a smaller/older network into the new one.
 
-        Only transfers encoder weights (tile_encoder.*, player_embed.*, player_ln.*)
-        which have identical shapes regardless of hidden_dim. These encode board
-        understanding — the hardest part to learn. The backbone (fc layers, output
-        heads, projection) starts fresh and retrains quickly.
+        Only transfers weights where shapes match exactly — basically the encoder
+        layers (tile_encoder.*, player_embed.*, player_ln.*). These encode board
+        understanding which took the longest to train (~2 days), so preserving
+        them is a huge time saver. The backbone and output heads get random init
+        and retrain in a few hours.
+
+        We do this instead of strict load_state_dict because that would just
+        crash on any shape mismatch.
         """
         new_state = self.policy.state_dict()
         transferred = 0
@@ -117,33 +142,10 @@ class NetworkWrapper:
                 'vertex': vertex_probs.cpu().numpy().flatten(),
                 'edge': edge_probs.cpu().numpy().flatten(),
             }
+            # Squash value to [-1, 1] range — MCTS expects this for
+            # backpropagation through the search tree
             value = np.tanh(state_value.cpu().numpy().flatten()[0])
 
             return policy, value
 
 
-# Quick test
-if __name__ == "__main__":
-    from game_state import GameState
-
-    print("Testing NetworkWrapper...")
-
-    # Create wrapper (no saved model - uses random weights)
-    network = NetworkWrapper(model_path=None)
-    print("✅ Created network wrapper")
-
-    # Create game state
-    state = GameState()
-    obs = state.get_observation()
-    print("✅ Got observation")
-
-    # Evaluate
-    policy, value = network.evaluate(obs)
-
-    print(f"✅ Network evaluation:")
-    print(f"   Policy shape: {policy.shape}")
-    print(f"   Policy sum: {policy.sum():.3f} (should be ~1.0)")
-    print(f"   Top 3 action probs: {sorted(policy, reverse=True)[:3]}")
-    print(f"   Value: {value:.3f}")
-
-    print("\n✅ NetworkWrapper test passed!")

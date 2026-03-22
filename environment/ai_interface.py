@@ -1,16 +1,17 @@
 """
-AI Training Interface for Catan
+Headless game environment for AI training — no GUI, no pygame dependency,
+just pure game logic running as fast as possible. This is what the RL
+training loop actually talks to (through CatanEnv which wraps this).
 
-ENVIRONMENT ONLY - You implement the AI agents yourself!
-
-This provides a clean interface to the Catan game for training 4 AI agents.
-No GUI, no networking, no sockets - just pure game logic.
+Sets up a 1v1 Catan game and provides methods for stepping through turns,
+getting observations, and checking if the game is over. Player 0's slot
+is left empty for the learning agent to control.
 """
 
 import random
-from game_system import GameSystem, GameBoard, Player, Robber
-from rule_based_ai import RuleBasedAI
-from tile import Tile
+from game.game_system import GameSystem, GameBoard, Player, Robber
+from ai.scripted_opponents import RuleBasedAI
+from game.hexagon import Tile
 
 # Same board setup as huPlay.py
 NUMBER_TOKENS = [5, 2, 6, 3, 8, 10, 9, 12, 11, 4, 8, 10, 9, 4, 5, 6, 3, 11]
@@ -181,7 +182,7 @@ class AIGameEnvironment:
                 actions.append('roll_dice')
 
             if self.game.can_trade_or_build():
-                from game_system import ResourceType
+                from game.game_system import ResourceType
                 res = player.resources
 
                 # Check for buildable locations AND resources
@@ -274,7 +275,7 @@ class AIGameEnvironment:
 
             # Count opponent structures on adjacent vertices
             # Vertices have adjacent_tiles, so check all vertices
-            from game_system import City
+            from game.game_system import City
             opponent_structures = 0
             my_structures = 0
 
@@ -316,7 +317,7 @@ class AIGameEnvironment:
         if not self.game.waiting_for_discards:
             return
 
-        from game_system import ResourceType
+        from game.game_system import ResourceType
         import random
 
         for player in self.game.players_must_discard:

@@ -1,14 +1,23 @@
 """
-Curriculum Training V3 - STABLE VERSION
+The main curriculum trainer — this is where everything comes together.
 
-Fixes entropy collapse with:
-1. Smooth entropy penalty (quadratic, not step function)
-2. Adaptive learning rate based on entropy health
-3. Trust region via KL divergence constraint
-4. Gradient clipping with entropy-aware scaling
-5. Performance-based curriculum transitions (not just game count)
-6. Separate entropy tracking for all heads
-7. Buffer prioritization for recent experiences
+Trains the Catan AI using PPO with curriculum learning: starts with
+easy opponents and gradually introduces harder ones as the agent improves.
+The curriculum has 12+ phases, from passive (does nothing) all the way to
+self-play with frozen snapshots of past versions.
+
+We went through a LOT of iterations to get this stable. The biggest
+problems were:
+- Entropy collapse: the agent gets too confident too fast and stops
+  exploring. Fixed with smooth quadratic entropy penalties.
+- Reward hacking: agent optimized board position instead of winning.
+  Fixed by making win/loss rewards dominate everything else.
+- Catastrophic forgetting: agent forgets how to beat easy opponents
+  when training against hard ones. Fixed with opponent mixing.
+
+This version runs games in parallel threads with a centralized GPU
+inference server for speed — each game thread sends observations to
+a shared batch queue instead of each doing its own GPU forward pass.
 """
 
 import sys
@@ -29,14 +38,14 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 if not sys.stdout.line_buffering:
     sys.stdout.reconfigure(line_buffering=True)
 
-from catan_env_pytorch import CatanEnv
-from simplified_reward_wrapper import SimplifiedRewardWrapper
-from pbrs_fixed_reward_wrapper import PBRSFixedRewardWrapper
-from network_wrapper import NetworkWrapper
-from self_play_pool import SelfPlayPool
-from game_system import ResourceType
-from catanatron_opponent import play_weighted_random_turn
-from rule_based_ai import score_vertex, score_edge
+from environment.catan_env import CatanEnv
+from environment.simple_rewards import SimplifiedRewardWrapper
+from environment.pbrs_rewards import PBRSFixedRewardWrapper
+from model.model_loader import NetworkWrapper
+from ai.opponent_pool import SelfPlayPool
+from game.game_system import ResourceType
+from ai.weighted_opponent import play_weighted_random_turn
+from ai.scripted_opponents import score_vertex, score_edge
 
 
 # Resource order matches catan_env_pytorch.py trade_give/get index mapping
@@ -397,7 +406,7 @@ def play_opponent_turn(game, player_id, mix_prob, primary_ai='medium', secondary
         medium: Rule-based, picks from top 3 with some strategy
         strong: Rule-based, always picks best position
     """
-    from rule_based_ai import play_rule_based_turn
+    from ai.scripted_opponents import play_rule_based_turn
 
     class MinimalEnv:
         def __init__(self, g):
@@ -420,7 +429,7 @@ def play_opponent_turn(game, player_id, mix_prob, primary_ai='medium', secondary
         return play_random_turn(game, player_id)
     elif chosen_ai in ('city_rusher', 'road_blocker', 'dev_card_spammer',
                         'balanced_aggressor', 'port_specialist'):
-        from specialist_ai import play_specialist_turn
+        from ai.specialist_opponents import play_specialist_turn
         return play_specialist_turn(game, player_id, strategy=chosen_ai)
     else:
         return play_rule_based_turn(MinimalEnv(game), player_id, difficulty=chosen_ai)
@@ -621,10 +630,17 @@ class CentralInferenceServer:
 
 
 class CurriculumTrainerV3:
-    """Stable curriculum trainer with entropy collapse prevention
+    """
+    The main trainer class. Handles the full training loop:
+    1. Play games in parallel (data collection)
+    2. Store experiences in a replay buffer
+    3. Run PPO updates on batches from the buffer
+    4. Track curriculum progress and advance phases when ready
 
-    Supports 1v1 training mode (num_players=2) for faster initial learning,
-    then transfer to 4-player mode.
+    The curriculum is the key innovation — without it, the agent just learns
+    to pass every turn because it can't figure out how to beat a strong
+    opponent from scratch. By starting against a passive opponent and
+    gradually increasing difficulty, it learns incrementally.
     """
 
     def __init__(self, model_path=None, learning_rate=5e-4, batch_size=None, reward_mode='pbrs_fixed',
@@ -681,7 +697,7 @@ class CurriculumTrainerV3:
                 compiled = torch.compile(self.network, mode='reduce-overhead')
                 # Warmup: tiny dummy batch to detect Triton missing / backend errors now
                 _d = self.device
-                from network_gpu import TOTAL_OBS_DIM
+                from model.network import TOTAL_OBS_DIM
                 with torch.inference_mode():
                     compiled(
                         torch.zeros(1, TOTAL_OBS_DIM, device=_d),
@@ -711,23 +727,22 @@ class CurriculumTrainerV3:
         self.games_played = 0
         self._games_lock = threading.Lock()  # Thread safety for games_played counter
 
-        # ENTROPY PARAMETERS - SIMPLIFIED (no more adaptive chaos)
-        # Fixed coefficient, let --entropy-decay handle reduction over time
-        self.target_entropy = 1.0   # Only used for logging status
-        self.entropy_coef = 0.05    # Increased from 0.025: matches train_gpu.py intent.
-                                    # Previous "doubling" that collapsed was 0.05→0.10;
-                                    # this is 0.025→0.05 (restoring original stable value).
-                                    # Rollback to 0.035 if entropy drops below 0.3 within 5k games.
+        # Entropy bonus encourages exploration — without it the agent
+        # converges too fast and gets stuck. We tried adaptive entropy
+        # (adjusting the coefficient based on current entropy levels)
+        # but it caused cascading instability, so now it's just fixed.
+        self.target_entropy = 1.0
+        self.entropy_coef = 0.05     # The sweet spot — 0.025 was too low, 0.1 collapsed
         self.min_entropy_coef = 0.04
         self.max_entropy_coef = 0.15
 
-        # NO adaptive parameters - they caused cascading failures
         self.entropy_history = deque(maxlen=100)
         self.policy_loss_history = deque(maxlen=50)
         self.current_entropy_coef = self.entropy_coef
 
-        # Trust region
-        self.max_kl = 0.02  # Maximum KL divergence per update
+        # KL divergence constraint — stops the policy from changing too
+        # much in a single update. Standard PPO trust region stuff.
+        self.max_kl = 0.02
         self.adaptive_kl_coef = 1.0
 
         # Gradient clipping - FIXED, no adaptation
@@ -741,7 +756,7 @@ class CurriculumTrainerV3:
         self._phase_lock = threading.Lock()
 
         # AQS tracking (protected by _phase_lock)
-        from agent_quality_score import AgentQualityEvaluator
+        from evaluation.quality_score import AgentQualityEvaluator
         self.aqs_evaluator = AgentQualityEvaluator(window_size=200)
 
         # DIAGNOSTIC: Track city building attempts
@@ -771,17 +786,6 @@ class CurriculumTrainerV3:
         print(f"Max KL divergence: {self.max_kl}")
         print(f"BC coef (imitation): {self.bc_coef}")
 
-        # MCTS for improved action selection during data collection
-        self._mcts = None
-        if self.use_mcts:
-            from mcts import MCTS
-            # MCTS uses the NetworkWrapper for priors + value estimation
-            self._mcts = MCTS(
-                policy_network=self.network_wrapper,
-                num_simulations=self.mcts_simulations,
-                c_puct=self.mcts_c_puct,
-            )
-            print(f"MCTS enabled: {self.mcts_simulations} sims, c_puct={self.mcts_c_puct}")
 
     def _compute_smooth_entropy_penalty(self, entropy):
         """Smooth quadratic penalty instead of hard floor"""
@@ -878,16 +882,7 @@ class CurriculumTrainerV3:
             if current_id == 0:
                 moves += 1
 
-                # Skip expensive MCTS for trivial forced actions (roll_dice, end_turn, wait, do_nothing)
-                # These have only 1 legal action — MCTS adds N sims of overhead for zero benefit
-                _action_mask = obs['action_mask']
-                _n_legal = int(_action_mask.sum())
-                _use_mcts_this_step = (self.use_mcts and self._mcts is not None and _n_legal > 1)
-
-                if _use_mcts_this_step:
-                    action, action_probs, vertex_probs, edge_probs, log_prob = self._get_action_mcts(obs, env)
-                else:
-                    action, action_probs, vertex_probs, edge_probs, log_prob = self._get_action(obs)
+                action, action_probs, vertex_probs, edge_probs, log_prob = self._get_action(obs)
                 action_id, vertex_id, edge_id, trade_give, trade_get = action
 
                 episode_obs.append(obs['observation'].copy())
@@ -972,7 +967,7 @@ class CurriculumTrainerV3:
                             'city_rusher', 'road_blocker', 'dev_card_spammer',
                             'balanced_aggressor', 'port_specialist',
                         ])
-                        from specialist_ai import play_specialist_turn
+                        from ai.specialist_opponents import play_specialist_turn
                         play_specialist_turn(game, current_id, strategy=specialist)
                         sp_used = True
                     else:
@@ -1102,21 +1097,6 @@ class CurriculumTrainerV3:
 
         return winner_id, my_vp, sum(episode_rewards)
 
-    def _mcts_infer_via_server(self, obs):
-        """Bridge: route MCTS neural network calls through CentralInferenceServer.
-
-        MCTS expects fn(obs) -> (policy_dict, value_float).
-        CentralInferenceServer.infer(obs) -> (ap, vp, ep, tgp, tgetp) numpy arrays.
-        """
-        ap, vp, ep, tgp, tgetp, sv = self._inference_server.infer(obs)
-        policy = {
-            'action': ap,
-            'vertex': vp,
-            'edge': ep,
-        }
-        value = float(np.tanh(sv.flatten()[0]))
-        return policy, value
-
     def play_games_parallel(self, num_games, mix_prob=1.0, primary_ai='random',
                             secondary_ai=None, victory_points_to_win=10):
         """Play multiple games in parallel using ThreadPoolExecutor.
@@ -1130,10 +1110,6 @@ class CurriculumTrainerV3:
         server = CentralInferenceServer(self.network, self.device)
         self._inference_server = server
         server.start()
-
-        # Wire MCTS to use the batched inference server instead of individual GPU calls
-        if self._mcts is not None:
-            self._mcts.set_infer_fn(self._mcts_infer_via_server)
 
         try:
             with ThreadPoolExecutor(max_workers=num_games) as executor:
@@ -1152,9 +1128,6 @@ class CurriculumTrainerV3:
                         print(f"  Warning: Game failed with error: {e}")
                         results.append((None, 0, 0))
         finally:
-            # Disconnect MCTS from server before stopping
-            if self._mcts is not None:
-                self._mcts.set_infer_fn(None)
             server.stop()
             self._inference_server = None
 
@@ -1225,70 +1198,6 @@ class CurriculumTrainerV3:
         trade_get = np.random.choice(len(tgetp), p=tgetp)
 
         # Store log probs for ALL heads (needed for proper PPO)
-        action_log_prob = np.log(ap[action_id] + 1e-8)
-        vertex_log_prob = np.log(vp[vertex_id] + 1e-8)
-        edge_log_prob = np.log(ep[edge_id] + 1e-8)
-        trade_give_log_prob = np.log(tgp[trade_give] + 1e-8)
-        trade_get_log_prob = np.log(tgetp[trade_get] + 1e-8)
-
-        return (action_id, vertex_id, edge_id, trade_give, trade_get), ap, vp, ep, (action_log_prob, vertex_log_prob, edge_log_prob, trade_give_log_prob, trade_get_log_prob)
-
-    def _get_action_mcts(self, obs, env):
-        """Get action using MCTS search for higher-quality decisions.
-
-        Uses MCTS to select action + location, falls back to network for trades.
-        Returns same format as _get_action so play_game works unchanged.
-        """
-        from game_state import GameState
-
-        # Create a temporary GameState from the current env for MCTS to search
-        # The env is a reward wrapper; its .env is the CatanEnv
-        underlying_env = env.env if hasattr(env, 'env') else env
-        temp_state = GameState(env=underlying_env)
-
-        # MCTS search (uses copies internally, doesn't modify temp_state)
-        best_action, mcts_probs = self._mcts.search(temp_state, temperature=1.0)
-        action_id, vertex_id, edge_id = best_action
-
-        # Get network's own probabilities (needed for PPO log_probs and entropy)
-        if self._inference_server is not None:
-            ap, vp, ep, tgp, tgetp, _sv = self._inference_server.infer(obs)
-        else:
-            ctx = torch.amp.autocast('cuda') if self.use_amp else contextlib.nullcontext()
-            with torch.inference_mode(), ctx:
-                observation = torch.from_numpy(obs['observation']).float().unsqueeze(0).to(self.device)
-                action_mask = torch.from_numpy(obs['action_mask']).float().unsqueeze(0).to(self.device)
-                vertex_mask = torch.from_numpy(obs['vertex_mask']).float().unsqueeze(0).to(self.device)
-                edge_mask = torch.from_numpy(obs['edge_mask']).float().unsqueeze(0).to(self.device)
-
-                action_probs, vertex_probs, edge_probs, trade_give_probs, trade_get_probs, _ = self.network(
-                    observation, action_mask, vertex_mask, edge_mask)
-
-                ap = action_probs.cpu().numpy()[0]
-                vp = vertex_probs.cpu().numpy()[0]
-                ep = edge_probs.cpu().numpy()[0]
-                tgp = trade_give_probs.cpu().numpy()[0]
-                tgetp = trade_get_probs.cpu().numpy()[0]
-
-        def safe_probs(probs):
-            probs = np.nan_to_num(probs, nan=0.0, posinf=0.0, neginf=0.0)
-            if probs.sum() <= 0:
-                probs = np.ones_like(probs) / len(probs)
-            else:
-                probs = probs / probs.sum()
-            return probs
-
-        ap = safe_probs(ap)
-        vp = safe_probs(vp)
-        ep = safe_probs(ep)
-        tgp = safe_probs(tgp)
-        tgetp = safe_probs(tgetp)
-
-        # Trade actions: MCTS doesn't specialize in trades, use network
-        trade_give = np.random.choice(len(tgp), p=tgp)
-        trade_get = np.random.choice(len(tgetp), p=tgetp)
-
-        # Log probs from the NETWORK's perspective (for PPO importance sampling)
         action_log_prob = np.log(ap[action_id] + 1e-8)
         vertex_log_prob = np.log(vp[vertex_id] + 1e-8)
         edge_log_prob = np.log(ep[edge_id] + 1e-8)

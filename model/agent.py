@@ -1,9 +1,33 @@
+"""
+RL agent with hierarchical action selection for 1v1 Catan.
+
+The agent wraps the policy network and handles the train/eval split:
+during training it keeps gradients and returns tensors (for PPO updates),
+during evaluation it detaches everything and returns plain ints (for gameplay).
+
+The ExperienceBuffer stores rollout data (states, actions, log probs, rewards,
+etc.) that PPO needs to compute its loss. It's just a simple list-based buffer
+that gets cleared after each training update — nothing fancy like prioritized
+replay since PPO is on-policy and uses each batch exactly once.
+"""
+
 import random
 import numpy as np
 import torch
-from network_gpu import CatanPolicy
+from model.network import CatanPolicy
+
 
 class CatanAgent:
+    """
+    Wraps CatanPolicy for gameplay. Handles device setup, the train vs eval
+    branching, and converting between tensors and plain Python types.
+
+    During training: returns raw tensors with gradients attached so PPO can
+    backprop through the action selection.
+    During evaluation: returns .item() scalars — no grad overhead, and the
+    game engine just needs ints anyway.
+    """
+
     def __init__(self, device=None):
         if device is None:
             if torch.cuda.is_available():
@@ -34,7 +58,11 @@ class CatanAgent:
         edge_mask_tensor = torch.FloatTensor(edge_mask)
 
         if is_training:
-            # Keep gradients for training
+            # Training mode: keep gradients so PPO can compute policy gradient.
+            # Actions are sampled (not argmax) — this is the exploration.
+            # The categorical distribution handles the explore/exploit tradeoff
+            # naturally: early on probs are ~uniform (explores), later they
+            # sharpen toward good actions (exploits).
             (action, vertex, edge, trade_give, trade_get,
              action_log_prob, vertex_log_prob, edge_log_prob,
              trade_give_log_prob, trade_get_log_prob, value, entropy) = \
@@ -48,7 +76,9 @@ class CatanAgent:
                     action_log_prob, vertex_log_prob, edge_log_prob,
                     trade_give_log_prob, trade_get_log_prob, value, entropy)
         else:
-            # No gradients needed for evaluation
+            # Eval mode: no_grad saves memory and speeds up inference.
+            # We still sample (not argmax) so the agent isn't fully
+            # deterministic — helps with variety in self-play.
             with torch.no_grad():
                 (action, vertex, edge, trade_give, trade_get,
                  action_log_prob, vertex_log_prob, edge_log_prob,
@@ -66,6 +96,18 @@ class CatanAgent:
 
 
 class ExperienceBuffer:
+    """
+    Simple on-policy experience buffer for PPO rollouts.
+
+    Stores everything PPO needs: states, actions from all heads, their log
+    probs (for the importance sampling ratio), values (for GAE advantage
+    estimation), rewards, and done flags. Also stores the action masks so
+    we can recompute log probs during the PPO update epochs.
+
+    This is NOT a replay buffer — PPO is on-policy, so we collect a batch,
+    train on it for a few epochs, then throw it away with clear().
+    """
+
     def __init__(self):
         self.states = []
         self.actions = []
@@ -108,6 +150,12 @@ class ExperienceBuffer:
         self.edge_masks.append(edge_mask)
 
     def get(self):
+        """Convert all stored lists to tensors for the PPO update.
+
+        We store as lists during rollout (fast append) then batch-convert
+        here. np.array() first for states/masks since they're already arrays
+        and FloatTensor can't handle a list of arrays directly.
+        """
         return {
             'states': torch.FloatTensor(np.array(self.states)),
             'actions': torch.LongTensor(self.actions),
@@ -129,6 +177,7 @@ class ExperienceBuffer:
         }
 
     def clear(self):
+        """Wipe everything after a PPO update. On-policy = use once and toss."""
         self.states.clear()
         self.actions.clear()
         self.vertices.clear()

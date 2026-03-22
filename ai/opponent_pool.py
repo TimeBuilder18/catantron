@@ -1,19 +1,17 @@
 """
-Self-Play Opponent Pool for Catan AI
+Self-play opponent pool — the final boss of curriculum learning.
 
-Maintains a rotating pool of past-checkpoint networks and uses them as
-opponents during training.  Replaces or supplements scripted AIs once
-the agent is strong enough to benefit from playing itself.
+Once the agent is strong enough to beat all scripted opponents, it starts
+playing against frozen snapshots of itself. This prevents it from overfitting
+to the scripted AIs' specific patterns and forces it to develop genuinely
+good Catan strategy.
 
-Thread-safe: multiple parallel game threads each get their own opponent
-env via threading.local(), while the loaded network weights are shared
-read-only across threads.
+The pool keeps the N most recent checkpoints and randomly picks one each
+game. Networks are loaded in eval mode with no_grad — they're frozen and
+only used for inference, never trained.
 
-Usage (in training loop):
-    pool = SelfPlayPool("models/v3_overnight2_game*.pt", pool_size=8)
-
-    # Pass pool into play_game so opponent turns use it:
-    trainer.play_game(..., primary_ai='self_play', self_play_pool=pool)
+Thread-safe: multiple parallel game threads share the loaded weights
+(read-only) but each gets its own environment via threading.local().
 """
 
 import glob
@@ -22,7 +20,7 @@ import threading
 import torch
 import numpy as np
 
-from catan_env_pytorch import CatanEnv
+from environment.catan_env import CatanEnv
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -193,7 +191,7 @@ class SelfPlayPool:
         return selected
 
     def _load_policy(self, path: str):
-        from network_gpu import CatanPolicy, TILE_FEATURE_DIM
+        from model.network import CatanPolicy, TILE_FEATURE_DIM
         ckpt = torch.load(path, map_location=self.device, weights_only=True)
         hidden_dim = ckpt.get('hidden_dim', None)
         if hidden_dim is None:
@@ -218,7 +216,7 @@ class SelfPlayPool:
 
     def _load_legacy_policy(self, ckpt, hidden_dim, tile_dim):
         """Load an old-format checkpoint and wrap it with an observation adapter."""
-        from network_gpu import CatanPolicy
+        from model.network import CatanPolicy
         # Build a CatanPolicy with old architecture dimensions
         # We need to temporarily construct a policy that matches the old weights.
         # The old layout: NON_TILE_DIM=46, TILE_FEATURE_DIM=3, TILE_EMBED_DIM=32,

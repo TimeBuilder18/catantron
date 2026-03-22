@@ -1,18 +1,21 @@
 """
-Fixed PBRS Reward Wrapper
+Potential-Based Reward Shaping (PBRS) wrapper for Catan.
 
-The original PBRS implementation had the right idea but wrong scale.
-This version:
-1. Scales potential function to ±5 max (not ±50)
-2. Has STRONG terminal rewards (win=+100, loss=-10)
-3. PBRS is a small guide, not the main signal
+The idea: instead of only rewarding wins/losses, give the agent small
+bonuses for improving its board position (better settlements, more
+resource diversity, port access, etc). The math behind PBRS guarantees
+that the shaped reward doesn't change the optimal policy — it just
+helps the agent learn faster by giving intermediate feedback.
 
-Result: PBRS helps learning but doesn't dominate
+Key lesson we learned the hard way: the PBRS bonuses MUST be small
+compared to the win/loss reward. Our first version had PBRS ±50 and
+win bonus +100, so the agent optimized board position instead of
+actually winning. Now PBRS is ±5 max and winning is +100.
 """
 
 import numpy as np
-from catan_env_pytorch import CatanEnv
-from reward_shaping_mixin import PositionalRewardMixin
+from environment.catan_env import CatanEnv
+from environment.reward_utils import PositionalRewardMixin
 
 
 class PBRSFixedRewardWrapper(PositionalRewardMixin):
@@ -64,18 +67,23 @@ class PBRSFixedRewardWrapper(PositionalRewardMixin):
         player = self.env.game_env.game.players[self.player_id]
         new_potential = self._calculate_scaled_potential(player)
 
-        # PBRS shaping reward (small)
+        # The PBRS formula: gamma * Phi(s') - Phi(s)
+        # This rewards the agent for moving to a better board state.
+        # The math guarantees this doesn't change the optimal policy
+        # (Ng et al. 1999), it just helps the agent learn faster.
         pbrs_reward = self.gamma * new_potential - self.last_potential
         self.last_potential = new_potential
 
         # Base rewards (large!)
         base_reward = 0.0
 
-        # VP changes (main signal)
+        # +10 per victory point gained — this is the main learning signal.
+        # We tried smaller values but the agent just ignored VP and
+        # focused on whatever gave the biggest immediate reward instead.
         current_vp = obs.get('my_victory_points', 0)
         vp_diff = current_vp - self.last_vp
         if vp_diff > 0:
-            base_reward += vp_diff * 10.0  # +10 per VP
+            base_reward += vp_diff * 10.0
 
         # Phase-aware bonuses: optimal Catan strategy changes through the game.
         #   Early  (VP < 50% of win): EXPAND — roads + settlements claim territory
@@ -158,13 +166,17 @@ class PBRSFixedRewardWrapper(PositionalRewardMixin):
         self.last_has_largest_army = has_largest_army
         self.last_has_longest_road = has_longest_road
 
-        # Terminal rewards (STRONG)
+        # Terminal rewards — winning MUST dominate everything else.
+        # Win bonus (100) > sum of all VP rewards (10 VP * 10 = 100) so
+        # the agent learns that actually winning matters more than just
+        # accumulating points. Loss penalty is small (-10) because we
+        # don't want the agent to play overly defensively.
         if terminated:
             winner_id = info.get('winner_id', None)
             if winner_id == self.player_id:
-                base_reward += 100.0  # HUGE win bonus
+                base_reward += 100.0
             else:
-                base_reward -= 10.0  # Small loss penalty
+                base_reward -= 10.0
 
         # Total reward = base + PBRS shaping
         total_reward = base_reward + pbrs_reward
@@ -184,7 +196,7 @@ def compare_pbrs_scales():
     print("PBRS SCALING COMPARISON")
     print("=" * 70)
 
-    from game_system import Player, GameBoard
+    from game.game_system import Player, GameBoard
 
     # Create dummy player with typical mid-game state
     # (This is just for demonstration)

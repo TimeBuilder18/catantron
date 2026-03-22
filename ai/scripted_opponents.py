@@ -1,18 +1,21 @@
 """
-Rule-Based AI for Catan
+Rule-based AI opponents with multiple difficulty levels for curriculum training.
 
-A smart AI with multiple difficulty levels:
-- Weak: Random placement, basic priorities
-- Medium: Scores settlements by pip count
-- Strong: Scores by pip count + resource diversity + ports
+The idea is to give the RL agent progressively harder opponents as it
+improves. Each difficulty adds another layer of intelligence:
 
-Helps curriculum learning by providing progressively harder opponents.
+- passive/truly_random: Does literally nothing or picks randomly. For
+  the very first phase when the agent is learning basic building.
+- weak: Random placements but at least tries to build things.
+- medium: Scores settlements by pip count (probability of getting rolled).
+- strong: Full heuristic — pip count + resource diversity + port access
+  + gap-filling. This is actually pretty good and hard to beat consistently.
+
+The scoring functions (score_vertex, score_edge) are also used by the
+specialist AIs and the trainer's opponent selection logic.
 """
 
-import sys
-sys.path.append('/mnt/project')
-
-from game_system import ResourceType
+from game.game_system import ResourceType
 import random
 
 
@@ -556,7 +559,7 @@ if __name__ == "__main__":
     #print("=" * 60)
 
     # This is just for testing - normally you'd use it in training
-    from ai_interface import AIGameEnvironment
+    from environment.ai_interface import AIGameEnvironment
 
     # Create game
     env = AIGameEnvironment()

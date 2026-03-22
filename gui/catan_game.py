@@ -1,21 +1,14 @@
 """
-Visual AI Training Environment for Catan
+Pygame visual game interface for watching the AI play or playing manually.
 
-Combines:
-- AI training interface (observations, actions, step function)
-- Pygame visualization (watch the AI play)
-- Simplified game (NO TRADING - too complex for AI)
+This was our first visual game before we built the polished main.py version.
+It combines the training environment with a pygame renderer so you can
+actually see what the AI is doing — useful for debugging and demos.
 
-USAGE:
-------
-# Watch AI play with trained model
-python visual_ai_game.py --model models/curriculum_v3_stable_phase5.pt --ai-difficulty medium
-
-# Watch random agents
-python visual_ai_game.py --ai-difficulty random
-
-# Manual control mode
-python visual_ai_game.py --manual
+Modes:
+- Watch a trained model play against a rule-based opponent
+- Manual control mode for testing
+- Random agent mode for baseline comparison
 """
 
 import pygame
@@ -25,11 +18,11 @@ import math
 import argparse
 import torch
 import numpy as np
-from tile import Tile
-from game_system import (Player, Robber, GameBoard, GameSystem, ResourceType,
+from game.hexagon import Tile
+from game.game_system import (Player, Robber, GameBoard, GameSystem, ResourceType,
                          Settlement, City, Road, DevelopmentCardType, GameConstants)
-from network_wrapper import NetworkWrapper
-from simplified_reward_wrapper import SimplifiedRewardWrapper
+from model.model_loader import NetworkWrapper
+from environment.simple_rewards import SimplifiedRewardWrapper
 
 # Standard Catan setup
 NUMBER_TOKENS = [5, 2, 6, 3, 8, 10, 9, 12, 11, 4, 8, 10, 9, 4, 5, 6, 3, 11]
@@ -114,7 +107,7 @@ def draw_game_board(screen, game_board, offset):
             pygame.draw.line(screen, (150, 150, 150), (x1, y1), (x2, y2), 1)
 
     # Draw ports
-    from game_system import PortType
+    from game.game_system import PortType
     PORT_COLORS = {
         PortType.GENERIC: (200, 200, 200),    # White/gray for 3:1
         PortType.WOOD: (34, 139, 34),         # Green
@@ -481,7 +474,7 @@ class VisualAIEnvironment:
 
 def _find_best_robber_tile(game, my_player_id):
     """Find best tile to place robber - blocks opponent's best hex"""
-    from game_system import City
+    from game.game_system import City
     pip_values = {2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 8: 5, 9: 4, 10: 3, 11: 2, 12: 1}
 
     my_player = game.players[my_player_id]
@@ -640,7 +633,7 @@ def play_opponent_turn(game, player_id, ai_difficulty='random'):
         return play_random_turn(game, player_id)
     else:
         try:
-            from rule_based_ai import play_rule_based_turn
+            from ai.scripted_opponents import play_rule_based_turn
             class MinimalEnv:
                 def __init__(self, g):
                     self.game_env = type('obj', (object,), {'game': g})()

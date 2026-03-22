@@ -1,15 +1,15 @@
 """
-Positional reward shaping helpers shared by all reward wrappers.
+Shared reward utilities used by both PBRS and simplified reward wrappers.
 
-Requires the host class to have:
-  self.env        — CatanEnv (or wrapper with .game_env.game)
-  self.player_id  — int
-
-And to call _shaping_reset() inside their own reset().
+The main thing here is the PositionalRewardMixin — it scores how good
+a player's board position is by looking at settlement pip counts,
+resource diversity, port access, and road connectivity to future
+building spots. Both wrappers mix this in so they don't duplicate
+the scoring logic.
 """
 
 from collections import deque
-from game_system import PortType
+from game.game_system import PortType
 
 
 class PositionalRewardMixin:

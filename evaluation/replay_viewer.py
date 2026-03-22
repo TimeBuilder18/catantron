@@ -13,10 +13,10 @@ import time
 import numpy as np
 import torch
 
-from catan_env_pytorch import CatanEnv
-from game_system import ResourceType
-from network_wrapper import NetworkWrapper
-from curriculum_trainer_v3_stable import play_opponent_turn
+from environment.catan_env import CatanEnv
+from game.game_system import ResourceType
+from model.model_loader import NetworkWrapper
+from training.trainer import play_opponent_turn
 
 RESOURCE_NAMES = {
     ResourceType.WOOD:  'Wood',

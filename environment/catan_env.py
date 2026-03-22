@@ -1,20 +1,21 @@
 """
-Catan Gymnasium Environment for PyTorch PPO Training
+Gymnasium environment wrapper for 1v1 Catan. Converts the game state into
+a flat 575-dimensional observation vector that the neural network processes,
+and handles the hierarchical action space (14 action types, each optionally
+needing a vertex/edge/trade selection).
 
-Designed to work with custom PyTorch PPO implementation.
-Provides clean observation/action spaces and proper masking.
+The hardest part was getting the action masking right — Catan has different
+action types and some need location info, so we use separate masks for
+actions, vertices, and edges. Without proper masking the agent wastes
+forever trying illegal moves.
 """
 import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
-import sys
-
-sys.path.append('/mnt/project')
-
-from ai_interface import AIGameEnvironment
-from game_system import ResourceType
-from game_system import DevelopmentCardType, Player
-from game_system import Settlement, City, Road, DevelopmentCardDeck
+from environment.ai_interface import AIGameEnvironment
+from game.game_system import ResourceType
+from game.game_system import DevelopmentCardType, Player
+from game.game_system import Settlement, City, Road, DevelopmentCardDeck
 
 # Dice pip counts (probability weight) for each number token
 DICE_PIPS = {2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 8: 5, 9: 4, 10: 3, 11: 2, 12: 1}
@@ -207,8 +208,21 @@ class CatanEnv(gym.Env):
         return mask
 
     def _get_obs(self):
+        """Build the 575-dim observation vector. It's a flat array with sections:
+        [0:11]    game state (phase, turn, dice)
+        [11:16]   my resources (wood, brick, wheat, sheep, ore)
+        [16:19]   my structure counts
+        [19:24]   my dev cards
+        [24:28]   VP and stats
+        [28:46]   opponent info (padded for multi-player compat)
+        [46:61]   strategic features (port access, longest road, etc)
+        [61:251]  tile features (19 tiles * 10 features each)
+        [251:269] port features
+        [269:575] positional features (54 vertices * ~5-6 features each)
+        """
         raw_obs = self.game_env.get_observation(self.player_id)
         features = []
+        # Game state features — what phase/turn are we in?
         features.extend([
             1.0 if raw_obs['is_my_turn'] else 0.0,
             float(raw_obs['current_player']),
