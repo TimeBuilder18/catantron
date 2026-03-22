@@ -15,18 +15,18 @@ from enum import Enum
 
 try:
     import torch
-    from network_wrapper import NetworkWrapper
-    from catan_env_pytorch import CatanEnv
+    from model.model_loader import NetworkWrapper
+    from environment.catan_env import CatanEnv
     HAS_TORCH = True
 except ImportError:
     HAS_TORCH = False
 
-from tile import Tile
-from game_system import (Player, Robber, GameBoard, GameSystem, ResourceType,
+from game.hexagon import Tile
+from game.game_system import (Player, Robber, GameBoard, GameSystem, ResourceType,
                          Settlement, City, Road, DevelopmentCardType, GameConstants,
                          PortType)
-import gui_components
-from gui_components import (
+from gui import gui_components
+from gui.gui_components import (
     BG_COLOR, PANEL_BG, PANEL_BORDER,
     TEXT_COLOR, TEXT_DIM, GOLD, WHITE, BLACK,
     RESOURCE_COLORS, RESOURCE_DISPLAY_NAMES, RESOURCE_TYPE_NAMES,
