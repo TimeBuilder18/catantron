@@ -1,3 +1,12 @@
+"""
+The main game engine for Catan. Handles everything — board setup, player
+turns, building, trading, dev cards, robber, victory detection. This is
+the backbone that both the GUI and the AI training environment talk to.
+
+Supports 1v1 (2-player) games. We started with 4-player but switched to
+1v1 because it trains way faster and the strategy space is more tractable.
+"""
+
 import random
 import math
 import pygame
@@ -32,18 +41,18 @@ class PortType(Enum):
 
 
 class GameConstants:
-    """Game constants for Catan"""
+    """Standard Catan rules as constants. These match the official rulebook."""
     # Victory conditions
-    VICTORY_POINTS_TO_WIN = 10 # 10
-    LARGEST_ARMY_MIN_KNIGHTS = 3
-    LONGEST_ROAD_MIN_LENGTH = 5
+    VICTORY_POINTS_TO_WIN = 10
+    LARGEST_ARMY_MIN_KNIGHTS = 3   # Need 3+ knights to claim Largest Army
+    LONGEST_ROAD_MIN_LENGTH = 5    # Need 5+ connected roads for Longest Road
 
-    # Player limits
+    # Player limits — per the official rules
     MAX_SETTLEMENTS = 5
     MAX_CITIES = 4
     MAX_ROADS = 15
 
-    # Resource limits
+    # If you have more than 7 cards when a 7 is rolled, you discard half
     ROBBER_DISCARD_LIMIT = 7
 
 
@@ -812,7 +821,11 @@ class DiceRoller:
 # ==================== GAME SYSTEM ====================
 
 class GameSystem:
-    """Main game system that manages all game state and actions"""
+    """
+    The big one — manages the full game state, turn flow, and all player actions.
+    Everything goes through here: rolling dice, building, trading, dev cards,
+    robber, victory detection. Both the GUI and the AI environment call into this.
+    """
 
     def __init__(self, game_board, players, victory_points_to_win=10):
         self.game_board = game_board
@@ -978,7 +991,9 @@ class GameSystem:
             return self.advance_initial_placement()
 
     def advance_initial_placement(self):
-        """Handle initial placement turn advancement"""
+        """Handle initial placement with snake draft — round 2 goes in reverse
+        order so the last player to place in round 1 gets first pick in round 2.
+        This is standard Catan and keeps things fair."""
         current_player = self.get_current_player()
         placements = self.player_initial_placements[current_player]
 
@@ -1306,7 +1321,9 @@ class GameSystem:
         return longest_player, longest_length
 
     def calculate_longest_road_for_player(self, player):
-        """Calculate the longest continuous road for a player using DFS"""
+        """Calculate longest continuous road using DFS with backtracking.
+        The tricky part: enemy settlements break your road chain, so we
+        have to check for those at each vertex."""
         # Build adjacency graph of player's roads
         road_graph = {}
         for road in player.roads:

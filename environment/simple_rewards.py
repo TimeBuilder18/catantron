@@ -1,14 +1,15 @@
 """
-Simplified Reward Wrapper for Catan AI
+Simplified reward wrapper with three modes for different training stages.
 
-The existing reward system is too complex for policy gradient methods.
-This wrapper provides simpler reward options:
+We found that simpler rewards actually work better for PPO — fewer
+conflicting gradient signals means more stable learning. The modes:
 
-1. SPARSE: Win (+100) / Loss (-10) only
-2. VP_ONLY: Reward based on VP changes (+10 per VP)
-3. SIMPLIFIED: VP + basic build rewards
-
-For MCTS/AlphaZero/PPO, simpler rewards work better!
+1. SPARSE: Only win (+100) or loss (-10). Purest signal but slowest
+   to learn — the agent gets no feedback until the game ends.
+2. VP_ONLY: +10 per victory point gained. Our default for PPO training.
+   Clear credit assignment and the agent quickly learns that VP = good.
+3. SIMPLIFIED: VP rewards plus small bonuses for building. Good for
+   the earliest curriculum phases when the agent can't even build yet.
 """
 
 import numpy as np

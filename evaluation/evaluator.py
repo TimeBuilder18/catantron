@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """
-1v1 Model Evaluation Script
-Evaluates a trained Catan model against AI opponents and reports detailed stats.
+Benchmark evaluation — runs the trained model against every opponent
+difficulty and reports win rates, average VP, and quality scores.
+
+This is how we know if training is actually working. We run 50+ games
+against each opponent level (passive through strong) and compute an
+overall Agent Quality Score. Games run in parallel threads for speed.
 
 Usage:
-    python evaluate_1v1.py --model models/my_model.pt
-    python evaluate_1v1.py --model models/my_model.pt --opponent strong --games 100
-    python evaluate_1v1.py --model models/my_model.pt --opponent all --games 50
+    python -m evaluation.evaluator --model models/my_model.pt
+    python -m evaluation.evaluator --model models/my_model.pt --opponent all --games 50
 """
 
 import argparse

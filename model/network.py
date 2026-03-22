@@ -1,3 +1,35 @@
+"""
+Neural network for our 1v1 Catan AI agent.
+
+Uses a multi-head architecture: one shared backbone feeds into separate output
+heads for action type, vertex placement, edge placement, and trading. The idea
+is that "what to do" and "where to do it" are related but distinct decisions —
+a single head couldn't really handle all of them well. We tried a single flat
+output early on and the agent kept trying to build roads in the ocean.
+
+We also tried transformers for the full architecture but feedforward works
+better for Catan since each decision is basically independent — there's no
+sequence to attend to, unlike chess where move order matters. The one exception
+is the tile encoder, where attention over the 19 hex tiles actually helps
+because tiles have spatial relationships (adjacent resources, ports, etc).
+
+Architecture overview:
+  observation (575 features)
+      |
+  split into tile features + player/game context
+      |                          |
+  TileAttentionEncoder     Linear encoder
+      |                          |
+      +---- concat (256) -------+
+                 |
+         FC backbone (3 layers)
+                 |
+     +-----+-----+------+------+-----+
+     |     |     |      |      |     |
+  action vertex edge  trade  trade value
+  (14)   (54)  (72)  give(5) get(5) (1)
+"""
+
 import random
 import numpy as np
 import torch
@@ -19,7 +51,7 @@ import torch.nn.functional as F
 
 NON_TILE_DIM = 61          # 46 base + 15 strategic features
 TILE_START_IDX = 61
-TILE_END_IDX = 251         # 61 + 19×10
+TILE_END_IDX = 251         # 61 + 19*10
 NUM_TILES = 19
 TILE_FEATURE_DIM = 10      # one-hot(6) + number + pips + robber + building_strength
 PORT_START_IDX = 251
@@ -28,7 +60,11 @@ POSITIONAL_START_IDX = 269
 TOTAL_OBS_DIM = 575
 
 # Tile attention hyperparameters
-TILE_EMBED_DIM = 48        # Was 32; richer 10-feature tiles need more capacity
+# 48 worked better than 32 — with 10 features per tile (up from 6 in our
+# old obs format), 32 was too compressed and the agent missed resource combos
+TILE_EMBED_DIM = 48
+# 4 heads lets different heads specialize (e.g. one for resource clusters,
+# one for number distributions). 2 was too few, 8 didn't help and was slower.
 NUM_ATTENTION_HEADS = 4
 
 
@@ -36,6 +72,12 @@ class TileAttentionEncoder(nn.Module):
     """
     Processes the 19 Catan tiles through multi-head self-attention.
     Each tile attends to all other tiles to learn spatial board context.
+
+    This is the one place where attention actually helps — tiles have real
+    spatial relationships (a wheat next to an ore matters more than either
+    alone). A plain MLP over flattened tiles couldn't learn that a 6-wheat
+    adjacent to an 8-ore is a great settlement spot. Attention lets the
+    model figure out which tile combos matter.
 
     Based on the settlers-rl architecture (Charlesworth, 2021).
     """
@@ -62,7 +104,9 @@ class TileAttentionEncoder(nn.Module):
         self.ffn = nn.Linear(embed_dim, embed_dim)
         self.ffn_ln = nn.LayerNorm(embed_dim)
 
-        # Compress flattened tile representations to fixed size
+        # Flatten all 19 tile embeddings and squeeze down to 128
+        # This bottleneck forces the model to learn a compact board summary
+        # instead of memorizing individual tile positions
         self.compress = nn.Linear(num_tiles * embed_dim, output_dim)
         self.compress_ln = nn.LayerNorm(output_dim)
 
@@ -95,6 +139,22 @@ class TileAttentionEncoder(nn.Module):
 
 
 class CatanPolicy(nn.Module):
+    """
+    The main policy network for our Catan agent. Takes in the full game
+    observation (575 features) and outputs probability distributions over
+    all the different decisions the agent can make.
+
+    Multi-head design: instead of one giant output, we have separate heads
+    for action type, vertex placement, edge placement, and trading. This
+    way the network can learn "I should build a settlement" independently
+    from "vertex 23 is a good spot." Early versions with a single flat
+    output were basically untrainable — the action space is just too big
+    for one softmax to handle (~150 possible moves per turn).
+
+    The value head is standard PPO — estimates how good the current board
+    state is so we can compute advantages for the policy gradient.
+    """
+
     def __init__(self, device=None, hidden_dim=256):
         super(CatanPolicy, self).__init__()
 
@@ -107,9 +167,11 @@ class CatanPolicy(nn.Module):
         else:
             self.device = torch.device('cpu')
 
-        self.hidden_dim = hidden_dim
-        # Encoders always output 128 each (256 total) for clean weight transfer.
-        # A projection layer widens to hidden_dim if needed.
+        self.hidden_dim = hidden_dim  # 256 default, 512 for the "big" model variant
+        # Both encoders output 128 each (256 total). We keep this fixed so we
+        # can transfer encoder weights between models with different backbone
+        # widths — the encoder learns board understanding which is expensive
+        # to retrain, but the backbone retrains fast.
         encoder_dim = 128
 
         # Store obs layout as instance attrs so legacy policies (created with
@@ -148,8 +210,10 @@ class CatanPolicy(nn.Module):
         else:
             self.projection = None
 
-        # === Combined Processing ===
-        # After projection: hidden_dim wide
+        # === Shared backbone ===
+        # 3 FC layers with LayerNorm. We tried BatchNorm first but it was
+        # unstable with PPO's small effective batch sizes during rollouts.
+        # LayerNorm doesn't depend on batch stats so it's more stable.
         self.fc1 = nn.Linear(hidden_dim, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, hidden_dim)
         self.fc3 = nn.Linear(hidden_dim, hidden_dim)
@@ -159,12 +223,18 @@ class CatanPolicy(nn.Module):
         self.ln3 = nn.LayerNorm(hidden_dim)
 
         # === Output Heads ===
-        self.policy_head = nn.Linear(hidden_dim, 14)  # 14 action types
-        self.location_head_vertex = nn.Linear(hidden_dim, 54)  # 54 vertices
-        self.location_head_edge = nn.Linear(hidden_dim, 72)  # 72 edges
-        self.trade_give_head = nn.Linear(hidden_dim, 5)  # 5 resources
-        self.trade_get_head = nn.Linear(hidden_dim, 5)   # 5 resources
-        self.value_head = nn.Linear(hidden_dim, 1)  # State value
+        # Each head handles a different part of the hierarchical decision.
+        # The action head picks WHAT to do (build, trade, end turn, etc.)
+        # then the relevant location/trade head picks the details.
+        self.policy_head = nn.Linear(hidden_dim, 14)          # 14 action types (build_settlement, build_road, etc.)
+        self.location_head_vertex = nn.Linear(hidden_dim, 54) # 54 vertices — for settlements and cities
+        self.location_head_edge = nn.Linear(hidden_dim, 72)   # 72 edges — for roads
+        self.trade_give_head = nn.Linear(hidden_dim, 5)       # which of 5 resources to give
+        self.trade_get_head = nn.Linear(hidden_dim, 5)        # which of 5 resources to get
+        # Value head — PPO's critic. Single scalar estimate of how likely
+        # we are to win from this state. Shares the backbone with the policy
+        # heads so it learns board understanding for free.
+        self.value_head = nn.Linear(hidden_dim, 1)
 
         self.to(self.device)
 
@@ -210,6 +280,10 @@ class CatanPolicy(nn.Module):
         x = F.relu(self.ln3(self.fc3(x)))
 
         # === Action head with masking ===
+        # Masking is critical — without it the agent tries illegal moves
+        # constantly. We set illegal action logits to -inf before softmax
+        # so they get probability ~0. The all-zeros check prevents NaN
+        # (shouldn't happen in normal play, but does during edge cases in testing).
         action_logits = self.policy_head(x)
         if action_mask is not None:
             if isinstance(action_mask, np.ndarray):
@@ -261,7 +335,9 @@ class CatanPolicy(nn.Module):
         else:
             edge_probs = F.softmax(edge_logits, dim=-1)
 
-        # === Trade heads (unused in 1v1 but kept for compatibility) ===
+        # === Trade heads ===
+        # In 1v1 Catan there's no player-to-player trading, only bank/port
+        # trades. We still output these for compatibility with the full game.
         trade_give_logits = self.trade_give_head(x)
         trade_give_probs = F.softmax(trade_give_logits, dim=-1)
 
@@ -274,6 +350,13 @@ class CatanPolicy(nn.Module):
         return action_probs, vertex_probs, edge_probs, trade_give_probs, trade_get_probs, state_value
 
     def get_action_and_value(self, obs, action_mask, vertex_mask=None, edge_mask=None):
+        """Sample actions from all heads and return log probs + value for PPO.
+
+        This is the main entry point during training rollouts. We sample from
+        the categorical distributions (not argmax) so the agent explores.
+        The log probs get stored in the experience buffer and used later
+        to compute the PPO surrogate loss.
+        """
         action_probs, vertex_probs, edge_probs, trade_give_probs, trade_get_probs, value = self.forward(
             obs, action_mask, vertex_mask, edge_mask
         )

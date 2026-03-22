@@ -1,19 +1,14 @@
 """
-catanatron_opponent.py
+Weighted random opponent — the "Goldilocks" training opponent.
 
-Implements WeightedRandomPlayer behavior using our game engine.
-WeightedRandomPlayer from catanatron weights actions as follows:
-  - Build settlement:  weight 5
-  - Build city:        weight 4
-  - Build road:        weight 3
-  - Buy dev card:      weight 2
-  - Use dev card:      weight 2
-  - Bank trade:        weight 1
-  - End turn:          weight 0.1  (only if nothing else available)
+Picks actions randomly but with weights that strongly prefer building
+over passing (settlement=5, city=4, road=3, end_turn=0.1). This makes
+it harder than truly_random (which barely builds anything) but easier
+than the rule-based AI (which actually evaluates the board).
 
-This creates a player that strongly prefers building over passing,
-which is harder than truly_random (15% build) but easier than our
-rule-based opponent (which uses board evaluation).
+It's the perfect opponent for the middle curriculum phases — forces
+the agent to learn to compete for spots without being unbeatable.
+Based on catanatron's WeightedRandomPlayer weights.
 """
 
 import random

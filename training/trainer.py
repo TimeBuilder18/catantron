@@ -1,14 +1,23 @@
 """
-Curriculum Training V3 - STABLE VERSION
+The main curriculum trainer — this is where everything comes together.
 
-Fixes entropy collapse with:
-1. Smooth entropy penalty (quadratic, not step function)
-2. Adaptive learning rate based on entropy health
-3. Trust region via KL divergence constraint
-4. Gradient clipping with entropy-aware scaling
-5. Performance-based curriculum transitions (not just game count)
-6. Separate entropy tracking for all heads
-7. Buffer prioritization for recent experiences
+Trains the Catan AI using PPO with curriculum learning: starts with
+easy opponents and gradually introduces harder ones as the agent improves.
+The curriculum has 12+ phases, from passive (does nothing) all the way to
+self-play with frozen snapshots of past versions.
+
+We went through a LOT of iterations to get this stable. The biggest
+problems were:
+- Entropy collapse: the agent gets too confident too fast and stops
+  exploring. Fixed with smooth quadratic entropy penalties.
+- Reward hacking: agent optimized board position instead of winning.
+  Fixed by making win/loss rewards dominate everything else.
+- Catastrophic forgetting: agent forgets how to beat easy opponents
+  when training against hard ones. Fixed with opponent mixing.
+
+This version runs games in parallel threads with a centralized GPU
+inference server for speed — each game thread sends observations to
+a shared batch queue instead of each doing its own GPU forward pass.
 """
 
 import sys
@@ -621,10 +630,17 @@ class CentralInferenceServer:
 
 
 class CurriculumTrainerV3:
-    """Stable curriculum trainer with entropy collapse prevention
+    """
+    The main trainer class. Handles the full training loop:
+    1. Play games in parallel (data collection)
+    2. Store experiences in a replay buffer
+    3. Run PPO updates on batches from the buffer
+    4. Track curriculum progress and advance phases when ready
 
-    Supports 1v1 training mode (num_players=2) for faster initial learning,
-    then transfer to 4-player mode.
+    The curriculum is the key innovation — without it, the agent just learns
+    to pass every turn because it can't figure out how to beat a strong
+    opponent from scratch. By starting against a passive opponent and
+    gradually increasing difficulty, it learns incrementally.
     """
 
     def __init__(self, model_path=None, learning_rate=5e-4, batch_size=None, reward_mode='pbrs_fixed',
@@ -711,23 +727,22 @@ class CurriculumTrainerV3:
         self.games_played = 0
         self._games_lock = threading.Lock()  # Thread safety for games_played counter
 
-        # ENTROPY PARAMETERS - SIMPLIFIED (no more adaptive chaos)
-        # Fixed coefficient, let --entropy-decay handle reduction over time
-        self.target_entropy = 1.0   # Only used for logging status
-        self.entropy_coef = 0.05    # Increased from 0.025: matches train_gpu.py intent.
-                                    # Previous "doubling" that collapsed was 0.05→0.10;
-                                    # this is 0.025→0.05 (restoring original stable value).
-                                    # Rollback to 0.035 if entropy drops below 0.3 within 5k games.
+        # Entropy bonus encourages exploration — without it the agent
+        # converges too fast and gets stuck. We tried adaptive entropy
+        # (adjusting the coefficient based on current entropy levels)
+        # but it caused cascading instability, so now it's just fixed.
+        self.target_entropy = 1.0
+        self.entropy_coef = 0.05     # The sweet spot — 0.025 was too low, 0.1 collapsed
         self.min_entropy_coef = 0.04
         self.max_entropy_coef = 0.15
 
-        # NO adaptive parameters - they caused cascading failures
         self.entropy_history = deque(maxlen=100)
         self.policy_loss_history = deque(maxlen=50)
         self.current_entropy_coef = self.entropy_coef
 
-        # Trust region
-        self.max_kl = 0.02  # Maximum KL divergence per update
+        # KL divergence constraint — stops the policy from changing too
+        # much in a single update. Standard PPO trust region stuff.
+        self.max_kl = 0.02
         self.adaptive_kl_coef = 1.0
 
         # Gradient clipping - FIXED, no adaptation

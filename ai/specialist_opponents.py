@@ -1,21 +1,23 @@
 """
-Specialist AIs for Catan 1v1 Training
+Specialist AIs that each commit to one extreme strategy for the whole game.
 
-Each specialist commits to a single whole-game strategy from placement through endgame.
-They are designed to expose strategic blindspots in the generalist RL agent by playing
-styles it has never encountered — pure city rushing, road blocking, dev card spamming,
-aggressive disruption, and port-based trading engines.
+The idea is that the RL agent can get stuck in a local optimum where it
+beats all the generic opponents but has glaring blind spots. These
+specialists are designed to expose those blind spots:
 
-Usage:
-    from ai.specialist_opponents import play_specialist_turn
-    play_specialist_turn(game, player_id, strategy='city_rusher')
+- city_rusher: Goes all-in on cities + ore/wheat. Tests whether the
+  agent can handle someone who skips roads entirely and just upgrades.
+- road_blocker: Builds roads aggressively to claim Longest Road and
+  block the agent's expansion paths. Wood/brick focus.
+- dev_card_spammer: Buys dev cards every turn for Largest Army + hidden
+  VP cards. Tests if the agent can handle a non-building strategy.
+- balanced_aggressor: Basically our strong AI but with extra-aggressive
+  robber placement — always targets the agent.
+- port_specialist: Builds toward ports and trades 2:1 constantly.
+  Creates a weird economy the agent hasn't seen before.
 
-Available strategies:
-    'city_rusher'         — Cities + dev cards, ore/wheat focus
-    'road_blocker'        — Longest Road + corridor denial, wood/brick focus
-    'dev_card_spammer'    — Largest Army + VP cards, ore/wheat/sheep focus
-    'balanced_aggressor'  — Strong AI clone with aggressive robber/blocking
-    'port_specialist'     — Port-based trading engine, adapts to best available port
+Used in the later curriculum phases (8+) when the agent is already decent
+but needs to learn to handle diverse strategies.
 """
 
 import random

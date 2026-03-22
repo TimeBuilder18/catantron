@@ -1,9 +1,14 @@
 """
-Catantron — Polished Catan Game GUI
-Entry point with title screen, game modes, and visual gameplay.
+Catantron — the main entry point for the playable Catan game.
+
+Run this to launch the game with a title screen and mode selection:
+  - Player vs Player (local hotseat)
+  - Player vs AI (play against the trained neural network)
+  - Player vs Bot (play against rule-based AI)
+  - Watch AI (spectate the trained model playing)
 
 Usage:
-    python main_game.py
+    python main.py
 """
 
 import pygame

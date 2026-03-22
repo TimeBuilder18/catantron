@@ -1,19 +1,17 @@
 """
-Self-Play Opponent Pool for Catan AI
+Self-play opponent pool — the final boss of curriculum learning.
 
-Maintains a rotating pool of past-checkpoint networks and uses them as
-opponents during training.  Replaces or supplements scripted AIs once
-the agent is strong enough to benefit from playing itself.
+Once the agent is strong enough to beat all scripted opponents, it starts
+playing against frozen snapshots of itself. This prevents it from overfitting
+to the scripted AIs' specific patterns and forces it to develop genuinely
+good Catan strategy.
 
-Thread-safe: multiple parallel game threads each get their own opponent
-env via threading.local(), while the loaded network weights are shared
-read-only across threads.
+The pool keeps the N most recent checkpoints and randomly picks one each
+game. Networks are loaded in eval mode with no_grad — they're frozen and
+only used for inference, never trained.
 
-Usage (in training loop):
-    pool = SelfPlayPool("models/v3_overnight2_game*.pt", pool_size=8)
-
-    # Pass pool into play_game so opponent turns use it:
-    trainer.play_game(..., primary_ai='self_play', self_play_pool=pool)
+Thread-safe: multiple parallel game threads share the loaded weights
+(read-only) but each gets its own environment via threading.local().
 """
 
 import glob

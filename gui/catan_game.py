@@ -1,21 +1,14 @@
 """
-Visual AI Training Environment for Catan
+Pygame visual game interface for watching the AI play or playing manually.
 
-Combines:
-- AI training interface (observations, actions, step function)
-- Pygame visualization (watch the AI play)
-- Simplified game (NO TRADING - too complex for AI)
+This was our first visual game before we built the polished main.py version.
+It combines the training environment with a pygame renderer so you can
+actually see what the AI is doing — useful for debugging and demos.
 
-USAGE:
-------
-# Watch AI play with trained model
-python visual_ai_game.py --model models/curriculum_v3_stable_phase5.pt --ai-difficulty medium
-
-# Watch random agents
-python visual_ai_game.py --ai-difficulty random
-
-# Manual control mode
-python visual_ai_game.py --manual
+Modes:
+- Watch a trained model play against a rule-based opponent
+- Manual control mode for testing
+- Random agent mode for baseline comparison
 """
 
 import pygame
