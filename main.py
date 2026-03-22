@@ -396,27 +396,47 @@ def play_neural_turn(game, player_id, network, device, catan_env, log=None):
             return True
 
         elif action_name == 'build_settlement':
+            built = False
             if vertex_id < len(board.vertices):
-                player.try_build_settlement(board.vertices[vertex_id])
+                result = player.try_build_settlement(board.vertices[vertex_id])
+                built = result[0] if isinstance(result, tuple) else bool(result)
+            if built:
                 log(f"{player.name} built a settlement", player.color)
+            elif game.can_end_turn():
+                game.end_turn()
             return True
 
         elif action_name == 'build_city':
+            built = False
             if vertex_id < len(board.vertices):
-                player.try_build_city(board.vertices[vertex_id])
+                result = player.try_build_city(board.vertices[vertex_id])
+                built = result[0] if isinstance(result, tuple) else bool(result)
+            if built:
                 log(f"{player.name} upgraded to a city", player.color)
+            elif game.can_end_turn():
+                game.end_turn()
             return True
 
         elif action_name == 'build_road':
+            built = False
             if edge_id < len(board.edges):
-                player.try_build_road(board.edges[edge_id])
-                game.update_longest_road()
+                result = player.try_build_road(board.edges[edge_id])
+                built = result[0] if isinstance(result, tuple) else bool(result)
+                if built:
+                    game.update_longest_road()
+            if built:
                 log(f"{player.name} built a road", player.color)
+            elif game.can_end_turn():
+                game.end_turn()
             return True
 
         elif action_name == 'buy_dev_card':
-            player.try_buy_development_card(game.dev_deck)
-            log(f"{player.name} bought a dev card", player.color)
+            result = player.try_buy_development_card(game.dev_deck)
+            bought = result[0] if isinstance(result, tuple) else bool(result)
+            if bought:
+                log(f"{player.name} bought a dev card", player.color)
+            elif game.can_end_turn():
+                game.end_turn()
             return True
 
         elif action_name == 'end_turn':
@@ -427,8 +447,13 @@ def play_neural_turn(game, player_id, network, device, catan_env, log=None):
         elif action_name == 'trade_with_bank':
             give_res = resource_map[give_idx]
             get_res = resource_map[get_idx]
-            game.execute_bank_trade(player, give_res, get_res)
-            log(f"{player.name} traded {give_res.name} for {get_res.name}", player.color)
+            success, msg = game.execute_bank_trade(player, give_res, get_res)
+            if success:
+                log(f"{player.name} traded {give_res.name} for {get_res.name}", player.color)
+            else:
+                # Trade failed — end turn to avoid infinite loop
+                if game.can_end_turn():
+                    game.end_turn()
             return True
 
         elif action_name == 'play_knight':
