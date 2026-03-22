@@ -1,11 +1,6 @@
 """
-Catantron — the main entry point for the playable Catan game.
-
-Run this to launch the game with a title screen and mode selection:
-  - Player vs Player (local hotseat)
-  - Player vs AI (play against the trained neural network)
-  - Player vs Bot (play against rule-based AI)
-  - Watch AI (spectate the trained model playing)
+Catantron — Polished Catan Game GUI
+Entry point with title screen, game modes, and visual gameplay.
 
 Usage:
     python main.py
@@ -20,18 +15,18 @@ from enum import Enum
 
 try:
     import torch
-    from model.model_loader import NetworkWrapper
-    from environment.catan_env import CatanEnv
+    from network_wrapper import NetworkWrapper
+    from catan_env_pytorch import CatanEnv
     HAS_TORCH = True
 except ImportError:
     HAS_TORCH = False
 
-from game.hexagon import Tile
-from game.game_system import (Player, Robber, GameBoard, GameSystem, ResourceType,
+from tile import Tile
+from game_system import (Player, Robber, GameBoard, GameSystem, ResourceType,
                          Settlement, City, Road, DevelopmentCardType, GameConstants,
                          PortType)
-from gui import gui_components
-from gui.gui_components import (
+import gui_components
+from gui_components import (
     BG_COLOR, PANEL_BG, PANEL_BORDER,
     TEXT_COLOR, TEXT_DIM, GOLD, WHITE, BLACK,
     RESOURCE_COLORS, RESOURCE_DISPLAY_NAMES, RESOURCE_TYPE_NAMES,
@@ -181,7 +176,7 @@ def find_closest_tile(game_board, mouse_pos, offset, max_distance=40):
 # ===========================================================================
 
 def _find_best_robber_tile(game, my_player_id):
-    from game.game_system import City as CityClass
+    from game_system import City as CityClass
     pip_values = {2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 8: 5, 9: 4, 10: 3, 11: 2, 12: 1}
     my_player = game.players[my_player_id]
     current_robber_tile = game.robber.position
@@ -454,9 +449,10 @@ def play_neural_turn(game, player_id, network, device, catan_env):
             return True
 
     except Exception as e:
-        print(f"Neural AI error: {e}")
+        print(f"[Neural AI] ERROR for player {player_id}: {e}")
         import traceback
         traceback.print_exc()
+        print(f"[Neural AI] Falling back to random for player {player_id}")
         return play_random_turn(game, player_id)
 
 
@@ -464,7 +460,7 @@ def play_opponent_turn(game, player_id, ai_difficulty='random'):
     if ai_difficulty == 'random':
         return play_random_turn(game, player_id)
     try:
-        from ai.scripted_opponents import play_rule_based_turn
+        from rule_based_ai import play_rule_based_turn
         class MinimalEnv:
             def __init__(self, g):
                 self.game_env = type('obj', (object,), {'game': g})()
@@ -656,7 +652,9 @@ class CatantronApp:
             # Swap game reference to point at our game
             self.neural_env.game_env.game = self.game
 
-            self.add_message(f"Neural AI loaded ({device})", (100, 220, 100))
+            model_name = model_path.split('/')[-1] if '/' in model_path else model_path
+            print(f"[Neural AI] Loaded model: {model_path} on {device}")
+            self.add_message(f"Neural AI loaded: {model_name} ({device})", (100, 220, 100))
         except Exception as e:
             print(f"Failed to load neural AI: {e}")
             import traceback
@@ -974,8 +972,8 @@ class CatantronApp:
                        x, y, width=pw)
         y += 24
 
-        # Resource cards for active human player (or current player in PvP)
-        if self.is_human_turn() or self.mode == GameMode.PVP:
+        # Resource cards for current player (always visible in watch/PvP, human turn otherwise)
+        if self.is_human_turn() or self.mode in (GameMode.PVP, GameMode.WATCH_AI):
             draw_resource_panel(self.screen, current, x, y)
             y += 82
 
