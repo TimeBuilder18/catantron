@@ -449,9 +449,10 @@ def play_neural_turn(game, player_id, network, device, catan_env):
             return True
 
     except Exception as e:
-        print(f"Neural AI error: {e}")
+        print(f"[Neural AI] ERROR for player {player_id}: {e}")
         import traceback
         traceback.print_exc()
+        print(f"[Neural AI] Falling back to random for player {player_id}")
         return play_random_turn(game, player_id)
 
 
@@ -651,7 +652,9 @@ class CatantronApp:
             # Swap game reference to point at our game
             self.neural_env.game_env.game = self.game
 
-            self.add_message(f"Neural AI loaded ({device})", (100, 220, 100))
+            model_name = model_path.split('/')[-1] if '/' in model_path else model_path
+            print(f"[Neural AI] Loaded model: {model_path} on {device}")
+            self.add_message(f"Neural AI loaded: {model_name} ({device})", (100, 220, 100))
         except Exception as e:
             print(f"Failed to load neural AI: {e}")
             import traceback
@@ -969,8 +972,8 @@ class CatantronApp:
                        x, y, width=pw)
         y += 24
 
-        # Resource cards for active human player (or current player in PvP)
-        if self.is_human_turn() or self.mode == GameMode.PVP:
+        # Resource cards for current player (always visible in watch/PvP, human turn otherwise)
+        if self.is_human_turn() or self.mode in (GameMode.PVP, GameMode.WATCH_AI):
             draw_resource_panel(self.screen, current, x, y)
             y += 82
 
