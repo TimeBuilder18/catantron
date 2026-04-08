@@ -343,6 +343,10 @@ def play_neural_turn(game, player_id, network, device, catan_env, log=None):
         # Sync env's game reference to our game
         catan_env.game_env.game = game
 
+        # Verify env perspective matches the player taking the turn
+        if catan_env.player_id != player_id:
+            catan_env.player_id = player_id
+
         # Build observation + masks
         obs = catan_env._get_obs()
 
