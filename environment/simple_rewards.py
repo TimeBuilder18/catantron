@@ -90,12 +90,10 @@ class SimplifiedRewardWrapper(PositionalRewardMixin):
             if info.get('built_settlement') or action_name_tmp == 'place_settlement':
                 reward += self._settlement_shaping(player)
 
-            # Road bonus: roads are prerequisite for settlement expansion → more cities.
-            # Without this, agent never learns to build roads and VP caps at ~4
-            # (2 initial settlements upgraded to cities → stuck, no new settlement spots).
+            # Road bonus: quality-only via expansion shaping (no flat bonus).
+            # Flat road bonus removed to prevent road addiction during training.
             if info.get('action_name') == 'build_road' and info.get('success', False):
-                reward += 2.0  # base
-                reward += self._road_expansion_shaping(player)  # quality bonus
+                reward += self._road_expansion_shaping(player)  # quality only, no flat bonus
 
             # Effective trade: reward trades that create a build opportunity
             if info.get('bank_trade') and info.get('success') and info.get('trade_led_to_build_opportunity'):
@@ -142,9 +140,9 @@ class SimplifiedRewardWrapper(PositionalRewardMixin):
             if info.get('built_settlement'):
                 reward += 3.0  # Settlements are good
 
-            # Road bonus: same fix as vp_only — roads must have non-zero reward
+            # Road bonus removed — roads rewarded only through VP (expansion -> settlements)
             if info.get('action_name') == 'build_road' and info.get('success', False):
-                reward += 2.0  # Enables settlement → city expansion chain
+                pass  # No flat bonus; value comes from enabling settlements
 
             # Dev card play rewards
             action_name = info.get('action_name', '')

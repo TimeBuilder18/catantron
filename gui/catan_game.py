@@ -24,6 +24,18 @@ from game.game_system import (Player, Robber, GameBoard, GameSystem, ResourceTyp
 from model.model_loader import NetworkWrapper
 from environment.simple_rewards import SimplifiedRewardWrapper
 
+def sample_with_temperature(probs, temperature=0.5):
+    """Sample from probability distribution with temperature scaling."""
+    if temperature <= 0.01:
+        return int(torch.argmax(probs).item())
+    logits = torch.log(probs + 1e-8) / temperature
+    logits = logits - logits.max()  # numerical stability
+    exp_logits = torch.exp(logits)
+    normalized = exp_logits / exp_logits.sum()
+    normalized = torch.clamp(normalized, min=1e-8)
+    normalized = normalized / normalized.sum()
+    return int(torch.multinomial(normalized, 1).item())
+
 # Standard Catan setup
 NUMBER_TOKENS = [5, 2, 6, 3, 8, 10, 9, 12, 11, 4, 8, 10, 9, 4, 5, 6, 3, 11]
 RESOURCES = ["forest"] * 4 + ["hill"] * 3 + ["field"] * 4 + ["mountain"] * 3 + ["pasture"] * 4 + ["desert"]
@@ -855,6 +867,9 @@ def main():
         moves = 0
         max_moves = 3000
         last_move_time = pygame.time.get_ticks()
+        actions_this_turn = 0
+        MAX_ACTIONS_PER_TURN = 10
+        last_player_id = -1
 
         while running and moves < max_moves:
             # Handle pygame events
@@ -874,12 +889,17 @@ def main():
                 current_player = game.get_current_player()
                 current_id = game.players.index(current_player)
 
+                # Reset action counter when player changes
+                if current_id != last_player_id:
+                    actions_this_turn = 0
+                    last_player_id = current_id
+
                 if current_id == 0:
                     # Player 0 - Neural network or random
                     moves += 1
                     if network:
                         try:
-                            # Get action from network (greedy argmax — zero entropy)
+                            # Get action from network (temperature sampling)
                             with torch.no_grad():
                                 action_probs, vertex_probs, edge_probs, trade_give_probs, trade_get_probs, _ = network.policy.forward(
                                     torch.FloatTensor(obs['observation']).unsqueeze(0).to(device),
@@ -888,19 +908,42 @@ def main():
                                     torch.FloatTensor(obs['edge_mask']).unsqueeze(0).to(device)
                                 )
 
-                            action_id  = int(torch.argmax(action_probs[0]).item())
-                            vertex_id  = int(torch.argmax(vertex_probs[0]).item())
-                            edge_id    = int(torch.argmax(edge_probs[0]).item())
-                            give_idx   = int(torch.argmax(trade_give_probs[0]).item())
-                            get_idx    = int(torch.argmax(trade_get_probs[0]).item())
-                            if give_idx == get_idx:
-                                get_idx = (give_idx + 1) % 5
+                            # Per-turn action limit: force end_turn after too many actions
+                            if actions_this_turn >= MAX_ACTIONS_PER_TURN:
+                                action_id = 7  # end_turn
+                                vertex_id = 0
+                                edge_id = 0
+                                give_idx = 0
+                                get_idx = 1
+                            else:
+                                action_id  = sample_with_temperature(action_probs[0], temperature=0.5)
+                                vertex_id  = sample_with_temperature(vertex_probs[0], temperature=0.3)
+                                edge_id    = sample_with_temperature(edge_probs[0], temperature=0.3)
+                                give_idx   = sample_with_temperature(trade_give_probs[0], temperature=0.3)
+                                get_idx    = sample_with_temperature(trade_get_probs[0], temperature=0.3)
+                                if give_idx == get_idx:
+                                    get_idx = (give_idx + 1) % 5
 
                             # Step environment
                             next_obs, reward, terminated, truncated, info = game_env.step(
                                 action_id, vertex_id, edge_id, give_idx, get_idx
                             )
                             obs = next_obs
+
+                            # Track actions per turn
+                            actions_this_turn += 1
+                            if action_id == 7:  # end_turn
+                                actions_this_turn = 0
+
+                            # Action logging
+                            _action_names = ['roll_dice', 'place_settlement', 'place_road',
+                                'build_settlement', 'build_city', 'build_road', 'buy_dev_card',
+                                'end_turn', 'wait', 'trade_with_bank', 'do_nothing',
+                                'play_knight', 'play_monopoly', 'play_year_of_plenty']
+                            _player = game.players[current_id]
+                            print(f"  Turn {moves}: {_action_names[action_id]} | "
+                                  f"Roads:{len(_player.roads)}/15 Sett:{len(_player.settlements)} "
+                                  f"City:{len(_player.cities)} VP:{_player.calculate_victory_points()}")
 
                             if terminated or truncated:
                                 winner = game.check_victory_conditions()
