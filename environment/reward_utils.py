@@ -143,10 +143,10 @@ class PositionalRewardMixin:
                             visited.add(id(adj))
                             queue.append((adj, depth + 1))
 
-        reward = min(best_score / 15.0, 1.0) * 4.0
+        reward = min(best_score / 15.0, 1.0) * 3.0   # was 4.0
         if toward_port:
-            reward += 2.0
+            reward += 0.5                               # was 2.0
         if best_resources - self._produced_resources:
-            reward += 1.0
+            reward += 0.5                               # was 1.0
 
-        return reward
+        return min(reward, 4.0)                         # hard cap (was uncapped at 7.0)

@@ -98,7 +98,7 @@ class PBRSFixedRewardWrapper(PositionalRewardMixin):
         win_vp = self.victory_points_to_win
         phase = 'early' if current_vp < 0.5 * win_vp else ('late' if current_vp >= 0.8 * win_vp else 'mid')
 
-        road_bonus      = {'early': 12, 'mid':  6, 'late':  3}[phase]
+        road_bonus      = {'early':  0, 'mid':  0, 'late':  0}[phase]  # zeroed: roads rewarded only via expansion shaping
         settle_bonus    = {'early': 25, 'mid': 15, 'late': 10}[phase]
         city_bonus      = {'early': 12, 'mid': 15, 'late': 13}[phase]
         dev_card_bonus  = {'early':  5, 'mid':  8, 'late': 10}[phase]
@@ -118,8 +118,7 @@ class PBRSFixedRewardWrapper(PositionalRewardMixin):
             base_reward += self._settlement_shaping(player)
 
         if info.get('action_name') == 'build_road' and info.get('success', False):
-            base_reward += road_bonus
-            # Directional quality: BFS toward best reachable settlement spot
+            # No flat bonus — roads rewarded only via expansion quality shaping
             base_reward += self._road_expansion_shaping(player)
 
         # Effective trade: reward trades that open a build opportunity

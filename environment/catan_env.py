@@ -67,6 +67,7 @@ class CatanEnv(gym.Env):
         self._bank_trades_this_game = 0
         self._last_city_count = 0
         self._resources_spent_on_trades = 0
+        self._actions_this_turn = 0
 
         # PERFORMANCE: Cache for port access checks (cleared on settlement/city build)
         self._port_access_cache = None
@@ -122,6 +123,7 @@ class CatanEnv(gym.Env):
         self._bank_trades_this_game = 0
         self._last_city_count = 0
         self._resources_spent_on_trades = 0
+        self._actions_this_turn = 0
 
         # Reset port access cache for new game
         self._port_access_cache = None
@@ -638,9 +640,11 @@ class CatanEnv(gym.Env):
             )
             step_info.update(step_info_from_env)
 
-            # Track turn count for phase awareness
+            # Track actions and turns
+            self._actions_this_turn += 1
             if action_name == 'end_turn':
                 self._turn_count += 1
+                self._actions_this_turn = 0
 
             # Track city building for rewards - ONLY if build actually succeeded!
             if action_name == 'build_city' and step_info.get('success', False):
@@ -888,21 +892,18 @@ class CatanEnv(gym.Env):
                 city_readiness = ore_progress * wheat_progress  # 0 to 1
                 potential += city_readiness * 5.0
 
-        # ========== ROAD VALUE (CAPPED AT 15) ==========
-        # Roads are valuable for expansion and longest road!
-        # Max 15 roads per player in Catan - cap bonuses there
-        num_roads = min(len(player.roads), 15)  # Cap at 15 (Catan max)
-        # Bonus for each road - roads enable expansion
-        potential += num_roads * 0.3
-        # Extra bonus for longest road progress
-        if num_roads >= 5:
-            potential += 1.0
-        if num_roads >= 8:
-            potential += 1.0  # Getting close to longest road
-        if num_roads >= 10:
-            potential += 1.5  # Strong longest road contender
-        if num_roads >= 13:
-            potential += 2.0  # Near max roads - dominating the board
+        # ========== ROAD VALUE ==========
+        # Roads: tiny per-road value + longest road status.
+        # Reduced from 0.3/road + milestones (up to +9.5) to prevent road spam.
+        # After /10 PBRS scaling, this gives ~+0.01 PBRS per road — barely
+        # noticeable but not zero. Expansion shaping (+0-4 capped) is the
+        # main road quality signal.
+        num_roads = min(len(player.roads), 15)
+        potential += num_roads * 0.1  # was 0.3 — reduced 3x
+        if player.has_longest_road:
+            potential += 3.0
+        elif num_roads >= 5:
+            potential += 0.5  # contending for longest road
 
         # ========== STRATEGIC ASSET POTENTIAL ==========
         if player.has_longest_road: potential += 2.0
@@ -1085,37 +1086,17 @@ class CatanEnv(gym.Env):
             reward += city_bonus
             reward_breakdown['city_bonus'] = city_bonus
 
-        # ========== SETTLEMENT BUILDING BONUS ==========
-        # Settlements give VP and unlock city upgrades - essential for 10VP
-        if step_info.get('built_settlement') or (action_name == 'build_settlement' and vp_diff > 0):
-            num_settlements = new_obs.get('my_settlements', 0)
+        # ========== SETTLEMENT BUILDING ==========
+        # Settlements rewarded through VP reward (+3.0 per VP). No additional bonus
+        # in the base env. Wrappers (PBRS/Simplified) add their own positional
+        # quality shaping. NOTE: This only affects the base env reward path.
+        # PBRSFixedRewardWrapper discards this reward entirely;
+        # SimplifiedRewardWrapper computes its own settlement rewards separately.
 
-            if self.num_players == 2:
-                # 1v1: Raised to ~city-level so the agent treats settlements as
-                # equally important prerequisites (3rd=+30, 4th=+35, 5th=+40)
-                settlement_bonus = 25.0
-                if num_settlements > 2:
-                    settlement_bonus += 5.0 * (num_settlements - 2)
-            else:
-                # 4-player: Standard bonus
-                settlement_bonus = 8.0
-                if num_settlements > 2:
-                    settlement_bonus += 3.0 * (num_settlements - 2)
-            if settlement_bonus > 0:
-                reward += settlement_bonus
-                reward_breakdown['settlement_bonus'] = settlement_bonus
-
-        # ========== ROAD BUILDING BONUS ==========
-        # Roads are required to expand settlements - critical for 10VP
-        if action_name == 'build_road' and step_info.get('success', False):
-            num_roads = new_obs.get('my_roads', 0)
-            road_bonus = 5.0
-            if num_roads > 2:
-                road_bonus += 2.0 * (num_roads - 2)
-            road_bonus = min(road_bonus, 15.0)
-            if road_bonus > 0:
-                reward += road_bonus
-                reward_breakdown['road_bonus'] = road_bonus
+        # ========== ROAD BUILDING ==========
+        # Roads get ZERO direct reward. Value comes from PBRS potential change
+        # (expansion access) and from enabling settlements which give VP.
+        # This prevents road addiction that dominated previous training runs.
 
         # ========== DEV CARD PURCHASE BONUS ==========
         # Buying dev cards is a valid strategy, give small reward

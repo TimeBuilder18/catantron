@@ -326,6 +326,19 @@ def play_random_turn(game, player_id, log=None):
     return False
 
 
+def _sample_with_temperature(probs, temperature=0.5):
+    """Sample from probability distribution with temperature scaling."""
+    if temperature <= 0.01:
+        return int(torch.argmax(probs).item())
+    logits = torch.log(probs + 1e-8) / temperature
+    logits = logits - logits.max()  # numerical stability
+    exp_logits = torch.exp(logits)
+    normalized = exp_logits / exp_logits.sum()
+    normalized = torch.clamp(normalized, min=1e-8)
+    normalized = normalized / normalized.sum()
+    return int(torch.multinomial(normalized, 1).item())
+
+
 def play_neural_turn(game, player_id, network, device, catan_env, log=None):
     """Play one AI action using the neural network.
 
@@ -359,11 +372,11 @@ def play_neural_turn(game, player_id, network, device, catan_env, log=None):
                     torch.FloatTensor(obs['edge_mask']).unsqueeze(0).to(device)
                 )
 
-        action_id = int(torch.argmax(action_probs[0]).item())
-        vertex_id = int(torch.argmax(vertex_probs[0]).item())
-        edge_id = int(torch.argmax(edge_probs[0]).item())
-        give_idx = int(torch.argmax(trade_give_probs[0]).item())
-        get_idx = int(torch.argmax(trade_get_probs[0]).item())
+        action_id = _sample_with_temperature(action_probs[0], temperature=0.5)
+        vertex_id = _sample_with_temperature(vertex_probs[0], temperature=0.3)
+        edge_id = _sample_with_temperature(edge_probs[0], temperature=0.3)
+        give_idx = _sample_with_temperature(trade_give_probs[0], temperature=0.3)
+        get_idx = _sample_with_temperature(trade_get_probs[0], temperature=0.3)
         if give_idx == get_idx:
             get_idx = (give_idx + 1) % 5
 
@@ -374,6 +387,11 @@ def play_neural_turn(game, player_id, network, device, catan_env, log=None):
             'do_nothing', 'play_knight', 'play_monopoly', 'play_year_of_plenty'
         ]
         action_name = action_names[action_id]
+
+        # Action logging
+        log(f"{player.name}: {action_name} | Roads:{len(player.roads)}/15 "
+            f"Sett:{len(player.settlements)} City:{len(player.cities)} "
+            f"VP:{player.calculate_victory_points()}", player.color)
         board = game.game_board
         resource_map = [ResourceType.WOOD, ResourceType.BRICK, ResourceType.WHEAT,
                         ResourceType.SHEEP, ResourceType.ORE]
