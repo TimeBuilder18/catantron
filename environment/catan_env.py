@@ -944,20 +944,29 @@ class CatanEnv(gym.Env):
         potential += total_dev * 0.3
 
         # ========== OPPONENT THREAT POTENTIAL ==========
-        # In 1v1, opponent threat is MUCH more urgent (direct competition)
-        # In 4-player, threats are spread across multiple opponents
         for opp in self.game_env.game.players:
             if opp != player:
                 opp_vp = opp.calculate_victory_points()
-                if opp_vp >= 8:
-                    if self.num_players == 2:
-                        # 1v1: Opponent at 8+ VP is a CRITICAL threat
-                        # Scale penalty by 2.5x to reflect urgency
+                my_vp = player.calculate_victory_points()
+
+                if self.num_players == 2:
+                    # 1v1: Progressive pressure based on opponent VP
+                    if opp_vp >= 8:
                         penalty = min((opp_vp - 7) * 5.0, 25.0)
+                    elif opp_vp >= 6:
+                        penalty = (opp_vp - 5) * 2.0
                     else:
-                        # 4-player: Standard penalty
-                        penalty = min((opp_vp - 7) * 2.0, 10.0)
+                        penalty = 0.0
                     potential -= penalty
+
+                    # VP lead/deficit: reward being ahead, penalize falling behind
+                    vp_diff = my_vp - opp_vp
+                    potential += vp_diff * 1.0  # +1 per VP lead, -1 per VP deficit
+                else:
+                    # 4-player: Standard penalty
+                    if opp_vp >= 8:
+                        penalty = min((opp_vp - 7) * 2.0, 10.0)
+                        potential -= penalty
 
         # ========== EXCESSIVE TRADING PENALTY (PBRS) ==========
         # Penalize states where agent has wasted resources on trades

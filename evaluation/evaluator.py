@@ -13,6 +13,7 @@ Usage:
 """
 
 import argparse
+import os
 import traceback
 import threading
 import time
@@ -24,6 +25,7 @@ from environment.catan_env import CatanEnv
 from model.model_loader import NetworkWrapper
 from training.trainer import play_opponent_turn
 from evaluation.quality_score import AgentQualityEvaluator
+from evaluation.eval_plots import plot_benchmark, plot_single_opponent
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -431,6 +433,8 @@ def benchmark(model_path, num_games=50, num_parallel=8):
               f"{r['model_avg_roads']:>5.2f} {r['model_avg_knights']:>5.2f} "
               f"{r['avg_moves']:>6.1f}")
     print(f"{'='*len(HDR)}")
+    model_name = os.path.splitext(os.path.basename(model_path))[0]
+    plot_benchmark(all_results, f"evaluation/{model_name}_benchmark.png")
     return all_results
 
 
@@ -454,6 +458,8 @@ def main():
         print(f"\nEvaluating vs {args.opponent.upper()} ({args.games} games) …")
         r = evaluate(args.model, args.opponent, args.games, args.parallel, verbose=True)
         _print_result(r)
+        model_name = os.path.splitext(os.path.basename(args.model))[0]
+        plot_single_opponent(r, f"evaluation/{model_name}_vs_{args.opponent}.png")
 
 
 if __name__ == '__main__':
