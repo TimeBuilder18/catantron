@@ -31,6 +31,9 @@ class PBRSFixedRewardWrapper(PositionalRewardMixin):
         self.victory_points_to_win = victory_points_to_win
         self.last_has_largest_army = False
         self.last_has_longest_road = False
+        # Turn diversity tracking
+        self._productive_actions_this_turn = set()
+        self._last_turn_player = -1
 
     def reset(self):
         obs, info = self.env.reset()
@@ -39,6 +42,8 @@ class PBRSFixedRewardWrapper(PositionalRewardMixin):
         self.last_vp = obs.get('my_victory_points', 0)
         self.last_has_largest_army = player.has_largest_army
         self.last_has_longest_road = player.has_longest_road
+        self._productive_actions_this_turn = set()
+        self._last_turn_player = -1
         self._shaping_reset()
         return obs, info
 
@@ -77,6 +82,23 @@ class PBRSFixedRewardWrapper(PositionalRewardMixin):
         # Base rewards (large!)
         base_reward = 0.0
 
+        # Turn diversity bonus: reward turns with multiple different productive actions
+        current_player = self.env.game_env.game.current_player_index
+        if current_player != self._last_turn_player:
+            # New turn — award diversity bonus for previous turn
+            if len(self._productive_actions_this_turn) >= 2:
+                base_reward += 2.0 * (len(self._productive_actions_this_turn) - 1)
+            self._productive_actions_this_turn = set()
+            self._last_turn_player = current_player
+
+        # Track productive actions this turn
+        action_name_div = info.get('action_name', '')
+        if action_name_div in ('build_settlement', 'build_city', 'build_road',
+                               'buy_dev_card', 'trade_with_bank', 'play_knight',
+                               'play_monopoly', 'play_year_of_plenty'):
+            if info.get('success', False):
+                self._productive_actions_this_turn.add(action_name_div)
+
         # +10 per victory point gained — this is the main learning signal.
         # We tried smaller values but the agent just ignored VP and
         # focused on whatever gave the biggest immediate reward instead.
@@ -100,7 +122,7 @@ class PBRSFixedRewardWrapper(PositionalRewardMixin):
 
         road_bonus      = {'early':  0, 'mid':  0, 'late':  0}[phase]  # zeroed: roads rewarded only via expansion shaping
         settle_bonus    = {'early': 25, 'mid': 15, 'late': 10}[phase]
-        city_bonus      = {'early': 12, 'mid': 15, 'late': 13}[phase]
+        city_bonus      = {'early': 15, 'mid': 25, 'late': 20}[phase]  # boosted: cities are THE dominant mid-game action
         dev_card_bonus  = {'early':  5, 'mid':  8, 'late': 10}[phase]
 
         player = self.env.game_env.game.players[self.player_id]
@@ -119,7 +141,12 @@ class PBRSFixedRewardWrapper(PositionalRewardMixin):
 
         if info.get('action_name') == 'build_road' and info.get('success', False):
             # No flat bonus — roads rewarded only via expansion quality shaping
-            base_reward += self._road_expansion_shaping(player)
+            road_quality = self._road_expansion_shaping(player)
+            base_reward += road_quality
+            # Penalize purposeless roads: if expansion shaping scored this road
+            # below 0.5, it's not heading anywhere useful — wasted resources
+            if road_quality < 0.5:
+                base_reward -= 1.0
 
         # Effective trade: reward trades that open a build opportunity
         if info.get('bank_trade') and info.get('success') and info.get('trade_led_to_build_opportunity'):

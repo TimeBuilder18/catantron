@@ -140,9 +140,10 @@ class SimplifiedRewardWrapper(PositionalRewardMixin):
             if info.get('built_settlement'):
                 reward += 3.0  # Settlements are good
 
-            # Road bonus removed — roads rewarded only through VP (expansion -> settlements)
+            # Road bonus: quality-only via expansion shaping, capped at 2.0
             if info.get('action_name') == 'build_road' and info.get('success', False):
-                pass  # No flat bonus; value comes from enabling settlements
+                player = self.env.game_env.game.players[self.player_id]
+                reward += self._road_expansion_shaping(player)
 
             # Dev card play rewards
             action_name = info.get('action_name', '')
