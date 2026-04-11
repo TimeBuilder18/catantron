@@ -31,6 +31,13 @@ class PBRSFixedRewardWrapper(PositionalRewardMixin):
         self.victory_points_to_win = victory_points_to_win
         self.last_has_largest_army = False
         self.last_has_longest_road = False
+        # Turn diversity tracking
+        self._productive_actions_this_turn = set()
+        self._last_turn_player = -1
+        # Opponent state tracking (1v1 denial rewards)
+        self._last_opp_vp = 0
+        self._last_opp_longest_road = False
+        self._last_opp_largest_army = False
 
     def reset(self):
         obs, info = self.env.reset()
@@ -39,7 +46,15 @@ class PBRSFixedRewardWrapper(PositionalRewardMixin):
         self.last_vp = obs.get('my_victory_points', 0)
         self.last_has_largest_army = player.has_largest_army
         self.last_has_longest_road = player.has_longest_road
+        self._productive_actions_this_turn = set()
+        self._last_turn_player = -1
         self._shaping_reset()
+        # Init opponent tracking for 1v1 denial rewards
+        if self.num_players == 2:
+            opp = self.env.game_env.game.players[1 - self.player_id]
+            self._last_opp_vp = opp.calculate_victory_points()
+            self._last_opp_longest_road = opp.has_longest_road
+            self._last_opp_largest_army = opp.has_largest_army
         return obs, info
 
     def _calculate_scaled_potential(self, player):
@@ -77,6 +92,23 @@ class PBRSFixedRewardWrapper(PositionalRewardMixin):
         # Base rewards (large!)
         base_reward = 0.0
 
+        # Turn diversity bonus: reward turns with multiple different productive actions
+        current_player = self.env.game_env.game.current_player_index
+        if current_player != self._last_turn_player:
+            # New turn — award diversity bonus for previous turn
+            if len(self._productive_actions_this_turn) >= 2:
+                base_reward += 2.0 * (len(self._productive_actions_this_turn) - 1)
+            self._productive_actions_this_turn = set()
+            self._last_turn_player = current_player
+
+        # Track productive actions this turn
+        action_name_div = info.get('action_name', '')
+        if action_name_div in ('build_settlement', 'build_city', 'build_road',
+                               'buy_dev_card', 'trade_with_bank', 'play_knight',
+                               'play_monopoly', 'play_year_of_plenty'):
+            if info.get('success', False):
+                self._productive_actions_this_turn.add(action_name_div)
+
         # +10 per victory point gained — this is the main learning signal.
         # We tried smaller values but the agent just ignored VP and
         # focused on whatever gave the biggest immediate reward instead.
@@ -100,7 +132,7 @@ class PBRSFixedRewardWrapper(PositionalRewardMixin):
 
         road_bonus      = {'early':  0, 'mid':  0, 'late':  0}[phase]  # zeroed: roads rewarded only via expansion shaping
         settle_bonus    = {'early': 25, 'mid': 15, 'late': 10}[phase]
-        city_bonus      = {'early': 12, 'mid': 15, 'late': 13}[phase]
+        city_bonus      = {'early': 15, 'mid': 25, 'late': 20}[phase]  # boosted: cities are THE dominant mid-game action
         dev_card_bonus  = {'early':  5, 'mid':  8, 'late': 10}[phase]
 
         player = self.env.game_env.game.players[self.player_id]
@@ -119,7 +151,12 @@ class PBRSFixedRewardWrapper(PositionalRewardMixin):
 
         if info.get('action_name') == 'build_road' and info.get('success', False):
             # No flat bonus — roads rewarded only via expansion quality shaping
-            base_reward += self._road_expansion_shaping(player)
+            road_quality = self._road_expansion_shaping(player)
+            base_reward += road_quality
+            # Penalize purposeless roads: if expansion shaping scored this road
+            # below 0.5, it's not heading anywhere useful — wasted resources
+            if road_quality < 0.5:
+                base_reward -= 1.0
 
         # Effective trade: reward trades that open a build opportunity
         if info.get('bank_trade') and info.get('success') and info.get('trade_led_to_build_opportunity'):
@@ -165,17 +202,66 @@ class PBRSFixedRewardWrapper(PositionalRewardMixin):
         self.last_has_largest_army = has_largest_army
         self.last_has_longest_road = has_longest_road
 
+        # ===== 1v1 COMPETITIVE DENIAL REWARDS =====
+        if self.num_players == 2:
+            opp = self.env.game_env.game.players[1 - self.player_id]
+            opp_vp = opp.calculate_victory_points()
+
+            # Stolen milestone bonus: taking LA/LR FROM opponent = huge swing
+            if has_largest_army and self._last_opp_largest_army:
+                base_reward += 25.0  # Stole Largest Army (4 VP swing)
+            if has_longest_road and self._last_opp_longest_road:
+                base_reward += 25.0  # Stole Longest Road (4 VP swing)
+
+            # Opponent VP drop: opponent losing VP is as good as us gaining it
+            opp_vp_drop = self._last_opp_vp - opp_vp
+            if opp_vp_drop > 0:
+                base_reward += opp_vp_drop * 8.0  # +8 per opponent VP lost
+
+            # Urgency multiplier: gentle scaling when opponent nears victory.
+            # 7VP=1.1x, 8VP=1.2x, 9VP=1.3x — creates pressure without
+            # making single actions rival the win bonus (+100).
+            if opp_vp >= 7:
+                urgency = 1.0 + (opp_vp - 6) * 0.1
+                base_reward *= urgency
+
+            # Blocking settlement: placing on a spot the opponent's road reaches
+            # (already handled by _settlement_shaping blocking bonus of +2.0,
+            # but in 1v1 the denial value is higher)
+            # Guard: skip during initial placement (no opponent roads to block yet)
+            is_initial = self.env.game_env.game.is_initial_placement_phase()
+            if not is_initial and (info.get('built_settlement') or info.get('action_name') == 'place_settlement'):
+                new_vertex = player.settlements[-1].position if player.settlements else None
+                if new_vertex:
+                    for adj in new_vertex.adjacent_vertices:
+                        for edge in adj.connected_edges:
+                            if edge.structure and edge.structure.player != player:
+                                base_reward += 8.0  # Strong 1v1 denial
+                                break
+
+            # Robber on opponent's best hex: bonus for disrupting production
+            if info.get('action_name') == 'play_knight' and info.get('success', False):
+                base_reward += 4.0  # Robber disrupts opponent's production
+
+            # Update opponent tracking
+            self._last_opp_vp = opp_vp
+            self._last_opp_longest_road = opp.has_longest_road
+            self._last_opp_largest_army = opp.has_largest_army
+
         # Terminal rewards — winning MUST dominate everything else.
-        # Win bonus (100) > sum of all VP rewards (10 VP * 10 = 100) so
-        # the agent learns that actually winning matters more than just
-        # accumulating points. Loss penalty is small (-10) because we
-        # don't want the agent to play overly defensively.
         if terminated:
             winner_id = info.get('winner_id', None)
             if winner_id == self.player_id:
                 base_reward += 100.0
             else:
-                base_reward -= 10.0
+                # Loss penalty scales with how close WE were to winning
+                # Close loss hurts more — motivates the agent to close out games
+                if current_vp >= 8:
+                    base_reward -= 30.0  # We were SO close — devastating
+                elif current_vp >= 6:
+                    base_reward -= 20.0  # Had a real shot
+                else:
+                    base_reward -= 10.0  # Standard loss
 
         # Total reward = base + PBRS shaping
         total_reward = base_reward + pbrs_reward

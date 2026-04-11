@@ -892,17 +892,41 @@ class CatanEnv(gym.Env):
                 city_readiness = ore_progress * wheat_progress  # 0 to 1
                 potential += city_readiness * 5.0
 
-        # ========== ROAD VALUE ==========
-        # Roads: tiny per-road value + longest road status.
-        # Reduced from 0.3/road + milestones (up to +9.5) to prevent road spam.
-        # After /10 PBRS scaling, this gives ~+0.01 PBRS per road — barely
-        # noticeable but not zero. Expansion shaping (+0-4 capped) is the
-        # main road quality signal.
-        num_roads = min(len(player.roads), 15)
-        potential += num_roads * 0.1  # was 0.3 — reduced 3x
+        # ========== ROAD VALUE (EXPANSION-ACCESS BASED) ==========
+        # Value roads by what settlement spots they ACCESS, not raw count.
+        # Count road endpoints adjacent to unoccupied, distance-rule-valid
+        # vertices with reasonable pip scores (>= 4 pips).
+        reachable_spots = 0
+        seen_vertices = set()
+        for road in player.roads:
+            for vertex in [road.position.vertex1, road.position.vertex2]:
+                vid = id(vertex)
+                if vid in seen_vertices:
+                    continue
+                seen_vertices.add(vid)
+                if vertex.structure is not None:
+                    continue
+                # Check distance rule: no adjacent vertex has a structure
+                too_close = any(adj.structure is not None for adj in vertex.adjacent_vertices)
+                if too_close:
+                    continue
+                # Check pip quality of this potential settlement spot
+                pips = sum(
+                    pip_map.get(t.number, 0)
+                    for t in vertex.adjacent_tiles
+                    if hasattr(t, 'number') and t.number
+                    and hasattr(t, 'resource') and t.resource and t.resource != 'desert'
+                )
+                if pips >= 4:
+                    reachable_spots += 1
+        # Cap at 3 — beyond 3 reachable spots, more roads have diminishing returns
+        reachable_spots = min(reachable_spots, 3)
+        potential += reachable_spots * 1.0
+
+        # Longest road bonus
         if player.has_longest_road:
             potential += 3.0
-        elif num_roads >= 5:
+        elif len(player.roads) >= 5:
             potential += 0.5  # contending for longest road
 
         # ========== STRATEGIC ASSET POTENTIAL ==========
@@ -920,20 +944,29 @@ class CatanEnv(gym.Env):
         potential += total_dev * 0.3
 
         # ========== OPPONENT THREAT POTENTIAL ==========
-        # In 1v1, opponent threat is MUCH more urgent (direct competition)
-        # In 4-player, threats are spread across multiple opponents
         for opp in self.game_env.game.players:
             if opp != player:
                 opp_vp = opp.calculate_victory_points()
-                if opp_vp >= 8:
-                    if self.num_players == 2:
-                        # 1v1: Opponent at 8+ VP is a CRITICAL threat
-                        # Scale penalty by 2.5x to reflect urgency
+                my_vp = player.calculate_victory_points()
+
+                if self.num_players == 2:
+                    # 1v1: Progressive pressure based on opponent VP
+                    if opp_vp >= 8:
                         penalty = min((opp_vp - 7) * 5.0, 25.0)
+                    elif opp_vp >= 6:
+                        penalty = (opp_vp - 5) * 2.0
                     else:
-                        # 4-player: Standard penalty
-                        penalty = min((opp_vp - 7) * 2.0, 10.0)
+                        penalty = 0.0
                     potential -= penalty
+
+                    # VP lead/deficit: reward being ahead, penalize falling behind
+                    vp_diff = my_vp - opp_vp
+                    potential += vp_diff * 1.0  # +1 per VP lead, -1 per VP deficit
+                else:
+                    # 4-player: Standard penalty
+                    if opp_vp >= 8:
+                        penalty = min((opp_vp - 7) * 2.0, 10.0)
+                        potential -= penalty
 
         # ========== EXCESSIVE TRADING PENALTY (PBRS) ==========
         # Penalize states where agent has wasted resources on trades

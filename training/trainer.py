@@ -46,6 +46,7 @@ from ai.opponent_pool import SelfPlayPool
 from game.game_system import ResourceType
 from ai.weighted_opponent import play_weighted_random_turn
 from ai.scripted_opponents import score_vertex, score_edge
+from training.training_plots import TrainingLogger
 
 
 # Resource order matches catan_env_pytorch.py trade_give/get index mapping
@@ -726,6 +727,7 @@ class CurriculumTrainerV3:
 
         self.games_played = 0
         self._games_lock = threading.Lock()  # Thread safety for games_played counter
+        self.training_logger = TrainingLogger()
 
         # Entropy bonus encourages exploration — without it the agent
         # converges too fast and gets stuck. We tried adaptive entropy
@@ -1080,6 +1082,11 @@ class CurriculumTrainerV3:
                 'resource_diversity': _aqs_resource_diversity(_p0),
                 'port_access_count': _aqs_port_access(_p0, env.game_env.game.game_board),
             })
+            self.training_logger.log_game(
+                self.games_played, my_vp, winner_id == 0,
+                len(_p0.roads), len(_p0.settlements), len(_p0.cities),
+                sum(episode_rewards), primary_ai
+            )
 
         # Track settlement count at game end (diagnose expansion failure)
         # If this stays at 2.0, agent never builds new settlements beyond initial placements
@@ -1692,6 +1699,7 @@ class CurriculumTrainerV3:
                     curr_ec = losses[-1]['entropy_coef']
                     curr_gn = losses[-1]['grad_norm']
                     curr_lr = losses[-1]['lr']
+                    self.training_logger.log_training(game_num, avg_p, avg_v, avg_e, curr_lr, curr_ec)
 
                     elapsed = time.time() - start_time
                     speed = game_num / elapsed * 60
@@ -1822,6 +1830,8 @@ class CurriculumTrainerV3:
                 last_save_game = game_num
                 ckpt_path = f"{save_path}_game{game_num}.pt"
                 self.save(ckpt_path)
+                self.training_logger.plot(f"{save_path}_progress.png")
+                self.training_logger.save_json(f"{save_path}_metrics.json")
                 # Register new checkpoint into self-play pool
                 if self.self_play_pool is not None:
                     self.self_play_pool.add_checkpoint(ckpt_path)
@@ -1846,6 +1856,8 @@ class CurriculumTrainerV3:
                     self.bc_coef = max(0.0, self.bc_coef * (1.0 - (1000 / bc_half)))
 
         self.save(f"{save_path}_final.pt")
+        self.training_logger.plot(f"{save_path}_final_progress.png")
+        self.training_logger.save_json(f"{save_path}_final_metrics.json")
 
         total_time = time.time() - start_time
         print("\n" + "=" * 70)
