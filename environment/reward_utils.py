@@ -151,10 +151,10 @@ class PositionalRewardMixin:
                             visited.add(id(adj))
                             queue.append((adj, depth + 1))
 
-        reward = min(best_score / 15.0, 1.0) * 1.5   # was 3.0 — halved again
+        reward = min(best_score / 15.0, 1.0) * 2.5   # boosted: roads toward good spots matter
         if toward_port:
-            reward += 0.3                               # was 0.5
+            reward += 0.5                               # ports critical in 1v1
         if best_resources - self._produced_resources:
-            reward += 0.2                               # was 0.5
+            reward += 0.5                               # new resource access
 
-        return min(reward, 2.0)                         # hard cap 2.0 (was 4.0)
+        return min(reward, 3.5)                         # raised cap: pipeline must compete with dev cards

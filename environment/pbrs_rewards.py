@@ -138,18 +138,27 @@ class PBRSFixedRewardWrapper(PositionalRewardMixin):
         player = self.env.game_env.game.players[self.player_id]
 
         if info.get('built_city'):
-            # First 2 cities get extra bonus — upgrading initial settlements
-            # is THE highest priority action in competitive Catan
+            # Escalating city bonus — 3rd city is the most valuable action
+            # (top 5 winning methods ALL include 3+ cities)
             num_cities = len(player.cities)
             if num_cities <= 2:
-                base_reward += city_bonus + 10.0
+                base_reward += city_bonus + 10.0   # First 2: upgrade initial settlements
+            elif num_cities == 3:
+                base_reward += city_bonus + 20.0   # 3rd city: HUGE bonus (pipeline payoff)
             else:
-                base_reward += city_bonus
+                base_reward += city_bonus + 15.0   # 4th city: strong but slightly less
 
         if info.get('built_settlement'):
             base_reward += settle_bonus
             # Positional quality: pip score, diversity, port access, blocking
             base_reward += self._settlement_shaping(player)
+            # Extra expansion bonus for 3rd+ settlement
+            # These are prerequisites for cities — the pipeline must be rewarding
+            num_sett = len(player.settlements) + len(player.cities)  # total placed
+            if num_sett >= 3:
+                base_reward += 8.0   # 3rd location
+            if num_sett >= 4:
+                base_reward += 5.0   # 4th location (cumulative with 3rd bonus)
 
         action_name_step = info.get('action_name', '')
         if action_name_step == 'place_settlement' and info.get('success', True):
@@ -198,7 +207,7 @@ class PBRSFixedRewardWrapper(PositionalRewardMixin):
         elif action_name == 'play_year_of_plenty' and info.get('success', False):
             base_reward += 5.0  # 2 targeted free resources (completes builds)
         elif action_name == 'buy_dev_card' and info.get('got_vp_card'):
-            base_reward += 15.0  # VP card = instant +1 VP. vp_diff gives +10, this seals the deal.
+            base_reward += 10.0  # VP card = instant +1 VP. vp_diff gives +10. Reduced so cities dominate.
 
         # 1v1 strategic milestone bonuses (on top of VP reward).
         # In 1v1 these confer permanent advantage beyond just the 2 bonus VP:

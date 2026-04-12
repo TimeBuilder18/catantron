@@ -869,11 +869,10 @@ class CatanEnv(gym.Env):
         # Max 4 cities per player in Catan
         num_cities = min(len(player.cities), 4)  # Cap at 4 (Catan max)
         # CRITICAL: City bonus must EXCEED the settlement potential lost when
-        # upgrading. Old values (20+2i) could give negative PBRS when upgrading
-        # a 4th settlement (lost 22 potential, gained only 20).
-        # New: 25+3i ensures building a city ALWAYS increases potential.
-        # First city: +25, Second: +53, Third: +84, Fourth: +118
-        city_bonus = sum(25.0 + 3.0 * i for i in range(num_cities))
+        # upgrading. Steeper scaling makes 3rd/4th cities especially valuable,
+        # reinforcing the pipeline: road → settlement → city.
+        # First city: +25, Second: +55, Third: +90, Fourth: +130
+        city_bonus = sum(25.0 + 5.0 * i for i in range(num_cities))
         potential += city_bonus
 
         # ========== CITY READINESS BONUS ==========
