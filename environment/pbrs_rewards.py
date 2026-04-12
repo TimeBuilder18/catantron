@@ -124,16 +124,16 @@ class PBRSFixedRewardWrapper(PositionalRewardMixin):
         #
         # Per-action value summary (bonus + 10 VP where applicable):
         #   Phase     road   settle  city   buy_dev  play_knight  play_monopoly  play_yop
-        #   Early      +12    +25    +13      +5         +8            +6           +5
-        #   Mid         +6    +15    +22      +8         +8            +6           +5
-        #   Late        +3    +10    +20     +10         +8            +6           +5
+        #   Early      +12    +30    +18      +3         +4            +6           +5
+        #   Mid         +6    +20    +28      +5         +4            +6           +5
+        #   Late        +3    +15    +25      +7         +4            +6           +5
         win_vp = self.victory_points_to_win
         phase = 'early' if current_vp < 0.5 * win_vp else ('late' if current_vp >= 0.8 * win_vp else 'mid')
 
         road_bonus      = {'early':  0, 'mid':  0, 'late':  0}[phase]  # zeroed: roads rewarded only via expansion shaping
-        settle_bonus    = {'early': 25, 'mid': 15, 'late': 10}[phase]
-        city_bonus      = {'early': 15, 'mid': 25, 'late': 20}[phase]  # boosted: cities are THE dominant mid-game action
-        dev_card_bonus  = {'early':  5, 'mid':  8, 'late': 10}[phase]
+        settle_bonus    = {'early': 30, 'mid': 20, 'late': 15}[phase]  # boosted: settlements need to outcompete dev cards
+        city_bonus      = {'early': 20, 'mid': 30, 'late': 25}[phase]  # boosted: cities are THE dominant mid-game action
+        dev_card_bonus  = {'early':  3, 'mid':  5, 'late':  7}[phase]  # reduced: was causing dev-card-heavy strategy
 
         player = self.env.game_env.game.players[self.player_id]
 
@@ -168,18 +168,18 @@ class PBRSFixedRewardWrapper(PositionalRewardMixin):
         # Dev card play rewards
         # Reward hierarchy (from most to least valuable per play):
         #   monopoly:  +3 per card stolen (steal 5 = +15, steal 0 = +0, typically > knight)
-        #   knight:    +8 base (robber blocks best hex) + 3 steal + 5 if steal completes a build
+        #   knight:    +4 base (robber blocks best hex) + 3 steal + 3 if steal completes a build
         #   yop:       +5 (2 free resources of choice — targeted, not luck-based)
         #
         # VP dev card (auto on purchase): vp_diff already gives +10, plus explicit +15 bonus
         # so VP card buy = +10 VP + +15 bonus + dev_card_bonus = strongest single buy action
         action_name = info.get('action_name', '')
         if action_name == 'play_knight' and info.get('success', False):
-            base_reward += 8.0  # Robber disruption value (Largest Army bonus tracked separately)
+            base_reward += 4.0  # Robber disruption value (Largest Army bonus tracked separately)
             if info.get('stolen_resource'):
                 base_reward += 3.0  # Stole a resource (now always guaranteed if opponent has any)
                 if info.get('steal_completes_build'):
-                    base_reward += 5.0  # Stolen card was the last one needed for a build
+                    base_reward += 3.0  # Stolen card was the last one needed for a build
         elif action_name == 'play_monopoly' and info.get('success', False):
             stolen_count = info.get('stolen_count', 0)
             base_reward += stolen_count * 3.0  # +3 per card stolen; beats knight when you steal 4+
@@ -241,7 +241,7 @@ class PBRSFixedRewardWrapper(PositionalRewardMixin):
 
             # Robber on opponent's best hex: bonus for disrupting production
             if info.get('action_name') == 'play_knight' and info.get('success', False):
-                base_reward += 4.0  # Robber disrupts opponent's production
+                base_reward += 2.0  # Robber disrupts opponent's production
 
             # Update opponent tracking
             self._last_opp_vp = opp_vp
