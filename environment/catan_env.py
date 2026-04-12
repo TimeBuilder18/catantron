@@ -868,10 +868,12 @@ class CatanEnv(gym.Env):
         # MASSIVE bonus for cities - this is the KEY to winning
         # Max 4 cities per player in Catan
         num_cities = min(len(player.cities), 4)  # Cap at 4 (Catan max)
-        # CRITICAL: City bonus must be HIGHER than city_readiness bonus (+10)
-        # Otherwise PBRS gives negative reward for building cities!
-        # First city: +20, Second: +22, Third: +24, Fourth: +26 (compound bonus)
-        city_bonus = sum(20.0 + 2.0 * i for i in range(num_cities))
+        # CRITICAL: City bonus must EXCEED the settlement potential lost when
+        # upgrading. Old values (20+2i) could give negative PBRS when upgrading
+        # a 4th settlement (lost 22 potential, gained only 20).
+        # New: 25+3i ensures building a city ALWAYS increases potential.
+        # First city: +25, Second: +53, Third: +84, Fourth: +118
+        city_bonus = sum(25.0 + 3.0 * i for i in range(num_cities))
         potential += city_bonus
 
         # ========== CITY READINESS BONUS ==========
@@ -935,13 +937,12 @@ class CatanEnv(gym.Env):
         potential += player.development_cards.get(DevelopmentCardType.VICTORY_POINT, 0) * 1.5
 
         # ========== DEVELOPMENT CARD BONUS (CAPPED) ==========
-        # Knights are valuable for largest army AND robber control
-        # 14 knights in deck total, cap bonus at reasonable amount
-        knights = min(player.development_cards.get(DevelopmentCardType.KNIGHT, 0), 10)
-        potential += knights * 0.5
-        # Total dev cards encourage buying (25 in deck total, cap at 15)
-        total_dev = min(sum(player.development_cards.values()), 15)
-        potential += total_dev * 0.3
+        # Reduced: data shows 3-4 dev cards is optimal, 4-8 makes no difference.
+        # Old weights were pulling agent toward knight-heavy strategy.
+        knights = min(player.development_cards.get(DevelopmentCardType.KNIGHT, 0), 5)  # was 10
+        potential += knights * 0.3  # was 0.5
+        total_dev = min(sum(player.development_cards.values()), 5)  # was 15
+        potential += total_dev * 0.2  # was 0.3
 
         # ========== OPPONENT THREAT POTENTIAL ==========
         for opp in self.game_env.game.players:

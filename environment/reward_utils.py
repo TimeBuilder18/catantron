@@ -61,6 +61,10 @@ class PositionalRewardMixin:
         new_types = res_set - self._produced_resources
         reward += len(new_types) * 1.0
         self._produced_resources |= res_set
+        # 1v1: completing all 5 resources = huge advantage (no player trading)
+        if hasattr(self, 'num_players') and self.num_players == 2:
+            if len(self._produced_resources) >= 5 and new_types:
+                reward += 3.0
 
         # Port access (one-time per port)
         for port in game.game_board.ports:
@@ -68,7 +72,11 @@ class PositionalRewardMixin:
                 pt_key = (port.port_type, id(port))
                 if pt_key not in self._port_access:
                     self._port_access.add(pt_key)
-                    reward += 5.0 if port.port_type != PortType.GENERIC else 2.5
+                    # 1v1: ports are critical (bank-only trading, no player trades)
+                    if hasattr(self, 'num_players') and self.num_players == 2:
+                        reward += 7.0 if port.port_type != PortType.GENERIC else 4.0
+                    else:
+                        reward += 5.0 if port.port_type != PortType.GENERIC else 2.5
 
         # Blocking: opponent road reaches an adjacent vertex
         for adj in new_vertex.adjacent_vertices:

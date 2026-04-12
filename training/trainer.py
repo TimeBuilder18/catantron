@@ -1085,7 +1085,8 @@ class CurriculumTrainerV3:
             self.training_logger.log_game(
                 self.games_played, my_vp, winner_id == 0,
                 len(_p0.roads), len(_p0.settlements), len(_p0.cities),
-                sum(episode_rewards), primary_ai
+                sum(episode_rewards), primary_ai,
+                dev_cards=sum(_p0.development_cards.values()) + _p0.knights_played
             )
 
         # Track settlement count at game end (diagnose expansion failure)

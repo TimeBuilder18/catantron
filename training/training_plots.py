@@ -48,6 +48,7 @@ class TrainingLogger:
         self.roads = []
         self.settlements = []
         self.cities = []
+        self.dev_cards = []
         self.rewards = []
         self.phases = []
 
@@ -59,7 +60,7 @@ class TrainingLogger:
         self.learning_rates = []
         self.entropy_coefs = []
 
-    def log_game(self, game_num, vp, won, roads, settlements, cities, reward, phase_name):
+    def log_game(self, game_num, vp, won, roads, settlements, cities, reward, phase_name, dev_cards=0):
         """Record metrics from a completed game."""
         self.game_nums.append(game_num)
         self.vps.append(vp)
@@ -67,6 +68,7 @@ class TrainingLogger:
         self.roads.append(roads)
         self.settlements.append(settlements)
         self.cities.append(cities)
+        self.dev_cards.append(dev_cards)
         self.rewards.append(reward)
         self.phases.append(phase_name)
 
@@ -89,6 +91,7 @@ class TrainingLogger:
                 'roads': self.roads,
                 'settlements': self.settlements,
                 'cities': self.cities,
+                'dev_cards': self.dev_cards,
                 'reward': self.rewards,
                 'phase': self.phases,
             },
@@ -141,9 +144,11 @@ class TrainingLogger:
         road_roll = _rolling(self.roads, 100)
         sett_roll = _rolling(self.settlements, 100)
         city_roll = _rolling(self.cities, 100)
+        dev_roll = _rolling(self.dev_cards, 100)
         ax.plot(games, road_roll, color='#795548', linewidth=1.5, label='Roads')
         ax.plot(games, sett_roll, color='#FF9800', linewidth=1.5, label='Settlements')
         ax.plot(games, city_roll, color='#9C27B0', linewidth=1.5, label='Cities')
+        ax.plot(games, dev_roll, color='#009688', linewidth=1.5, label='Dev Cards')
         ax.set_title('Build Diversity (rolling 100)')
         ax.set_xlabel('Games')
         ax.set_ylabel('Count per Game')
