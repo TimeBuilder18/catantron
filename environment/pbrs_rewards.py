@@ -138,7 +138,13 @@ class PBRSFixedRewardWrapper(PositionalRewardMixin):
         player = self.env.game_env.game.players[self.player_id]
 
         if info.get('built_city'):
-            base_reward += city_bonus
+            # First 2 cities get extra bonus — upgrading initial settlements
+            # is THE highest priority action in competitive Catan
+            num_cities = len(player.cities)
+            if num_cities <= 2:
+                base_reward += city_bonus + 10.0
+            else:
+                base_reward += city_bonus
 
         if info.get('built_settlement'):
             base_reward += settle_bonus
@@ -163,7 +169,13 @@ class PBRSFixedRewardWrapper(PositionalRewardMixin):
             base_reward += 2.0
 
         if info.get('action_name') == 'buy_dev_card' and info.get('success', False):
-            base_reward += dev_card_bonus
+            # Strategy insight: never buy dev cards before having 2 cities
+            # (upgrading initial settlements is always higher priority)
+            num_cities = len(player.cities)
+            if num_cities >= 2:
+                base_reward += dev_card_bonus
+            else:
+                base_reward += 1.0  # Minimal — VP cards still have value
 
         # Dev card play rewards
         # Reward hierarchy (from most to least valuable per play):
@@ -196,9 +208,9 @@ class PBRSFixedRewardWrapper(PositionalRewardMixin):
         has_largest_army = player.has_largest_army
         has_longest_road = player.has_longest_road
         if has_largest_army and not self.last_has_largest_army:
-            base_reward += 30.0  # Gained Largest Army: +2 VP already counted + denial bonus
+            base_reward += 20.0  # Gained Largest Army (45.8% of wins use LA)
         if has_longest_road and not self.last_has_longest_road:
-            base_reward += 20.0  # Gained Longest Road: +2 VP already counted + map control bonus
+            base_reward += 25.0  # Gained Longest Road (62.5% of wins use LR — more common path)
         self.last_has_largest_army = has_largest_army
         self.last_has_longest_road = has_longest_road
 
