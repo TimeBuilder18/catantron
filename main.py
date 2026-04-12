@@ -99,6 +99,24 @@ def assign_resources_numbers(tiles, robber):
         if i < len(nums):
             tile.number = nums[i]
 
+    # Catan rule: 6 and 8 (red numbers) must never be on adjacent tiles
+    for _ in range(100):
+        conflict = None
+        for tile in non_desert:
+            if tile.number in (6, 8):
+                for nb in getattr(tile, 'neighbors', []):
+                    if nb.number in (6, 8) and nb != tile:
+                        conflict = tile
+                        break
+            if conflict:
+                break
+        if not conflict:
+            break
+        swap_candidates = [t for t in non_desert if t.number not in (6, 8)]
+        if swap_candidates:
+            swap_target = random.choice(swap_candidates)
+            conflict.number, swap_target.number = swap_target.number, conflict.number
+
 
 def compute_center_offset(tiles, target_x, target_y):
     if not tiles:

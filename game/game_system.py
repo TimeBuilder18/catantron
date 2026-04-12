@@ -1017,15 +1017,12 @@ class GameSystem:
                     # In second round, go in reverse order (last player goes first)
                     self.current_player_index = len(self.players) - 1
                     self.waiting_for_road = False  # Reset waiting_for_road for new round
-                    self.give_starting_resources_for_player(self.get_current_player())
-
 
             elif self.game_phase == "INITIAL_PLACEMENT_2":
-                # In second round, go in reverse order
+                # Grant starting resources to the player who just placed their 2nd settlement
+                self.give_starting_resources_for_player(current_player)
+                # Then advance to next player (reverse order)
                 self.current_player_index -= 1
-                if self.current_player_index >= 0:
-                    self.give_starting_resources_for_player(self.get_current_player())
-
 
                 if self.current_player_index < 0:
 
