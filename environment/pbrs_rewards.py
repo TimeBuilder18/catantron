@@ -245,10 +245,17 @@ class PBRSFixedRewardWrapper(PositionalRewardMixin):
             if not is_initial and (info.get('built_settlement') or info.get('action_name') == 'place_settlement'):
                 new_vertex = player.settlements[-1].position if player.settlements else None
                 if new_vertex:
+                    # Use a flag to break both loops — without it the inner break
+                    # only exits the edge loop, awarding +8 once per adjacent
+                    # vertex rather than once per placement.
+                    _blocked = False
                     for adj in new_vertex.adjacent_vertices:
+                        if _blocked:
+                            break
                         for edge in adj.connected_edges:
                             if edge.structure and edge.structure.player != player:
                                 base_reward += 8.0  # Strong 1v1 denial
+                                _blocked = True
                                 break
 
             # Robber on opponent's best hex: bonus for disrupting production
