@@ -133,7 +133,7 @@ class PBRSFixedRewardWrapper(PositionalRewardMixin):
         road_bonus      = {'early':  0, 'mid':  0, 'late':  0}[phase]  # zeroed: roads rewarded only via expansion shaping
         settle_bonus    = {'early': 30, 'mid': 20, 'late': 15}[phase]  # boosted: settlements need to outcompete dev cards
         city_bonus      = {'early': 20, 'mid': 30, 'late': 25}[phase]  # boosted: cities are THE dominant mid-game action
-        dev_card_bonus  = {'early':  3, 'mid':  5, 'late':  7}[phase]  # reduced: was causing dev-card-heavy strategy
+        dev_card_bonus  = {'early':  0, 'mid':  0, 'late':  0}[phase]  # zeroed: play rewards (knight/monopoly/yop) are enough incentive
 
         player = self.env.game_env.game.players[self.player_id]
 
