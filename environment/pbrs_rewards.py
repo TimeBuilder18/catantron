@@ -116,9 +116,6 @@ class PBRSFixedRewardWrapper(PositionalRewardMixin):
         vp_diff = current_vp - self.last_vp
         if vp_diff > 0:
             base_reward += vp_diff * 10.0
-            # Endgame acceleration: closing out wins is critical
-            if current_vp >= 7:
-                base_reward += vp_diff * 10.0  # Double VP reward near victory
 
         # Phase-aware bonuses: optimal Catan strategy changes through the game.
         #   Early  (VP < 50% of win): EXPAND — roads + settlements claim territory
@@ -210,7 +207,7 @@ class PBRSFixedRewardWrapper(PositionalRewardMixin):
         elif action_name == 'play_year_of_plenty' and info.get('success', False):
             base_reward += 5.0  # 2 targeted free resources (completes builds)
         elif action_name == 'buy_dev_card' and info.get('got_vp_card'):
-            base_reward += 10.0  # VP card = instant +1 VP. vp_diff gives +10. Reduced so cities dominate.
+            base_reward += 5.0  # VP card = instant +1 VP. vp_diff gives +10. Kept small so cities dominate.
 
         # 1v1 strategic milestone bonuses (on top of VP reward).
         # In 1v1 these confer permanent advantage beyond just the 2 bonus VP:
