@@ -116,6 +116,9 @@ class PBRSFixedRewardWrapper(PositionalRewardMixin):
         vp_diff = current_vp - self.last_vp
         if vp_diff > 0:
             base_reward += vp_diff * 10.0
+            # Endgame acceleration: closing out wins is critical
+            if current_vp >= 7:
+                base_reward += vp_diff * 10.0  # Double VP reward near victory
 
         # Phase-aware bonuses: optimal Catan strategy changes through the game.
         #   Early  (VP < 50% of win): EXPAND — roads + settlements claim territory

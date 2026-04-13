@@ -849,20 +849,24 @@ class CatanEnv(gym.Env):
         if num_settlements == 0 and (num_settlements + num_cities * 2) < 8:
             potential -= 20.0
 
-        # ========== SETTLEMENT READINESS BONUS (NEW) ==========
+        # ========== SETTLEMENT READINESS BONUS ==========
         # Reward for being close to building a settlement (wood, brick, sheep, wheat)
         wood_count = player.resources.get(ResourceType.WOOD, 0)
         brick_count = player.resources.get(ResourceType.BRICK, 0)
         sheep_count = player.resources.get(ResourceType.SHEEP, 0)
         wheat_count_settle = player.resources.get(ResourceType.WHEAT, 0)
-        # How close are we to settlement resources?
         wood_ok = min(wood_count, 1)
         brick_ok = min(brick_count, 1)
         sheep_ok = min(sheep_count, 1)
         wheat_ok = min(wheat_count_settle, 1)
         settlement_readiness = (wood_ok + brick_ok + sheep_ok + wheat_ok) / 4.0
-        # Settlement readiness matters in all modes - in 10VP 1v1 you need expansion
-        potential += settlement_readiness * 3.0  # Up to +3 when ready to build
+
+        # URGENCY: at 0 settlements with 2+ cities, agent MUST expand
+        # Triple the signal to make the agent trade ore→wood/brick
+        if num_settlements == 0 and num_cities >= 2:
+            potential += settlement_readiness * 9.0   # Up to +9 (3x normal)
+        else:
+            potential += settlement_readiness * 3.0   # Normal: up to +3
 
         # ========== CITY BUILDING INCENTIVE (CAPPED AT 4) ==========
         # MASSIVE bonus for cities - this is the KEY to winning
@@ -892,6 +896,52 @@ class CatanEnv(gym.Env):
             else:
                 city_readiness = ore_progress * wheat_progress  # 0 to 1
                 potential += city_readiness * 5.0
+
+        # ========== RESOURCE DIVERSITY POTENTIAL ==========
+        # In 1v1, producing all 5 resources is mandatory (no player trading).
+        # This pulls the agent toward settlements that diversify production.
+        produced_resources = set()
+        for s in player.settlements:
+            for tile in s.position.adjacent_tiles:
+                if tile.resource and tile.resource != 'desert':
+                    produced_resources.add(tile.resource)
+        for c in player.cities:
+            for tile in c.position.adjacent_tiles:
+                if tile.resource and tile.resource != 'desert':
+                    produced_resources.add(tile.resource)
+        diversity = len(produced_resources)
+        if self.num_players == 2:
+            if diversity >= 5:
+                potential += 10.0   # All 5 resources: massive 1v1 advantage
+            elif diversity >= 4:
+                potential += 5.0
+            elif diversity >= 3:
+                potential += 2.0
+            if diversity <= 2:
+                potential -= 5.0    # Only 2 resources: crippling in 1v1
+        else:
+            potential += diversity * 1.5
+
+        # ========== PORT ACCESS POTENTIAL ==========
+        # Ports are critical in 1v1 (bank-only trading).
+        # A 2:1 port for your most-produced resource = converts excess into anything.
+        player_ports = self.game_env.game.game_board.get_player_ports(player)
+        if self.num_players == 2:
+            for port in player_ports:
+                if port.port_type == PortType.GENERIC:
+                    potential += 3.0   # 3:1 generic: 25% cheaper trades
+                else:
+                    potential += 5.0   # 2:1 specialized: huge efficiency boost
+                    # Extra bonus if port matches a resource we produce heavily (city tiles)
+                    port_resource = port.port_type.value.split('_')[0]  # e.g. "ore" from "ore_2:1"
+                    for c in player.cities:
+                        for tile in c.position.adjacent_tiles:
+                            if tile.resource == port_resource:
+                                potential += 3.0  # Port synergizes with city production
+                                break
+                        else:
+                            continue
+                        break
 
         # ========== ROAD VALUE (EXPANSION-ACCESS BASED) ==========
         # Value roads by what settlement spots they ACCESS, not raw count.

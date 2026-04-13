@@ -57,14 +57,14 @@ class PositionalRewardMixin:
 
         reward = min(pips / 15.0, 1.0) * 4.0
 
-        # New resource types entering production
+        # New resource types entering production — diversity is critical
         new_types = res_set - self._produced_resources
-        reward += len(new_types) * 1.0
+        reward += len(new_types) * 2.0   # +2 per new resource (was 1.0)
         self._produced_resources |= res_set
-        # 1v1: completing all 5 resources = huge advantage (no player trading)
+        # 1v1: completing all 5 resources = massive advantage (no player trading)
         if hasattr(self, 'num_players') and self.num_players == 2:
             if len(self._produced_resources) >= 5 and new_types:
-                reward += 3.0
+                reward += 5.0   # Full diversity achieved! (was 3.0)
 
         # Port access (one-time per port)
         for port in game.game_board.ports:
@@ -74,7 +74,7 @@ class PositionalRewardMixin:
                     self._port_access.add(pt_key)
                     # 1v1: ports are critical (bank-only trading, no player trades)
                     if hasattr(self, 'num_players') and self.num_players == 2:
-                        reward += 7.0 if port.port_type != PortType.GENERIC else 4.0
+                        reward += 8.0 if port.port_type != PortType.GENERIC else 5.0
                     else:
                         reward += 5.0 if port.port_type != PortType.GENERIC else 2.5
 
