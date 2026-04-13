@@ -13,7 +13,7 @@ import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
 from environment.ai_interface import AIGameEnvironment
-from game.game_system import ResourceType
+from game.game_system import ResourceType, PortType
 from game.game_system import DevelopmentCardType, Player
 from game.game_system import Settlement, City, Road, DevelopmentCardDeck
 
