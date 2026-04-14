@@ -1151,7 +1151,10 @@ class GameSystem:
         if not self.can_trade_or_build():
             return False, "Cannot build now - roll dice first"
 
-        return player.try_build_road(edge)
+        success, msg = player.try_build_road(edge)
+        if success:
+            self.update_longest_road()
+        return success, msg
 
     # ==================== DEVELOPMENT CARDS ====================
 
@@ -1301,6 +1304,7 @@ class GameSystem:
 
     def check_victory_conditions(self):
         """Check if any player has won and return the winner"""
+        self.update_longest_road()
         for player in self.players:
             if player.calculate_victory_points() >= self.victory_points_to_win:
                 return player
@@ -1445,6 +1449,7 @@ class GameSystem:
 
         # Place road (free during initial placement)
         edge.build_road(player)
+        self.update_longest_road()
         placements = self.player_initial_placements[player]
         placements["roads"] += 1
         self.initial_roads_placed += 1

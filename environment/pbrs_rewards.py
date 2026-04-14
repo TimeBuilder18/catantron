@@ -173,9 +173,16 @@ class PBRSFixedRewardWrapper(PositionalRewardMixin):
             if road_quality < 0.5:
                 base_reward -= 1.0
 
-        # Effective trade: reward trades that open a build opportunity
-        if info.get('bank_trade') and info.get('success') and info.get('trade_led_to_build_opportunity'):
-            base_reward += 2.0
+        # Trade quality: port trades are efficient, raw 4:1 bank trades waste resources.
+        # In 1v1 there are no player trades — ports are the ONLY way to trade well.
+        if info.get('bank_trade') and info.get('success'):
+            trade_ratio = info.get('trade_ratio', 4)
+            if trade_ratio == 2:
+                base_reward += 1.5   # 2:1 port trade — efficient, reward it
+            elif trade_ratio == 3:
+                base_reward += 0.5   # 3:1 port trade — decent
+            else:
+                base_reward -= 1.5   # 4:1 bank trade — wasteful, penalize
 
         if info.get('action_name') == 'buy_dev_card' and info.get('success', False):
             # Strategy insight: never buy dev cards before having 2 cities

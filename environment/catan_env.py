@@ -528,14 +528,17 @@ class CatanEnv(gym.Env):
             resource_map = [ResourceType.WOOD, ResourceType.BRICK, ResourceType.WHEAT, ResourceType.SHEEP, ResourceType.ORE]
             give_res = resource_map[trade_give_idx]
             get_res = resource_map[trade_get_idx]
+            # Get actual trade ratio (2:1 with specific port, 3:1 generic, 4:1 no port)
+            actual_ratio = self.game_env.game.game_board.get_best_trade_ratio(player, give_res)
             success, message = self.game_env.game.execute_bank_trade(player, give_res, get_res)
             step_info['success'] = success
             step_info['message'] = message
             step_info['bank_trade'] = True
+            step_info['trade_ratio'] = actual_ratio
             # Track bank trades for efficiency penalty
             if success:
                 self._bank_trades_this_game += 1
-                self._resources_spent_on_trades += 4  # 4:1 trade ratio
+                self._resources_spent_on_trades += actual_ratio
             new_obs, done, _ = self.game_env.step(self.player_id, 'wait', {})
         elif action_name == 'play_knight':
             import random
@@ -929,9 +932,9 @@ class CatanEnv(gym.Env):
         if self.num_players == 2:
             for port in player_ports:
                 if port.port_type == PortType.GENERIC:
-                    potential += 3.0   # 3:1 generic: 25% cheaper trades
+                    potential += 5.0   # 3:1 generic: only efficient trade option in 1v1
                 else:
-                    potential += 5.0   # 2:1 specialized: huge efficiency boost
+                    potential += 8.0   # 2:1 specialized: massive efficiency in 1v1
                     # Extra bonus if port matches a resource we produce heavily (city tiles)
                     port_resource = port.port_type.value.split('_')[0]  # e.g. "ore" from "ore_2:1"
                     for c in player.cities:
