@@ -65,6 +65,8 @@ class CatanEnv(gym.Env):
         # Track game state for phase-aware rewards
         self._turn_count = 0
         self._bank_trades_this_game = 0
+        self._port_trades_this_game = 0
+        self._bank_4to1_trades_this_game = 0
         self._last_city_count = 0
         self._resources_spent_on_trades = 0
         self._actions_this_turn = 0
@@ -121,6 +123,8 @@ class CatanEnv(gym.Env):
         # Reset game state tracking
         self._turn_count = 0
         self._bank_trades_this_game = 0
+        self._port_trades_this_game = 0
+        self._bank_4to1_trades_this_game = 0
         self._last_city_count = 0
         self._resources_spent_on_trades = 0
         self._actions_this_turn = 0
@@ -530,6 +534,13 @@ class CatanEnv(gym.Env):
             get_res = resource_map[trade_get_idx]
             # Get actual trade ratio (2:1 with specific port, 3:1 generic, 4:1 no port)
             actual_ratio = self.game_env.game.game_board.get_best_trade_ratio(player, give_res)
+            # Snapshot build affordability BEFORE trade
+            pre_can_build = (
+                player.can_afford(Settlement.get_cost()) or
+                player.can_afford(City.get_cost()) or
+                player.can_afford(Road.get_cost()) or
+                player.can_afford(DevelopmentCardDeck.get_cost())
+            )
             success, message = self.game_env.game.execute_bank_trade(player, give_res, get_res)
             step_info['success'] = success
             step_info['message'] = message
@@ -539,6 +550,19 @@ class CatanEnv(gym.Env):
             if success:
                 self._bank_trades_this_game += 1
                 self._resources_spent_on_trades += actual_ratio
+                if actual_ratio < 4:
+                    self._port_trades_this_game += 1
+                else:
+                    self._bank_4to1_trades_this_game += 1
+                # Detect if trade enabled a new build opportunity
+                post_can_build = (
+                    player.can_afford(Settlement.get_cost()) or
+                    player.can_afford(City.get_cost()) or
+                    player.can_afford(Road.get_cost()) or
+                    player.can_afford(DevelopmentCardDeck.get_cost())
+                )
+                if post_can_build and not pre_can_build:
+                    step_info['trade_led_to_build_opportunity'] = True
             new_obs, done, _ = self.game_env.step(self.player_id, 'wait', {})
         elif action_name == 'play_knight':
             import random
@@ -1022,11 +1046,12 @@ class CatanEnv(gym.Env):
                         potential -= penalty
 
         # ========== EXCESSIVE TRADING PENALTY (PBRS) ==========
-        # Penalize states where agent has wasted resources on trades
-        # This shapes long-term behavior to avoid trading addiction
-        if self._bank_trades_this_game > 3:
-            trade_waste_penalty = 0.5 * (self._bank_trades_this_game - 3)
-            potential -= trade_waste_penalty
+        # 4:1 trades waste resources badly — penalize early and hard.
+        # Port trades (2:1, 3:1) are efficient — allow more before penalizing.
+        if self._bank_4to1_trades_this_game > 2:
+            potential -= 0.8 * (self._bank_4to1_trades_this_game - 2)
+        if self._port_trades_this_game > 5:
+            potential -= 0.3 * (self._port_trades_this_game - 5)
 
         return potential
 

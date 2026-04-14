@@ -183,6 +183,9 @@ class PBRSFixedRewardWrapper(PositionalRewardMixin):
                 base_reward += 0.5   # 3:1 port trade — decent
             else:
                 base_reward -= 1.5   # 4:1 bank trade — wasteful, penalize
+            # Bonus if this trade enabled a build that wasn't possible before
+            if info.get('trade_led_to_build_opportunity'):
+                base_reward += 2.0
 
         if info.get('action_name') == 'buy_dev_card' and info.get('success', False):
             # Strategy insight: never buy dev cards before having 2 cities
